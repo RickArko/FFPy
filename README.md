@@ -1,5 +1,5 @@
 # FFPy
-Fantasy Football &amp; Python
+Fantasy Football & Python
 
 ## Getting Started
 

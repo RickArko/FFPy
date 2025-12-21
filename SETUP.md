@@ -106,7 +106,7 @@ git push -u origin main
 ### Authentication Issues
 
 **HTTPS:** You may be prompted for your GitHub username and password. As of August 2021, GitHub requires a Personal Access Token (PAT) instead of a password.
-- Go to GitHub Settings → Developer settings → Personal access tokens → Generate new token
+- Go to GitHub Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token (classic)
 - Use the token as your password when prompted
 
 **SSH:** Ensure you have SSH keys set up:
