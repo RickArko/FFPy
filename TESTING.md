@@ -6,7 +6,9 @@ This guide will help you test the Fantasy Football Projections app and verify th
 
 ### Step 1: Run the App
 
-**Windows:**
+Choose the command for your operating system:
+
+**Windows (No `make` required):**
 ```bash
 run.bat
 ```
@@ -16,10 +18,12 @@ run.bat
 make run
 ```
 
-**Any platform:**
+**Any Platform (Universal method):**
 ```bash
 uv run streamlit run src/ffpy/app.py
 ```
+
+> **Windows Users:** Do NOT use `make` commands - use `run.bat` instead. The `make` command is not available on Windows by default.
 
 ### Step 2: Verify in Browser
 

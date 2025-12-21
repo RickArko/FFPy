@@ -4,25 +4,37 @@ A web application for viewing fantasy football point projections by position and
 
 ## Quick Start (2 Minutes)
 
-**New users - Get started in 3 commands:**
+> **New to development?** See [QUICKSTART.md](QUICKSTART.md) for a beginner-friendly guide with no jargon.
+
+### The Simplest Way (Works Everywhere)
+
+**All users - just 2 commands:**
 
 ```bash
-# 1. Install dependencies
+# 1. Install (one-time)
 uv sync
 
-# 2. Run the app
+# 2. Run
 uv run streamlit run src/ffpy/app.py
-
-# 3. Open your browser to http://localhost:8501
 ```
+
+Your browser opens automatically to `http://localhost:8501`
 
 **That's it!** The app works immediately with free ESPN data (no API key needed).
 
-**Windows users can use:**
-```bash
-install.bat    # Install
-run.bat        # Run
-```
+---
+
+### Platform-Specific Shortcuts (Optional)
+
+**Windows - Double-click method:**
+- First time: Double-click `install.bat`
+- Every time: Double-click `run.bat`
+
+**Linux/macOS - Using make:**
+- First time: `make install`
+- Every time: `make run`
+
+> **Note:** These are just shortcuts for the universal commands above. Use whichever is easier for you!
 
 ## Features
 
@@ -49,27 +61,31 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 ## Installation
 
-### One-Line Install
+### Recommended Method (All Platforms)
 
-**Linux/macOS:**
-```bash
-make install
-```
+**One command that works everywhere:**
 
-**Windows:**
-```bash
-install.bat
-```
-
-**Cross-platform (if make is not available):**
 ```bash
 uv sync
 ```
 
 This will:
-1. Create a virtual environment
-2. Install all dependencies (Streamlit, Pandas, Requests, python-dotenv)
-3. Set up the project for development
+1. Automatically install Python if needed
+2. Create a virtual environment
+3. Install all dependencies (Streamlit, Pandas, Requests, python-dotenv)
+4. Set up the project for development
+
+**That's it!** No Python installation needed. No complex setup.
+
+---
+
+### Alternative Methods
+
+**Windows:** Double-click `install.bat`
+
+**Linux/macOS (if you have make installed):** `make install`
+
+> All methods do the same thing. Use whichever is easiest for you!
 
 ### API Configuration (Optional)
 
@@ -105,36 +121,27 @@ The app works out of the box with **ESPN's free API** (no signup required). For 
 
 ### Start the App
 
-**Linux/macOS:**
-```bash
-make run
-```
+**Recommended for everyone:**
 
-**Windows:**
-```bash
-run.bat
-```
-
-**Cross-platform:**
 ```bash
 uv run streamlit run src/ffpy/app.py
 ```
 
-The app will open in your default browser at `http://localhost:8501`
+The app opens automatically in your browser at `http://localhost:8501`
+
+**Shortcuts:**
+- Windows: Double-click `run.bat`
+- Linux/macOS: `make run` (if make is installed)
 
 ### Development Mode
 
-For auto-reload on file changes:
+For auto-reload when you edit code:
 
-**Linux/macOS:**
-```bash
-make dev
-```
-
-**Cross-platform:**
 ```bash
 uv run streamlit run src/ffpy/app.py --server.runOnSave=true
 ```
+
+Or on Linux/macOS with make: `make dev`
 
 ## Project Structure
 
@@ -194,19 +201,31 @@ The app now supports **real-time fantasy football data** from multiple sources:
 2. Falls back to ESPN if primary fails
 3. Uses sample data if all APIs fail
 
-## Available Commands
+## Command Reference
 
-**Linux/macOS:**
-- `make install` - Install dependencies
-- `make run` - Run the application
-- `make dev` - Run in development mode
-- `make clean` - Remove build artifacts
-- `make help` - Show available commands
+### Universal Commands (Work Everywhere)
+
+```bash
+uv sync                                    # Install dependencies (one-time)
+uv run streamlit run src/ffpy/app.py       # Run the application
+uv run streamlit run src/ffpy/app.py --server.runOnSave=true  # Dev mode with auto-reload
+```
+
+### Shortcuts (Optional)
 
 **Windows:**
-- `install.bat` - Install dependencies
-- `run.bat` - Run the application
-- `uv run streamlit run src/ffpy/app.py` - Direct run command
+- Double-click `install.bat` or `run.bat`
+
+**Linux/macOS (requires make):**
+```bash
+make install    # Install dependencies
+make run        # Run the application
+make dev        # Development mode
+make clean      # Remove build artifacts
+make help       # Show all make commands
+```
+
+> **Recommendation:** Use the universal `uv` commands - they work everywhere and don't require make!
 
 ## Development
 
