@@ -1,0 +1,22 @@
+[project]
+name = "ffpy"
+version = "0.1.0"
+description = "Fantasy Football Point Projection Web App"
+readme = "README.md"
+authors = [
+    { name = "RickArko", email = "rick.arko17@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "streamlit>=1.40.0",
+    "pandas>=2.2.0",
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+ffpy = "ffpy.app:main"
+
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
