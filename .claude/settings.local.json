@@ -10,7 +10,8 @@
       "Bash(uv add:*)",
       "Bash(curl:*)",
       "Bash(python:*)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:nflreadr.nflverse.com)"
     ]
   }
 }

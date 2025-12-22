@@ -16,6 +16,8 @@ dependencies = [
     "duckdb>=1.4.3",
     "pulp>=3.3.0",
     "plotly>=6.5.0",
+    "nflreadpy",
+    "tqdm>=4.67.1",
 ]
 
 [project.scripts]
@@ -48,3 +50,6 @@ ignore = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.uv.sources]
+nflreadpy = { git = "https://github.com/nflverse/nflreadpy" }

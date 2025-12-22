@@ -20,4 +20,5 @@ wheels/
 *.db-shm
 backups/
 
+*.ipynb_checkpoints*
 .claude/*
