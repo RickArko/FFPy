@@ -1,0 +1,17 @@
+{
+  "name": "Half-PPR",
+  "passing_yards_per_point": 25.0,
+  "passing_td_points": 4.0,
+  "interception_points": -2.0,
+  "passing_2pt_conversion": 2.0,
+  "rushing_yards_per_point": 10.0,
+  "rushing_td_points": 6.0,
+  "rushing_2pt_conversion": 2.0,
+  "receiving_yards_per_point": 10.0,
+  "receiving_td_points": 6.0,
+  "reception_points": 0.5,
+  "receiving_2pt_conversion": 2.0,
+  "fumble_lost_points": -2.0,
+  "fumble_recovered_td": 6.0,
+  "bonus_settings": {}
+}
