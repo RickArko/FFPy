@@ -26,12 +26,23 @@ def main():
     # Sidebar for filters
     st.sidebar.header("Filters")
 
-    # Data source toggle
-    use_real_data = st.sidebar.toggle(
-        "Use Real-Time Data",
-        value=True,
-        help="Toggle between real API data and sample data"
+    # Data source selection
+    st.sidebar.subheader("Data Source")
+
+    data_source = st.sidebar.radio(
+        "Projection Method",
+        options=["Historical Model", "API Data", "Sample Data"],
+        index=0,
+        help=(
+            "Historical Model: Uses actual player performance data to generate projections\n\n"
+            "API Data: Fetches projections from ESPN or SportsDataIO\n\n"
+            "Sample Data: Uses pre-defined mock data"
+        ),
     )
+
+    # Convert radio selection to parameters
+    use_historical_model = data_source == "Historical Model"
+    use_real_data = data_source == "API Data"
 
     week = st.sidebar.selectbox(
         "Select Week",
@@ -53,13 +64,21 @@ def main():
         step=5,
     )
 
-    # Show API configuration status
-    if use_real_data:
+    # Show data source status
+    if use_historical_model:
+        st.sidebar.caption("📊 Using database-driven projections")
+    elif use_real_data:
         config_status = Config.debug_config()
         st.sidebar.caption(f"API: {config_status['api_provider'].upper()}")
+    else:
+        st.sidebar.caption("🎲 Using sample data")
 
     # Get projections
-    projections = get_projections(week=week, use_real_data=use_real_data)
+    projections = get_projections(
+        week=week,
+        use_real_data=use_real_data,
+        use_historical_model=use_historical_model,
+    )
 
     # Filter by position if selected
     if position != "All Positions":
@@ -73,11 +92,21 @@ def main():
     with col1:
         st.metric("Total Players", len(projections))
     with col2:
-        st.metric("Avg Projected Points", f"{projections['projected_points'].mean():.1f}")
+        st.metric(
+            "Avg Projected Points", f"{projections['projected_points'].mean():.1f}"
+        )
     with col3:
-        st.metric("Top Player", top_players.iloc[0]['player'] if len(top_players) > 0 else "N/A")
+        st.metric(
+            "Top Player",
+            top_players.iloc[0]["player"] if len(top_players) > 0 else "N/A",
+        )
     with col4:
-        st.metric("Top Projection", f"{top_players.iloc[0]['projected_points']:.1f}" if len(top_players) > 0 else "N/A")
+        st.metric(
+            "Top Projection",
+            f"{top_players.iloc[0]['projected_points']:.1f}"
+            if len(top_players) > 0
+            else "N/A",
+        )
 
     st.markdown("---")
 
@@ -116,7 +145,7 @@ def main():
 
                 st.markdown(f"### {pos}")
                 st.dataframe(
-                    top_pos[['player', 'team', 'projected_points']],
+                    top_pos[["player", "team", "projected_points"]],
                     use_container_width=True,
                     hide_index=True,
                     column_config={
@@ -142,14 +171,14 @@ def format_dataframe_for_display(df: pd.DataFrame, position: str) -> pd.DataFram
         Formatted DataFrame
     """
     # Base columns always shown
-    base_cols = ['player', 'team', 'position', 'opponent', 'projected_points']
+    base_cols = ["player", "team", "position", "opponent", "projected_points"]
 
     # Position-specific columns
     position_cols = {
-        'QB': ['passing_yards', 'passing_tds', 'rushing_yards'],
-        'RB': ['rushing_yards', 'rushing_tds', 'receiving_yards', 'receptions'],
-        'WR': ['receiving_yards', 'receiving_tds', 'receptions'],
-        'TE': ['receiving_yards', 'receiving_tds', 'receptions'],
+        "QB": ["passing_yards", "passing_tds", "rushing_yards"],
+        "RB": ["rushing_yards", "rushing_tds", "receiving_yards", "receptions"],
+        "WR": ["receiving_yards", "receiving_tds", "receptions"],
+        "TE": ["receiving_yards", "receiving_tds", "receptions"],
     }
 
     # Select columns based on position
@@ -168,23 +197,23 @@ def format_dataframe_for_display(df: pd.DataFrame, position: str) -> pd.DataFram
 
     # Rename columns for better display
     column_renames = {
-        'player': 'Player',
-        'team': 'Team',
-        'position': 'Pos',
-        'opponent': 'Opp',
-        'projected_points': 'Projected Points',
-        'passing_yards': 'Pass Yds',
-        'passing_tds': 'Pass TDs',
-        'rushing_yards': 'Rush Yds',
-        'rushing_tds': 'Rush TDs',
-        'receiving_yards': 'Rec Yds',
-        'receiving_tds': 'Rec TDs',
-        'receptions': 'Rec',
+        "player": "Player",
+        "team": "Team",
+        "position": "Pos",
+        "opponent": "Opp",
+        "projected_points": "Projected Points",
+        "passing_yards": "Pass Yds",
+        "passing_tds": "Pass TDs",
+        "rushing_yards": "Rush Yds",
+        "rushing_tds": "Rush TDs",
+        "receiving_yards": "Rec Yds",
+        "receiving_tds": "Rec TDs",
+        "receptions": "Rec",
     }
 
-    display_df = display_df.rename(columns={
-        k: v for k, v in column_renames.items() if k in display_df.columns
-    })
+    display_df = display_df.rename(
+        columns={k: v for k, v in column_renames.items() if k in display_df.columns}
+    )
 
     return display_df
 

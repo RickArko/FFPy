@@ -22,7 +22,11 @@ class SportsDataIntegration(BaseAPIIntegration):
 
     def is_available(self) -> bool:
         """Check if API key is configured."""
-        return self.api_key is not None and self.api_key != "" and self.api_key != "your_sportsdata_api_key_here"
+        return (
+            self.api_key is not None
+            and self.api_key != ""
+            and self.api_key != "your_sportsdata_api_key_here"
+        )
 
     def get_projections(self, week: int, season: int = 2025) -> pd.DataFrame:
         """
@@ -44,7 +48,7 @@ class SportsDataIntegration(BaseAPIIntegration):
             all_projections = []
 
             # Get projections for each position
-            for position in ['QB', 'RB', 'WR', 'TE']:
+            for position in ["QB", "RB", "WR", "TE"]:
                 position_data = self._get_position_projections(position, week, season)
                 if not position_data.empty:
                     all_projections.append(position_data)
@@ -57,7 +61,9 @@ class SportsDataIntegration(BaseAPIIntegration):
             print(f"SportsDataIO API error: {e}")
             return pd.DataFrame()
 
-    def _get_position_projections(self, position: str, week: int, season: int) -> pd.DataFrame:
+    def _get_position_projections(
+        self, position: str, week: int, season: int
+    ) -> pd.DataFrame:
         """
         Get projections for a specific position.
 
@@ -71,18 +77,16 @@ class SportsDataIntegration(BaseAPIIntegration):
         """
         # SportsDataIO endpoint format
         endpoint_map = {
-            'QB': 'scores/json/FantasyDefenseProjectionsByWeek',  # Changed to a generic one
-            'RB': 'scores/json/FantasyDefenseProjectionsByWeek',
-            'WR': 'scores/json/FantasyDefenseProjectionsByWeek',
-            'TE': 'scores/json/FantasyDefenseProjectionsByWeek',
+            "QB": "scores/json/FantasyDefenseProjectionsByWeek",  # Changed to a generic one
+            "RB": "scores/json/FantasyDefenseProjectionsByWeek",
+            "WR": "scores/json/FantasyDefenseProjectionsByWeek",
+            "TE": "scores/json/FantasyDefenseProjectionsByWeek",
         }
 
         # Actually, let's use the player projections endpoint
         url = f"{self.BASE_URL}/projections/json/PlayerGameProjectionStatsByWeek/{season}/{week}"
 
-        headers = {
-            "Ocp-Apim-Subscription-Key": self.api_key
-        }
+        headers = {"Ocp-Apim-Subscription-Key": self.api_key}
 
         try:
             response = requests.get(url, headers=headers, timeout=10)
@@ -103,7 +107,9 @@ class SportsDataIntegration(BaseAPIIntegration):
             print(f"SportsDataIO error for {position}: {e}")
             return pd.DataFrame()
 
-    def _parse_sportsdata_response(self, data: list, position: str, week: int) -> pd.DataFrame:
+    def _parse_sportsdata_response(
+        self, data: list, position: str, week: int
+    ) -> pd.DataFrame:
         """
         Parse SportsDataIO API response.
 
@@ -120,37 +126,43 @@ class SportsDataIntegration(BaseAPIIntegration):
         for player_data in data:
             try:
                 # Filter by position
-                player_position = player_data.get('Position', '')
+                player_position = player_data.get("Position", "")
                 if player_position != position:
                     continue
 
                 # Calculate fantasy points (PPR scoring)
-                fantasy_points = player_data.get('FantasyPointsPPR', 0) or 0
+                fantasy_points = player_data.get("FantasyPointsPPR", 0) or 0
 
                 player_record = {
-                    'player': player_data.get('Name', ''),
-                    'team': player_data.get('Team', ''),
-                    'position': player_position,
-                    'opponent': player_data.get('Opponent', ''),
-                    'projected_points': round(fantasy_points, 1),
-                    'week': week,
+                    "player": player_data.get("Name", ""),
+                    "team": player_data.get("Team", ""),
+                    "position": player_position,
+                    "opponent": player_data.get("Opponent", ""),
+                    "projected_points": round(fantasy_points, 1),
+                    "week": week,
                 }
 
                 # Add position-specific stats
-                if position == 'QB':
-                    player_record.update({
-                        'passing_yards': player_data.get('PassingYards', 0) or 0,
-                        'passing_tds': player_data.get('PassingTouchdowns', 0) or 0,
-                        'rushing_yards': player_data.get('RushingYards', 0) or 0,
-                    })
-                elif position in ['RB', 'WR', 'TE']:
-                    player_record.update({
-                        'rushing_yards': player_data.get('RushingYards', 0) or 0,
-                        'rushing_tds': player_data.get('RushingTouchdowns', 0) or 0,
-                        'receiving_yards': player_data.get('ReceivingYards', 0) or 0,
-                        'receiving_tds': player_data.get('ReceivingTouchdowns', 0) or 0,
-                        'receptions': player_data.get('Receptions', 0) or 0,
-                    })
+                if position == "QB":
+                    player_record.update(
+                        {
+                            "passing_yards": player_data.get("PassingYards", 0) or 0,
+                            "passing_tds": player_data.get("PassingTouchdowns", 0) or 0,
+                            "rushing_yards": player_data.get("RushingYards", 0) or 0,
+                        }
+                    )
+                elif position in ["RB", "WR", "TE"]:
+                    player_record.update(
+                        {
+                            "rushing_yards": player_data.get("RushingYards", 0) or 0,
+                            "rushing_tds": player_data.get("RushingTouchdowns", 0) or 0,
+                            "receiving_yards": player_data.get("ReceivingYards", 0)
+                            or 0,
+                            "receiving_tds": player_data.get("ReceivingTouchdowns", 0)
+                            or 0,
+                            "receptions": player_data.get("Receptions", 0) or 0,
+                        }
+                    )
 
                 # Only add players with fantasy points
                 if fantasy_points > 0:

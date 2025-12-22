@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-env_path = Path(__file__).parent.parent.parent / '.env'
+env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 
@@ -13,17 +13,21 @@ class Config:
     """Application configuration loaded from environment variables."""
 
     # API Provider Selection
-    API_PROVIDER = os.getenv('API_PROVIDER', 'espn').lower()
+    API_PROVIDER = os.getenv("API_PROVIDER", "espn").lower()
 
     # API Keys
-    SPORTSDATA_API_KEY = os.getenv('SPORTSDATA_API_KEY', '')
-    RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY', '')
+    SPORTSDATA_API_KEY = os.getenv("SPORTSDATA_API_KEY", "")
+    RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
 
     # NFL Season Configuration
-    NFL_SEASON = int(os.getenv('NFL_SEASON', '2025'))
+    NFL_SEASON = int(os.getenv("NFL_SEASON", "2024"))
 
     # Cache Settings
-    CACHE_TTL = int(os.getenv('CACHE_TTL', '3600'))  # 1 hour default
+    CACHE_TTL = int(os.getenv("CACHE_TTL", "3600"))  # 1 hour default
+
+    # Database Configuration
+    DATABASE_PATH = os.getenv("DATABASE_PATH", str(Path.home() / ".ffpy" / "ffpy.db"))
+    DATABASE_TYPE = os.getenv("DATABASE_TYPE", "sqlite")
 
     @classmethod
     def get_api_provider(cls) -> str:
@@ -44,8 +48,8 @@ class Config:
             True if API key is set and valid
         """
         return (
-            cls.SPORTSDATA_API_KEY != '' and
-            cls.SPORTSDATA_API_KEY != 'your_sportsdata_api_key_here'
+            cls.SPORTSDATA_API_KEY != ""
+            and cls.SPORTSDATA_API_KEY != "your_sportsdata_api_key_here"
         )
 
     @classmethod
@@ -56,11 +60,11 @@ class Config:
         Returns:
             API key or empty string
         """
-        if cls.API_PROVIDER == 'sportsdata':
+        if cls.API_PROVIDER == "sportsdata":
             return cls.SPORTSDATA_API_KEY
-        elif cls.API_PROVIDER == 'rapidapi':
+        elif cls.API_PROVIDER == "rapidapi":
             return cls.RAPIDAPI_KEY
-        return ''
+        return ""
 
     @classmethod
     def debug_config(cls) -> dict:
@@ -71,8 +75,8 @@ class Config:
             Dictionary with config status
         """
         return {
-            'api_provider': cls.API_PROVIDER,
-            'sportsdata_configured': cls.is_sportsdata_configured(),
-            'nfl_season': cls.NFL_SEASON,
-            'cache_ttl': cls.CACHE_TTL,
+            "api_provider": cls.API_PROVIDER,
+            "sportsdata_configured": cls.is_sportsdata_configured(),
+            "nfl_season": cls.NFL_SEASON,
+            "cache_ttl": cls.CACHE_TTL,
         }
