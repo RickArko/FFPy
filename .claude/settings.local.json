@@ -7,7 +7,10 @@
       "Bash(timeout /t 5 /nobreak)",
       "Bash(ping:*)",
       "Bash(uv run pytest:*)",
-      "Bash(uv add:*)"
+      "Bash(uv add:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "WebSearch"
     ]
   }
 }
