@@ -15,12 +15,14 @@ from ffpy.config import Config
 def main():
     """Main entry point for the Streamlit app."""
     st.set_page_config(
-        page_title="Fantasy Football Projections",
+        page_title="FFPy - Fantasy Football Analytics",
         page_icon="🏈",
         layout="wide",
+        initial_sidebar_state="expanded"
     )
 
-    st.title("🏈 Fantasy Football Point Projections")
+    st.title("🏈 FFPy - Fantasy Football Analytics")
+    st.markdown("**Data-driven fantasy football projections and lineup optimization**")
     st.markdown("---")
 
     # Sidebar for filters

@@ -15,6 +15,7 @@ dependencies = [
     "polars>=1.36.1",
     "duckdb>=1.4.3",
     "pulp>=3.3.0",
+    "plotly>=6.5.0",
 ]
 
 [project.scripts]
