@@ -310,9 +310,7 @@ class LineupOptimizer:
                 value,
             )
         except ImportError:
-            raise ImportError(
-                "PuLP is required for lineup optimization. Install with: uv add pulp"
-            )
+            raise ImportError("PuLP is required for lineup optimization. Install with: uv add pulp")
 
         import time
 
@@ -328,15 +326,10 @@ class LineupOptimizer:
         prob = LpProblem("Lineup_Optimization", LpMaximize)
 
         # Decision variables: binary (1 = start, 0 = sit)
-        x = {
-            player.name: LpVariable(f"start_{player.name}", cat="Binary")
-            for player in available_players
-        }
+        x = {player.name: LpVariable(f"start_{player.name}", cat="Binary") for player in available_players}
 
         # Objective: Maximize total projected points
-        prob += lpSum(
-            [player.projected_points * x[player.name] for player in available_players]
-        )
+        prob += lpSum([player.projected_points * x[player.name] for player in available_players])
 
         # Add constraints
         self._add_position_constraints(prob, available_players, x)
@@ -353,9 +346,7 @@ class LineupOptimizer:
 
         # Check solution status
         if LpStatus[prob.status] != "Optimal":
-            raise ValueError(
-                f"No optimal solution found. Status: {LpStatus[prob.status]}"
-            )
+            raise ValueError(f"No optimal solution found. Status: {LpStatus[prob.status]}")
 
         # Extract results
         starters = []
@@ -396,9 +387,7 @@ class LineupOptimizer:
             improvement_vs_current=improvement,
         )
 
-    def _add_position_constraints(
-        self, prob, players: List[Player], x: Dict[str, "LpVariable"]
-    ):
+    def _add_position_constraints(self, prob, players: List[Player], x: Dict[str, "LpVariable"]):
         """
         Add position requirement constraints (e.g., exactly 1 QB, at least 2 RB, etc.).
 
@@ -417,9 +406,7 @@ class LineupOptimizer:
             eligible = [p for p in players if p.position == position]
 
             if not eligible and count > 0:
-                raise ValueError(
-                    f"No available players for required position: {position}"
-                )
+                raise ValueError(f"No available players for required position: {position}")
 
             # For FLEX-eligible positions, use >= (minimum)
             # For other positions, use == (exact)
@@ -436,9 +423,7 @@ class LineupOptimizer:
                     f"{position}_exact_requirement",
                 )
 
-    def _add_flex_constraints(
-        self, prob, players: List[Player], x: Dict[str, "LpVariable"]
-    ):
+    def _add_flex_constraints(self, prob, players: List[Player], x: Dict[str, "LpVariable"]):
         """
         Add FLEX position constraints.
 
@@ -460,9 +445,7 @@ class LineupOptimizer:
             return  # No FLEX spots
 
         # Get all players eligible for FLEX
-        flex_eligible = [
-            p for p in players if p.position in self.constraints.flex_positions
-        ]
+        flex_eligible = [p for p in players if p.position in self.constraints.flex_positions]
 
         if not flex_eligible:
             raise ValueError("No players eligible for FLEX positions")
@@ -470,8 +453,7 @@ class LineupOptimizer:
         # Calculate total required from flex-eligible positions
         # This is the sum of base position requirements + FLEX spots
         base_requirements = sum(
-            self.constraints.positions.get(pos, 0)
-            for pos in self.constraints.flex_positions
+            self.constraints.positions.get(pos, 0) for pos in self.constraints.flex_positions
         )
         total_required = base_requirements + self.constraints.num_flex
 
@@ -482,9 +464,7 @@ class LineupOptimizer:
             "flex_total_constraint",
         )
 
-    def _add_total_starters_constraint(
-        self, prob, players: List[Player], x: Dict[str, "LpVariable"]
-    ):
+    def _add_total_starters_constraint(self, prob, players: List[Player], x: Dict[str, "LpVariable"]):
         """
         Add constraint for total number of starters.
 
@@ -503,9 +483,7 @@ class LineupOptimizer:
                 "total_starters_constraint",
             )
 
-    def _add_player_locks(
-        self, prob, players: List[Player], x: Dict[str, "LpVariable"]
-    ):
+    def _add_player_locks(self, prob, players: List[Player], x: Dict[str, "LpVariable"]):
         """
         Add constraints for locked-in and locked-out players.
 
@@ -524,9 +502,7 @@ class LineupOptimizer:
             if player_name in x:
                 prob += x[player_name] == 0, f"lock_out_{player_name}"
 
-    def _add_team_limits(
-        self, prob, players: List[Player], x: Dict[str, "LpVariable"]
-    ):
+    def _add_team_limits(self, prob, players: List[Player], x: Dict[str, "LpVariable"]):
         """
         Add constraints for max players per team (stack limits).
 
@@ -547,8 +523,7 @@ class LineupOptimizer:
             team_players = [p for p in players if p.team == team]
 
             prob += (
-                lpSum([x[p.name] for p in team_players])
-                <= self.constraints.max_players_per_team,
+                lpSum([x[p.name] for p in team_players]) <= self.constraints.max_players_per_team,
                 f"team_limit_{team}",
             )
 
@@ -574,10 +549,7 @@ class LineupOptimizer:
             players = by_position[position]
             lines.append(f"\n{position}:")
             for player in sorted(players, key=lambda p: p.projected_points, reverse=True):
-                lines.append(
-                    f"  • {player.name:25} {player.team:4} "
-                    f"{player.projected_points:5.1f} pts"
-                )
+                lines.append(f"  • {player.name:25} {player.team:4} {player.projected_points:5.1f} pts")
 
         # Summary
         lines.append("\n" + "-" * 60)

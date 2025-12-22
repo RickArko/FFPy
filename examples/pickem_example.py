@@ -113,7 +113,9 @@ def main():
             spread = row["spread"]
             upset_prob = row["upset_probability"]
 
-            print(f"{matchup:25} │ Favorite: {favorite:4} (-{spread:.1f}) │ Underdog: {underdog:4} │ Upset %: {upset_prob*100:.0f}%")
+            print(
+                f"{matchup:25} │ Favorite: {favorite:4} (-{spread:.1f}) │ Underdog: {underdog:4} │ Upset %: {upset_prob * 100:.0f}%"
+            )
     else:
         print("No close games found this week (all spreads > 3 points)")
 

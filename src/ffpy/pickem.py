@@ -68,12 +68,38 @@ class PickemAnalyzer:
 
     # ESPN NFL team IDs
     TEAM_IDS = {
-        "ARI": 22, "ATL": 1, "BAL": 33, "BUF": 2, "CAR": 29, "CHI": 3,
-        "CIN": 4, "CLE": 5, "DAL": 6, "DEN": 7, "DET": 8, "GB": 9,
-        "HOU": 34, "IND": 11, "JAX": 30, "KC": 12, "LV": 13, "LAC": 24,
-        "LAR": 14, "MIA": 15, "MIN": 16, "NE": 17, "NO": 18, "NYG": 19,
-        "NYJ": 20, "PHI": 21, "PIT": 23, "SF": 25, "SEA": 26, "TB": 27,
-        "TEN": 10, "WAS": 28
+        "ARI": 22,
+        "ATL": 1,
+        "BAL": 33,
+        "BUF": 2,
+        "CAR": 29,
+        "CHI": 3,
+        "CIN": 4,
+        "CLE": 5,
+        "DAL": 6,
+        "DEN": 7,
+        "DET": 8,
+        "GB": 9,
+        "HOU": 34,
+        "IND": 11,
+        "JAX": 30,
+        "KC": 12,
+        "LV": 13,
+        "LAC": 24,
+        "LAR": 14,
+        "MIA": 15,
+        "MIN": 16,
+        "NE": 17,
+        "NO": 18,
+        "NYG": 19,
+        "NYJ": 20,
+        "PHI": 21,
+        "PIT": 23,
+        "SF": 25,
+        "SEA": 26,
+        "TB": 27,
+        "TEN": 10,
+        "WAS": 28,
     }
 
     # Reverse mapping
@@ -104,7 +130,7 @@ class PickemAnalyzer:
             params = {
                 "seasontype": 2,  # Regular season
                 "week": week,
-                "dates": self.season
+                "dates": self.season,
             }
 
             response = requests.get(url, params=params, timeout=10)
@@ -202,7 +228,7 @@ class PickemAnalyzer:
                 spread=spread,
                 over_under=over_under,
                 home_win_prob=home_win_prob,
-                is_final=is_final
+                is_final=is_final,
             )
 
         except Exception as e:
@@ -236,15 +262,17 @@ class PickemAnalyzer:
                 # Weight win prob into confidence
                 confidence_score = (confidence_score * 0.6) + (prob * 100 * 0.4)
 
-            game_data.append({
-                "matchup": f"{game.away_abbrev} @ {game.home_abbrev}",
-                "favorite": favorite,
-                "spread": spread_magnitude,
-                "win_prob": game.home_win_prob,
-                "confidence_score": confidence_score,
-                "pick": favorite,
-                "game": game
-            })
+            game_data.append(
+                {
+                    "matchup": f"{game.away_abbrev} @ {game.home_abbrev}",
+                    "favorite": favorite,
+                    "spread": spread_magnitude,
+                    "win_prob": game.home_win_prob,
+                    "confidence_score": confidence_score,
+                    "pick": favorite,
+                    "game": game,
+                }
+            )
 
         df = pd.DataFrame(game_data)
 
@@ -276,21 +304,19 @@ class PickemAnalyzer:
             if spread is not None and spread <= threshold:
                 underdog = game.away_abbrev if favorite == game.home_abbrev else game.home_abbrev
 
-                upsets.append({
-                    "matchup": f"{game.away_abbrev} @ {game.home_abbrev}",
-                    "favorite": favorite,
-                    "underdog": underdog,
-                    "spread": spread,
-                    "upset_probability": min((threshold - spread) / threshold, 0.5)
-                })
+                upsets.append(
+                    {
+                        "matchup": f"{game.away_abbrev} @ {game.home_abbrev}",
+                        "favorite": favorite,
+                        "underdog": underdog,
+                        "spread": spread,
+                        "upset_probability": min((threshold - spread) / threshold, 0.5),
+                    }
+                )
 
         return pd.DataFrame(upsets).sort_values("spread", ascending=True)
 
-    def simulate_pickem_strategy(
-        self,
-        games: List[NFLGame],
-        strategy: str = "favorites"
-    ) -> Dict:
+    def simulate_pickem_strategy(self, games: List[NFLGame], strategy: str = "favorites") -> Dict:
         """
         Simulate a pick'em strategy.
 
@@ -305,25 +331,29 @@ class PickemAnalyzer:
             picks = []
             for game in games:
                 favorite, spread = game.get_favorite()
-                picks.append({
-                    "matchup": f"{game.away_abbrev} @ {game.home_abbrev}",
-                    "pick": favorite,
-                    "spread": spread,
-                    "reasoning": f"Favored by {spread:.1f} points"
-                })
+                picks.append(
+                    {
+                        "matchup": f"{game.away_abbrev} @ {game.home_abbrev}",
+                        "pick": favorite,
+                        "spread": spread,
+                        "reasoning": f"Favored by {spread:.1f} points",
+                    }
+                )
             return {"strategy": "All Favorites", "picks": picks}
 
         elif strategy == "confidence":
             df = self.calculate_confidence_rankings(games)
             picks = []
             for _, row in df.iterrows():
-                picks.append({
-                    "matchup": row["matchup"],
-                    "pick": row["pick"],
-                    "confidence": int(row["confidence_points"]),
-                    "spread": row["spread"],
-                    "reasoning": f"Confidence: {row['confidence_score']:.1f}"
-                })
+                picks.append(
+                    {
+                        "matchup": row["matchup"],
+                        "pick": row["pick"],
+                        "confidence": int(row["confidence_points"]),
+                        "spread": row["spread"],
+                        "reasoning": f"Confidence: {row['confidence_score']:.1f}",
+                    }
+                )
             return {"strategy": "Confidence-Based", "picks": picks}
 
         return {}
@@ -381,22 +411,94 @@ def create_sample_pickem_data(week: int = 15) -> List[NFLGame]:
     print("⚠️  Using SAMPLE DATA (not real games!)")
 
     sample_games = [
-        NFLGame("sample_1", week, 2024, "Kansas City Chiefs", "Las Vegas Raiders", "KC", "LV",
-                spread=7.5, home_win_prob=0.75),
-        NFLGame("sample_2", week, 2024, "Buffalo Bills", "Miami Dolphins", "BUF", "MIA",
-                spread=3.0, home_win_prob=0.60),
-        NFLGame("sample_3", week, 2024, "San Francisco 49ers", "Arizona Cardinals", "SF", "ARI",
-                spread=10.5, home_win_prob=0.82),
-        NFLGame("sample_4", week, 2024, "Baltimore Ravens", "Jacksonville Jaguars", "BAL", "JAX",
-                spread=6.5, home_win_prob=0.72),
-        NFLGame("sample_5", week, 2024, "Dallas Cowboys", "Philadelphia Eagles", "DAL", "PHI",
-                spread=-2.5, home_win_prob=0.45),
-        NFLGame("sample_6", week, 2024, "Detroit Lions", "Chicago Bears", "DET", "CHI",
-                spread=4.5, home_win_prob=0.65),
-        NFLGame("sample_7", week, 2024, "Green Bay Packers", "Minnesota Vikings", "GB", "MIN",
-                spread=-1.0, home_win_prob=0.48),
-        NFLGame("sample_8", week, 2024, "Cincinnati Bengals", "Pittsburgh Steelers", "CIN", "PIT",
-                spread=2.5, home_win_prob=0.58),
+        NFLGame(
+            "sample_1",
+            week,
+            2024,
+            "Kansas City Chiefs",
+            "Las Vegas Raiders",
+            "KC",
+            "LV",
+            spread=7.5,
+            home_win_prob=0.75,
+        ),
+        NFLGame(
+            "sample_2",
+            week,
+            2024,
+            "Buffalo Bills",
+            "Miami Dolphins",
+            "BUF",
+            "MIA",
+            spread=3.0,
+            home_win_prob=0.60,
+        ),
+        NFLGame(
+            "sample_3",
+            week,
+            2024,
+            "San Francisco 49ers",
+            "Arizona Cardinals",
+            "SF",
+            "ARI",
+            spread=10.5,
+            home_win_prob=0.82,
+        ),
+        NFLGame(
+            "sample_4",
+            week,
+            2024,
+            "Baltimore Ravens",
+            "Jacksonville Jaguars",
+            "BAL",
+            "JAX",
+            spread=6.5,
+            home_win_prob=0.72,
+        ),
+        NFLGame(
+            "sample_5",
+            week,
+            2024,
+            "Dallas Cowboys",
+            "Philadelphia Eagles",
+            "DAL",
+            "PHI",
+            spread=-2.5,
+            home_win_prob=0.45,
+        ),
+        NFLGame(
+            "sample_6",
+            week,
+            2024,
+            "Detroit Lions",
+            "Chicago Bears",
+            "DET",
+            "CHI",
+            spread=4.5,
+            home_win_prob=0.65,
+        ),
+        NFLGame(
+            "sample_7",
+            week,
+            2024,
+            "Green Bay Packers",
+            "Minnesota Vikings",
+            "GB",
+            "MIN",
+            spread=-1.0,
+            home_win_prob=0.48,
+        ),
+        NFLGame(
+            "sample_8",
+            week,
+            2024,
+            "Cincinnati Bengals",
+            "Pittsburgh Steelers",
+            "CIN",
+            "PIT",
+            spread=2.5,
+            home_win_prob=0.58,
+        ),
     ]
 
     return sample_games

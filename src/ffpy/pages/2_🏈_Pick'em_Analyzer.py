@@ -14,11 +14,7 @@ from ffpy.pickem import PickemAnalyzer, create_sample_pickem_data, NFLGame
 
 
 # Page config
-st.set_page_config(
-    page_title="Pick'em Analyzer",
-    page_icon="🏈",
-    layout="wide"
-)
+st.set_page_config(page_title="Pick'em Analyzer", page_icon="🏈", layout="wide")
 
 st.title("🏈 NFL Pick'em Competition Analyzer")
 st.markdown("""
@@ -32,27 +28,15 @@ Analyze weekly NFL matchups and generate optimal picking strategies for:
 st.sidebar.header("⚙️ Configuration")
 
 season = st.sidebar.number_input(
-    "Season",
-    min_value=2020,
-    max_value=2025,
-    value=2025,
-    step=1,
-    help="Current NFL season (2025)"
+    "Season", min_value=2020, max_value=2025, value=2025, step=1, help="Current NFL season (2025)"
 )
 
 week = st.sidebar.number_input(
-    "Week",
-    min_value=1,
-    max_value=18,
-    value=16,
-    step=1,
-    help="NFL regular season week (1-18)"
+    "Week", min_value=1, max_value=18, value=16, step=1, help="NFL regular season week (1-18)"
 )
 
 use_sample_data = st.sidebar.checkbox(
-    "Use Sample Data",
-    value=False,
-    help="Use sample data instead of fetching from ESPN API"
+    "Use Sample Data", value=False, help="Use sample data instead of fetching from ESPN API"
 )
 
 upset_threshold = st.sidebar.slider(
@@ -61,11 +45,12 @@ upset_threshold = st.sidebar.slider(
     max_value=7.0,
     value=3.0,
     step=0.5,
-    help="Games with spreads below this are considered potential upsets"
+    help="Games with spreads below this are considered potential upsets",
 )
 
 # Initialize analyzer
 analyzer = PickemAnalyzer(season=season)
+
 
 # Fetch games
 @st.cache_data(ttl=3600)  # Cache for 1 hour
@@ -82,6 +67,7 @@ def get_games(week_num, use_sample, season_year):
             return []
         return games
 
+
 with st.spinner("Fetching NFL games..."):
     games = get_games(week, use_sample_data, season)
 
@@ -92,12 +78,9 @@ if not games:
 st.success(f"✅ Loaded {len(games)} games for Week {week}, {season} season")
 
 # Create tabs for different analyses
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Confidence Rankings",
-    "🎯 Straight Picks",
-    "⚡ Upset Candidates",
-    "📈 Analytics"
-])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["📊 Confidence Rankings", "🎯 Straight Picks", "⚡ Upset Candidates", "📈 Analytics"]
+)
 
 # ============================================================================
 # TAB 1: Confidence Rankings
@@ -117,22 +100,18 @@ with tab1:
     # Display table
     st.subheader("📋 Your Picks (Ranked by Confidence)")
 
-    display_df = confidence_df[[
-        "confidence_points", "matchup", "pick", "spread", "win_prob", "confidence_score"
-    ]].copy()
+    display_df = confidence_df[
+        ["confidence_points", "matchup", "pick", "spread", "win_prob", "confidence_score"]
+    ].copy()
 
     display_df.columns = ["Confidence", "Matchup", "Pick", "Spread", "Win Prob", "Score"]
     display_df["Spread"] = display_df["Spread"].apply(lambda x: f"{x:.1f}")
     display_df["Win Prob"] = display_df["Win Prob"].apply(
-        lambda x: f"{x*100:.0f}%" if pd.notna(x) else "N/A"
+        lambda x: f"{x * 100:.0f}%" if pd.notna(x) else "N/A"
     )
     display_df["Score"] = display_df["Score"].apply(lambda x: f"{x:.1f}")
 
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True
-    )
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     # Visualization: Confidence scores
     st.subheader("📊 Confidence Score Distribution")
@@ -144,14 +123,10 @@ with tab1:
         color="confidence_score",
         color_continuous_scale="RdYlGn",
         labels={"confidence_score": "Confidence Score", "matchup": "Matchup"},
-        hover_data=["pick", "spread", "confidence_points"]
+        hover_data=["pick", "spread", "confidence_points"],
     )
 
-    fig.update_layout(
-        xaxis_tickangle=-45,
-        height=400,
-        showlegend=False
-    )
+    fig.update_layout(xaxis_tickangle=-45, height=400, showlegend=False)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -174,20 +149,18 @@ with tab2:
 
     picks_data = []
     for pick in favorites_result["picks"]:
-        picks_data.append({
-            "Matchup": pick["matchup"],
-            "Pick": pick["pick"],
-            "Spread": f"{pick['spread']:.1f}",
-            "Reasoning": pick["reasoning"]
-        })
+        picks_data.append(
+            {
+                "Matchup": pick["matchup"],
+                "Pick": pick["pick"],
+                "Spread": f"{pick['spread']:.1f}",
+                "Reasoning": pick["reasoning"],
+            }
+        )
 
     picks_df = pd.DataFrame(picks_data)
 
-    st.dataframe(
-        picks_df,
-        use_container_width=True,
-        hide_index=True
-    )
+    st.dataframe(picks_df, use_container_width=True, hide_index=True)
 
     # Summary stats
     col1, col2, col3 = st.columns(3)
@@ -211,13 +184,10 @@ with tab2:
         x=spreads,
         nbins=15,
         labels={"x": "Point Spread", "y": "Number of Games"},
-        color_discrete_sequence=["#1f77b4"]
+        color_discrete_sequence=["#1f77b4"],
     )
 
-    fig.update_layout(
-        showlegend=False,
-        height=350
-    )
+    fig.update_layout(showlegend=False, height=350)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -244,37 +214,35 @@ with tab3:
         display_upsets = upsets_df.copy()
         display_upsets["spread"] = display_upsets["spread"].apply(lambda x: f"{x:.1f}")
         display_upsets["upset_probability"] = display_upsets["upset_probability"].apply(
-            lambda x: f"{x*100:.0f}%"
+            lambda x: f"{x * 100:.0f}%"
         )
 
         display_upsets.columns = ["Matchup", "Favorite", "Underdog", "Spread", "Upset %"]
 
-        st.dataframe(
-            display_upsets,
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(display_upsets, use_container_width=True, hide_index=True)
 
         # Upset probability chart
         st.subheader("📊 Upset Probability by Game")
 
         fig = go.Figure()
 
-        fig.add_trace(go.Bar(
-            x=upsets_df["matchup"],
-            y=upsets_df["upset_probability"] * 100,
-            text=upsets_df["upset_probability"].apply(lambda x: f"{x*100:.0f}%"),
-            textposition="outside",
-            marker_color="#ff7f0e",
-            name="Upset Probability"
-        ))
+        fig.add_trace(
+            go.Bar(
+                x=upsets_df["matchup"],
+                y=upsets_df["upset_probability"] * 100,
+                text=upsets_df["upset_probability"].apply(lambda x: f"{x * 100:.0f}%"),
+                textposition="outside",
+                marker_color="#ff7f0e",
+                name="Upset Probability",
+            )
+        )
 
         fig.update_layout(
             xaxis_title="Matchup",
             yaxis_title="Upset Probability (%)",
             xaxis_tickangle=-45,
             height=400,
-            showlegend=False
+            showlegend=False,
         )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -332,7 +300,7 @@ with tab4:
         fig = px.pie(
             values=tier_counts.values,
             names=tier_counts.index,
-            color_discrete_sequence=["#2ca02c", "#ff7f0e", "#d62728"]
+            color_discrete_sequence=["#2ca02c", "#ff7f0e", "#d62728"],
         )
 
         fig.update_traces(textposition="inside", textinfo="percent+label")
@@ -363,15 +331,10 @@ with tab4:
             win_probs = confidence_df[confidence_df["win_prob"].notna()]["win_prob"] * 100
 
             fig = px.box(
-                y=win_probs,
-                labels={"y": "Win Probability (%)"},
-                color_discrete_sequence=["#9467bd"]
+                y=win_probs, labels={"y": "Win Probability (%)"}, color_discrete_sequence=["#9467bd"]
             )
 
-            fig.update_layout(
-                showlegend=False,
-                height=300
-            )
+            fig.update_layout(showlegend=False, height=300)
 
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -385,24 +348,22 @@ with tab4:
         favorite, spread = game.get_favorite()
         underdog = game.away_abbrev if favorite == game.home_abbrev else game.home_abbrev
 
-        details_data.append({
-            "Matchup": f"{game.away_abbrev} @ {game.home_abbrev}",
-            "Favorite": favorite,
-            "Underdog": underdog,
-            "Spread": f"{spread:.1f}",
-            "O/U": f"{game.over_under:.1f}" if game.over_under else "N/A",
-            "Win Prob": f"{game.home_win_prob*100:.0f}%" if game.home_win_prob else "N/A",
-            "Status": "Final" if game.is_final else "Upcoming",
-            "Time": game.game_time.strftime("%a %I:%M %p") if game.game_time else "TBD"
-        })
+        details_data.append(
+            {
+                "Matchup": f"{game.away_abbrev} @ {game.home_abbrev}",
+                "Favorite": favorite,
+                "Underdog": underdog,
+                "Spread": f"{spread:.1f}",
+                "O/U": f"{game.over_under:.1f}" if game.over_under else "N/A",
+                "Win Prob": f"{game.home_win_prob * 100:.0f}%" if game.home_win_prob else "N/A",
+                "Status": "Final" if game.is_final else "Upcoming",
+                "Time": game.game_time.strftime("%a %I:%M %p") if game.game_time else "TBD",
+            }
+        )
 
     details_df = pd.DataFrame(details_data)
 
-    st.dataframe(
-        details_df,
-        use_container_width=True,
-        hide_index=True
-    )
+    st.dataframe(details_df, use_container_width=True, hide_index=True)
 
 # Footer
 st.markdown("---")

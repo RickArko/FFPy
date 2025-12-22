@@ -77,7 +77,7 @@ def main():
         teams = espn.get_all_teams()
         for team in teams:
             record = f"{team['wins']}-{team['losses']}"
-            if team['ties'] > 0:
+            if team["ties"] > 0:
                 record += f"-{team['ties']}"
             print(f"Team {team['id']}: {team['name']:30} ({record}) - {team['points_for']:.1f} pts")
 
@@ -99,17 +99,19 @@ def main():
         print("-" * 70)
 
         # Group by lineup slot
-        starters = roster_df[roster_df['lineup_slot'] != 'BENCH']
-        bench = roster_df[roster_df['lineup_slot'] == 'BENCH']
+        starters = roster_df[roster_df["lineup_slot"] != "BENCH"]
+        bench = roster_df[roster_df["lineup_slot"] == "BENCH"]
 
         print("\nSTARTERS:")
         for _, player in starters.iterrows():
-            status = f" [{player['injury_status']}]" if player['injury_status'] != 'ACTIVE' else ""
-            print(f"  {player['lineup_slot']:8} {player['player']:25} {player['position']:3} {player['team']:3}{status}")
+            status = f" [{player['injury_status']}]" if player["injury_status"] != "ACTIVE" else ""
+            print(
+                f"  {player['lineup_slot']:8} {player['player']:25} {player['position']:3} {player['team']:3}{status}"
+            )
 
         print(f"\nBENCH ({len(bench)} players):")
         for _, player in bench.iterrows():
-            status = f" [{player['injury_status']}]" if player['injury_status'] != 'ACTIVE' else ""
+            status = f" [{player['injury_status']}]" if player["injury_status"] != "ACTIVE" else ""
             print(f"  {player['player']:25} {player['position']:3} {player['team']:3}{status}")
 
         # Step 5: Get projections for your players
@@ -124,11 +126,12 @@ def main():
             print("\n⚠️  No projection data available from ESPN API")
             print("Using sample data for demonstration...")
             from ffpy.data import get_sample_projections
+
             week_projections = get_sample_projections()
 
         # Match projections to your roster
-        player_names = roster_df['player'].tolist()
-        my_projections = week_projections[week_projections['player'].isin(player_names)]
+        player_names = roster_df["player"].tolist()
+        my_projections = week_projections[week_projections["player"].isin(player_names)]
 
         if my_projections.empty:
             print("\n⚠️  Could not match projections to roster players")
@@ -141,36 +144,36 @@ def main():
         players = []
         for _, row in my_projections.iterrows():
             # Check injury status from roster
-            roster_player = roster_df[roster_df['player'] == row['player']]
+            roster_player = roster_df[roster_df["player"] == row["player"]]
             status = PlayerStatus.AVAILABLE
 
             if not roster_player.empty:
-                injury_status = roster_player.iloc[0]['injury_status']
-                if injury_status == 'OUT':
+                injury_status = roster_player.iloc[0]["injury_status"]
+                if injury_status == "OUT":
                     status = PlayerStatus.OUT
-                elif injury_status == 'INJURED_RESERVE':
+                elif injury_status == "INJURED_RESERVE":
                     status = PlayerStatus.INJURED
-                elif injury_status == 'QUESTIONABLE':
+                elif injury_status == "QUESTIONABLE":
                     status = PlayerStatus.QUESTIONABLE
 
             player = Player(
-                name=row['player'],
-                position=row['position'],
-                team=row['team'],
-                projected_points=row.get('projected_points', 0),
-                status=status
+                name=row["player"],
+                position=row["position"],
+                team=row["team"],
+                projected_points=row.get("projected_points", 0),
+                status=status,
             )
             players.append(player)
 
         # Build current lineup for comparison
         current_starters = []
         for player_obj in players:
-            roster_player = starters[starters['player'] == player_obj.name]
+            roster_player = starters[starters["player"] == player_obj.name]
             if not roster_player.empty:
                 current_starters.append(player_obj)
 
         # Create constraints based on league settings
-        roster_slots = info['roster_slots']
+        roster_slots = info["roster_slots"]
         constraints = RosterConstraints(
             positions={
                 "QB": roster_slots.get("QB", 1),
@@ -181,7 +184,7 @@ def main():
                 "D/ST": roster_slots.get("D/ST", 1),
             },
             flex_positions=["RB", "WR", "TE"],
-            num_flex=roster_slots.get("FLEX", 1)
+            num_flex=roster_slots.get("FLEX", 1),
         )
 
         # Optimize!

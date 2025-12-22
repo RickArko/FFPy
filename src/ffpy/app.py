@@ -18,7 +18,7 @@ def main():
         page_title="FFPy - Fantasy Football Analytics",
         page_icon="🏈",
         layout="wide",
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="expanded",
     )
 
     st.title("🏈 FFPy - Fantasy Football Analytics")

@@ -227,10 +227,10 @@ def example_6_comparison_with_current():
         players[5],  # Tyreek Hill (WR)
         players[7],  # Justin Jefferson (WR)
         players[8],  # Amon-Ra St. Brown (WR) - 4th best
-        players[10], # George Kittle (TE) - 2nd best
+        players[10],  # George Kittle (TE) - 2nd best
         players[3],  # Austin Ekeler (FLEX) - 2nd best RB
-        players[11], # Justin Tucker (K)
-        players[12], # 49ers DST
+        players[11],  # Justin Tucker (K)
+        players[12],  # 49ers DST
     ]
 
     constraints = RosterConstraints.standard()

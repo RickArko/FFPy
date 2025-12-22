@@ -34,11 +34,7 @@ class ESPNLeagueIntegration:
     }
 
     def __init__(
-        self,
-        league_id: int,
-        season: int = 2024,
-        swid: Optional[str] = None,
-        espn_s2: Optional[str] = None
+        self, league_id: int, season: int = 2024, swid: Optional[str] = None, espn_s2: Optional[str] = None
     ):
         """
         Initialize ESPN league integration.
@@ -87,13 +83,7 @@ class ESPNLeagueIntegration:
             "Accept": "application/json",
         }
 
-        response = requests.get(
-            url,
-            params=params,
-            headers=headers,
-            cookies=self.cookies,
-            timeout=10
-        )
+        response = requests.get(url, params=params, headers=headers, cookies=self.cookies, timeout=10)
         response.raise_for_status()
 
         return response.json()
@@ -129,17 +119,19 @@ class ESPNLeagueIntegration:
 
         teams = []
         for team_data in data.get("teams", []):
-            teams.append({
-                "id": team_data.get("id"),
-                "name": team_data.get("name", "Unknown"),
-                "abbrev": team_data.get("abbrev", ""),
-                "owner": team_data.get("primaryOwner", "Unknown"),
-                "wins": team_data.get("record", {}).get("overall", {}).get("wins", 0),
-                "losses": team_data.get("record", {}).get("overall", {}).get("losses", 0),
-                "ties": team_data.get("record", {}).get("overall", {}).get("ties", 0),
-                "points_for": team_data.get("record", {}).get("overall", {}).get("pointsFor", 0),
-                "points_against": team_data.get("record", {}).get("overall", {}).get("pointsAgainst", 0),
-            })
+            teams.append(
+                {
+                    "id": team_data.get("id"),
+                    "name": team_data.get("name", "Unknown"),
+                    "abbrev": team_data.get("abbrev", ""),
+                    "owner": team_data.get("primaryOwner", "Unknown"),
+                    "wins": team_data.get("record", {}).get("overall", {}).get("wins", 0),
+                    "losses": team_data.get("record", {}).get("overall", {}).get("losses", 0),
+                    "ties": team_data.get("record", {}).get("overall", {}).get("ties", 0),
+                    "points_for": team_data.get("record", {}).get("overall", {}).get("pointsFor", 0),
+                    "points_against": team_data.get("record", {}).get("overall", {}).get("pointsAgainst", 0),
+                }
+            )
 
         return teams
 
@@ -221,10 +213,7 @@ class ESPNLeagueIntegration:
 
         # Sort by wins (descending), then points for
         standings = pd.DataFrame(teams)
-        standings = standings.sort_values(
-            ["wins", "points_for"],
-            ascending=[False, False]
-        )
+        standings = standings.sort_values(["wins", "points_for"], ascending=[False, False])
         standings["rank"] = range(1, len(standings) + 1)
 
         return standings[["rank", "name", "wins", "losses", "ties", "points_for", "points_against"]]
@@ -239,23 +228,22 @@ class ESPNLeagueIntegration:
         Returns:
             List of matchup dicts
         """
-        data = self._make_request({
-            "view": "mMatchup",
-            "scoringPeriodId": week
-        })
+        data = self._make_request({"view": "mMatchup", "scoringPeriodId": week})
 
         matchups = []
         schedule = data.get("schedule", [])
 
         for matchup in schedule:
             if matchup.get("matchupPeriodId") == week:
-                matchups.append({
-                    "home_team_id": matchup.get("home", {}).get("teamId"),
-                    "away_team_id": matchup.get("away", {}).get("teamId"),
-                    "home_score": matchup.get("home", {}).get("totalPoints", 0),
-                    "away_score": matchup.get("away", {}).get("totalPoints", 0),
-                    "winner": matchup.get("winner", "UNDECIDED"),
-                })
+                matchups.append(
+                    {
+                        "home_team_id": matchup.get("home", {}).get("teamId"),
+                        "away_team_id": matchup.get("away", {}).get("teamId"),
+                        "home_score": matchup.get("home", {}).get("totalPoints", 0),
+                        "away_score": matchup.get("away", {}).get("totalPoints", 0),
+                        "winner": matchup.get("winner", "UNDECIDED"),
+                    }
+                )
 
         return matchups
 
@@ -323,13 +311,38 @@ class ESPNLeagueIntegration:
     def _get_team_abbr(self, team_id: int) -> str:
         """Convert ESPN team ID to abbreviation."""
         teams = {
-            1: "ATL", 2: "BUF", 3: "CHI", 4: "CIN", 5: "CLE",
-            6: "DAL", 7: "DEN", 8: "DET", 9: "GB", 10: "TEN",
-            11: "IND", 12: "KC", 13: "LV", 14: "LAR", 15: "MIA",
-            16: "MIN", 17: "NE", 18: "NO", 19: "NYG", 20: "NYJ",
-            21: "PHI", 22: "ARI", 23: "PIT", 24: "LAC", 25: "SF",
-            26: "SEA", 27: "TB", 28: "WAS", 29: "CAR", 30: "JAX",
-            33: "BAL", 34: "HOU",
+            1: "ATL",
+            2: "BUF",
+            3: "CHI",
+            4: "CIN",
+            5: "CLE",
+            6: "DAL",
+            7: "DEN",
+            8: "DET",
+            9: "GB",
+            10: "TEN",
+            11: "IND",
+            12: "KC",
+            13: "LV",
+            14: "LAR",
+            15: "MIA",
+            16: "MIN",
+            17: "NE",
+            18: "NO",
+            19: "NYG",
+            20: "NYJ",
+            21: "PHI",
+            22: "ARI",
+            23: "PIT",
+            24: "LAC",
+            25: "SF",
+            26: "SEA",
+            27: "TB",
+            28: "WAS",
+            29: "CAR",
+            30: "JAX",
+            33: "BAL",
+            34: "HOU",
         }
         return teams.get(team_id, "FA")
 

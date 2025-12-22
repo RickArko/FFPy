@@ -27,7 +27,9 @@ def main():
     )
 
     st.title("🔍 Player Comparison")
-    st.markdown("Compare multiple players side-by-side across projections, historical performance, and scoring systems")
+    st.markdown(
+        "Compare multiple players side-by-side across projections, historical performance, and scoring systems"
+    )
     st.markdown("---")
 
     # Sidebar for player selection
@@ -39,7 +41,7 @@ def main():
             "Week",
             options=list(range(1, 19)),
             index=14,  # Default to week 15
-            help="Select the week for projections"
+            help="Select the week for projections",
         )
 
         # Position filter
@@ -47,7 +49,7 @@ def main():
             "Filter by Position",
             options=["All"] + get_positions(),
             index=0,
-            help="Filter available players by position"
+            help="Filter available players by position",
         )
 
         # Data source
@@ -55,16 +57,12 @@ def main():
             "Data Source",
             options=["Historical Model", "Sample Data"],
             index=0,
-            help="Historical Model uses database projections, Sample uses mock data"
+            help="Historical Model uses database projections, Sample uses mock data",
         )
 
     # Load player data
     use_historical = data_source == "Historical Model"
-    projections = get_projections(
-        week=week,
-        use_real_data=False,
-        use_historical_model=use_historical
-    )
+    projections = get_projections(week=week, use_real_data=False, use_historical_model=use_historical)
 
     if projections.empty:
         st.warning("No projection data available. Using sample data.")
@@ -86,8 +84,8 @@ def main():
         for _, row in projections.iterrows():
             label = f"{row['player']} ({row['position']}, {row['team']}) - {row['projected_points']:.1f} pts"
             player_labels.append(label)
-            player_map[label] = row['player']
-            player_projections[label] = row['projected_points']
+            player_map[label] = row["player"]
+            player_projections[label] = row["projected_points"]
 
         # Sort by projected points (descending)
         player_labels.sort(key=lambda x: player_projections[x], reverse=True)
@@ -97,7 +95,7 @@ def main():
             options=player_labels,
             default=player_labels[:3] if len(player_labels) >= 3 else player_labels,
             max_selections=6,
-            help="Select 2-6 players to compare"
+            help="Select 2-6 players to compare",
         )
 
         selected_players = [player_map[label] for label in selected_labels]
@@ -114,12 +112,9 @@ def main():
     comparison_data = projections[projections["player"].isin(selected_players)].copy()
 
     # Display comparison sections
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Projections",
-        "📈 Historical Performance",
-        "⚖️ Scoring Systems",
-        "📋 Stats Breakdown"
-    ])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["📊 Projections", "📈 Historical Performance", "⚖️ Scoring Systems", "📋 Stats Breakdown"]
+    )
 
     with tab1:
         show_projections_comparison(comparison_data, week)
@@ -148,63 +143,56 @@ def show_projections_comparison(data: pd.DataFrame, week: int):
         st.metric(
             "Highest Projection",
             f"{data['projected_points'].max():.1f} pts",
-            data.loc[data['projected_points'].idxmax(), 'player']
+            data.loc[data["projected_points"].idxmax(), "player"],
         )
     with col2:
-        st.metric(
-            "Average Projection",
-            f"{data['projected_points'].mean():.1f} pts"
-        )
+        st.metric("Average Projection", f"{data['projected_points'].mean():.1f} pts")
     with col3:
-        if 'consistency' in data.columns:
-            most_consistent_idx = data['consistency'].idxmin()
+        if "consistency" in data.columns:
+            most_consistent_idx = data["consistency"].idxmin()
             st.metric(
                 "Most Consistent",
-                data.loc[most_consistent_idx, 'player'],
-                f"±{data.loc[most_consistent_idx, 'consistency']:.1f} pts"
+                data.loc[most_consistent_idx, "player"],
+                f"±{data.loc[most_consistent_idx, 'consistency']:.1f} pts",
             )
 
     st.markdown("---")
 
     # Projected points bar chart
     fig = px.bar(
-        data.sort_values('projected_points', ascending=True),
-        y='player',
-        x='projected_points',
-        orientation='h',
-        color='projected_points',
-        color_continuous_scale='Blues',
+        data.sort_values("projected_points", ascending=True),
+        y="player",
+        x="projected_points",
+        orientation="h",
+        color="projected_points",
+        color_continuous_scale="Blues",
         title="Projected Fantasy Points",
-        labels={'projected_points': 'Projected Points', 'player': 'Player'}
+        labels={"projected_points": "Projected Points", "player": "Player"},
     )
 
     fig.update_layout(
-        height=max(300, len(data) * 80),
-        showlegend=False,
-        yaxis={'categoryorder': 'total ascending'}
+        height=max(300, len(data) * 80), showlegend=False, yaxis={"categoryorder": "total ascending"}
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
     # Consistency visualization (if available)
-    if 'consistency' in data.columns:
+    if "consistency" in data.columns:
         st.markdown("### Consistency (Lower is Better)")
 
         fig_consistency = px.bar(
-            data.sort_values('consistency', ascending=False),
-            y='player',
-            x='consistency',
-            orientation='h',
-            color='consistency',
-            color_continuous_scale='Reds_r',
+            data.sort_values("consistency", ascending=False),
+            y="player",
+            x="consistency",
+            orientation="h",
+            color="consistency",
+            color_continuous_scale="Reds_r",
             title="Point Variance (Standard Deviation)",
-            labels={'consistency': 'Std Dev (pts)', 'player': 'Player'}
+            labels={"consistency": "Std Dev (pts)", "player": "Player"},
         )
 
         fig_consistency.update_layout(
-            height=max(300, len(data) * 80),
-            showlegend=False,
-            yaxis={'categoryorder': 'total descending'}
+            height=max(300, len(data) * 80), showlegend=False, yaxis={"categoryorder": "total descending"}
         )
 
         st.plotly_chart(fig_consistency, use_container_width=True)
@@ -212,26 +200,26 @@ def show_projections_comparison(data: pd.DataFrame, week: int):
     # Detailed comparison table
     st.markdown("### Detailed Comparison")
 
-    display_cols = ['player', 'team', 'position', 'opponent', 'projected_points']
-    if 'consistency' in data.columns:
-        display_cols.append('consistency')
+    display_cols = ["player", "team", "position", "opponent", "projected_points"]
+    if "consistency" in data.columns:
+        display_cols.append("consistency")
 
     display_cols = [col for col in display_cols if col in data.columns]
 
     display_df = data[display_cols].copy()
-    display_df = display_df.rename(columns={
-        'player': 'Player',
-        'team': 'Team',
-        'position': 'Position',
-        'opponent': 'Opponent',
-        'projected_points': 'Projected Points',
-        'consistency': 'Consistency (±)'
-    })
+    display_df = display_df.rename(
+        columns={
+            "player": "Player",
+            "team": "Team",
+            "position": "Position",
+            "opponent": "Opponent",
+            "projected_points": "Projected Points",
+            "consistency": "Consistency (±)",
+        }
+    )
 
     st.dataframe(
-        display_df.sort_values('Projected Points', ascending=False),
-        use_container_width=True,
-        hide_index=True
+        display_df.sort_values("Projected Points", ascending=False), use_container_width=True, hide_index=True
     )
 
 
@@ -249,7 +237,7 @@ def show_historical_performance(players: List[str], current_week: int):
             player_history = db.get_player_history(player_name, num_weeks=8)
 
             if not player_history.empty:
-                player_history['player'] = player_name
+                player_history["player"] = player_name
                 historical_data.append(player_history)
 
         db.close()
@@ -264,24 +252,18 @@ def show_historical_performance(players: List[str], current_week: int):
         # Performance trend line chart
         fig = px.line(
             all_history,
-            x='week',
-            y='actual_points',
-            color='player',
+            x="week",
+            y="actual_points",
+            color="player",
             markers=True,
             title="Fantasy Points by Week",
-            labels={'week': 'Week', 'actual_points': 'Fantasy Points', 'player': 'Player'}
+            labels={"week": "Week", "actual_points": "Fantasy Points", "player": "Player"},
         )
 
         fig.update_layout(
             height=500,
-            hovermode='x unified',
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -291,17 +273,19 @@ def show_historical_performance(players: List[str], current_week: int):
 
         summary_stats = []
         for player_name in players:
-            player_data = all_history[all_history['player'] == player_name]
+            player_data = all_history[all_history["player"] == player_name]
 
             if not player_data.empty:
-                summary_stats.append({
-                    'Player': player_name,
-                    'Games': len(player_data),
-                    'Avg Points': player_data['actual_points'].mean(),
-                    'High': player_data['actual_points'].max(),
-                    'Low': player_data['actual_points'].min(),
-                    'Std Dev': player_data['actual_points'].std()
-                })
+                summary_stats.append(
+                    {
+                        "Player": player_name,
+                        "Games": len(player_data),
+                        "Avg Points": player_data["actual_points"].mean(),
+                        "High": player_data["actual_points"].max(),
+                        "Low": player_data["actual_points"].min(),
+                        "Std Dev": player_data["actual_points"].std(),
+                    }
+                )
 
         summary_df = pd.DataFrame(summary_stats)
         summary_df = summary_df.round(1)
@@ -324,9 +308,9 @@ def show_scoring_system_comparison(data: pd.DataFrame):
 
     # Define scoring systems
     scoring_systems = {
-        'PPR': ScoringConfig.ppr(),
-        'Half-PPR': ScoringConfig.half_ppr(),
-        'Standard': ScoringConfig.standard()
+        "PPR": ScoringConfig.ppr(),
+        "Half-PPR": ScoringConfig.half_ppr(),
+        "Standard": ScoringConfig.standard(),
     }
 
     # Calculate points under each system
@@ -336,51 +320,42 @@ def show_scoring_system_comparison(data: pd.DataFrame):
         for _, player_row in data.iterrows():
             # Extract stats
             stats = {
-                'passing_yards': player_row.get('passing_yards', 0),
-                'passing_tds': player_row.get('passing_tds', 0),
-                'interceptions': player_row.get('interceptions', 0),
-                'rushing_yards': player_row.get('rushing_yards', 0),
-                'rushing_tds': player_row.get('rushing_tds', 0),
-                'receiving_yards': player_row.get('receiving_yards', 0),
-                'receiving_tds': player_row.get('receiving_tds', 0),
-                'receptions': player_row.get('receptions', 0)
+                "passing_yards": player_row.get("passing_yards", 0),
+                "passing_tds": player_row.get("passing_tds", 0),
+                "interceptions": player_row.get("interceptions", 0),
+                "rushing_yards": player_row.get("rushing_yards", 0),
+                "rushing_tds": player_row.get("rushing_tds", 0),
+                "receiving_yards": player_row.get("receiving_yards", 0),
+                "receiving_tds": player_row.get("receiving_tds", 0),
+                "receptions": player_row.get("receptions", 0),
             }
 
             points = calculate_fantasy_points(stats, config)
 
-            results.append({
-                'Player': player_row['player'],
-                'Position': player_row['position'],
-                'Scoring System': system_name,
-                'Points': points
-            })
+            results.append(
+                {
+                    "Player": player_row["player"],
+                    "Position": player_row["position"],
+                    "Scoring System": system_name,
+                    "Points": points,
+                }
+            )
 
     results_df = pd.DataFrame(results)
 
     # Grouped bar chart
     fig = px.bar(
         results_df,
-        x='Player',
-        y='Points',
-        color='Scoring System',
-        barmode='group',
+        x="Player",
+        y="Points",
+        color="Scoring System",
+        barmode="group",
         title="Fantasy Points by Scoring System",
-        color_discrete_map={
-            'PPR': '#1f77b4',
-            'Half-PPR': '#ff7f0e',
-            'Standard': '#2ca02c'
-        }
+        color_discrete_map={"PPR": "#1f77b4", "Half-PPR": "#ff7f0e", "Standard": "#2ca02c"},
     )
 
     fig.update_layout(
-        height=500,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -394,31 +369,27 @@ def show_scoring_system_comparison(data: pd.DataFrame):
         with col:
             st.markdown(f"**{system_name}**")
 
-            system_data = results_df[results_df['Scoring System'] == system_name].copy()
-            system_data = system_data.sort_values('Points', ascending=False)
-            system_data['Rank'] = range(1, len(system_data) + 1)
+            system_data = results_df[results_df["Scoring System"] == system_name].copy()
+            system_data = system_data.sort_values("Points", ascending=False)
+            system_data["Rank"] = range(1, len(system_data) + 1)
 
-            display_df = system_data[['Rank', 'Player', 'Points']].copy()
-            display_df['Points'] = display_df['Points'].round(1)
+            display_df = system_data[["Rank", "Player", "Points"]].copy()
+            display_df["Points"] = display_df["Points"].round(1)
 
             st.dataframe(display_df, use_container_width=True, hide_index=True, height=250)
 
     # Impact of receptions (for pass-catchers)
-    reception_impact = results_df.pivot_table(
-        index='Player',
-        columns='Scoring System',
-        values='Points'
-    )
+    reception_impact = results_df.pivot_table(index="Player", columns="Scoring System", values="Points")
 
-    if 'PPR' in reception_impact.columns and 'Standard' in reception_impact.columns:
-        reception_impact['PPR Bonus'] = reception_impact['PPR'] - reception_impact['Standard']
+    if "PPR" in reception_impact.columns and "Standard" in reception_impact.columns:
+        reception_impact["PPR Bonus"] = reception_impact["PPR"] - reception_impact["Standard"]
 
         st.markdown("### PPR Impact")
         st.markdown("Points gained from PPR scoring vs Standard")
 
-        impact_df = reception_impact[['PPR Bonus']].sort_values('PPR Bonus', ascending=False)
+        impact_df = reception_impact[["PPR Bonus"]].sort_values("PPR Bonus", ascending=False)
         impact_df = impact_df.reset_index()
-        impact_df['PPR Bonus'] = impact_df['PPR Bonus'].round(1)
+        impact_df["PPR Bonus"] = impact_df["PPR Bonus"].round(1)
 
         st.dataframe(impact_df, use_container_width=True, hide_index=True)
 
@@ -432,23 +403,23 @@ def show_stats_breakdown(data: pd.DataFrame):
         return
 
     # Position-specific stats
-    positions = data['position'].unique()
+    positions = data["position"].unique()
 
     for position in positions:
-        pos_data = data[data['position'] == position].copy()
+        pos_data = data[data["position"] == position].copy()
 
         st.markdown(f"### {position} Stats")
 
         # Determine relevant stats by position
-        if position == 'QB':
-            stat_cols = ['passing_yards', 'passing_tds', 'rushing_yards', 'rushing_tds']
-            stat_labels = ['Pass Yds', 'Pass TDs', 'Rush Yds', 'Rush TDs']
-        elif position == 'RB':
-            stat_cols = ['rushing_yards', 'rushing_tds', 'receiving_yards', 'receptions']
-            stat_labels = ['Rush Yds', 'Rush TDs', 'Rec Yds', 'Receptions']
-        elif position in ['WR', 'TE']:
-            stat_cols = ['receiving_yards', 'receiving_tds', 'receptions']
-            stat_labels = ['Rec Yds', 'Rec TDs', 'Receptions']
+        if position == "QB":
+            stat_cols = ["passing_yards", "passing_tds", "rushing_yards", "rushing_tds"]
+            stat_labels = ["Pass Yds", "Pass TDs", "Rush Yds", "Rush TDs"]
+        elif position == "RB":
+            stat_cols = ["rushing_yards", "rushing_tds", "receiving_yards", "receptions"]
+            stat_labels = ["Rush Yds", "Rush TDs", "Rec Yds", "Receptions"]
+        elif position in ["WR", "TE"]:
+            stat_cols = ["receiving_yards", "receiving_tds", "receptions"]
+            stat_labels = ["Rec Yds", "Rec TDs", "Receptions"]
         else:
             continue
 
@@ -464,21 +435,19 @@ def show_stats_breakdown(data: pd.DataFrame):
         stats_data = []
         for _, player_row in pos_data.iterrows():
             for stat_col, stat_label in zip(available_stats, available_labels):
-                stats_data.append({
-                    'Player': player_row['player'],
-                    'Stat': stat_label,
-                    'Value': player_row.get(stat_col, 0)
-                })
+                stats_data.append(
+                    {"Player": player_row["player"], "Stat": stat_label, "Value": player_row.get(stat_col, 0)}
+                )
 
         stats_df = pd.DataFrame(stats_data)
 
         fig = px.bar(
             stats_df,
-            x='Stat',
-            y='Value',
-            color='Player',
-            barmode='group',
-            title=f"{position} Statistical Comparison"
+            x="Stat",
+            y="Value",
+            color="Player",
+            barmode="group",
+            title=f"{position} Statistical Comparison",
         )
 
         fig.update_layout(height=400)
@@ -486,23 +455,19 @@ def show_stats_breakdown(data: pd.DataFrame):
         st.plotly_chart(fig, use_container_width=True)
 
         # Detailed stats table
-        display_cols = ['player', 'team'] + available_stats + ['projected_points']
+        display_cols = ["player", "team"] + available_stats + ["projected_points"]
         display_df = pos_data[display_cols].copy()
 
         # Rename columns
-        rename_map = {
-            'player': 'Player',
-            'team': 'Team',
-            'projected_points': 'Projected Points'
-        }
+        rename_map = {"player": "Player", "team": "Team", "projected_points": "Projected Points"}
         rename_map.update(dict(zip(available_stats, available_labels)))
 
         display_df = display_df.rename(columns=rename_map)
 
         st.dataframe(
-            display_df.sort_values('Projected Points', ascending=False),
+            display_df.sort_values("Projected Points", ascending=False),
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
         )
 
 

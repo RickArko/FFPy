@@ -551,12 +551,12 @@ class TestLineupOptimizer:
             players[2],  # Jalen Hurts (QB) - 3rd best
             players[5],  # Bijan Robinson (RB) - 3rd best
             players[6],  # James Cook (RB) - 4th best
-            players[10], # Amon-Ra St. Brown (WR)
-            players[11], # Stefon Diggs (WR) - 5th best
-            players[14], # George Kittle (TE) - 3rd best
+            players[10],  # Amon-Ra St. Brown (WR)
+            players[11],  # Stefon Diggs (WR) - 5th best
+            players[14],  # George Kittle (TE) - 3rd best
             players[4],  # Austin Ekeler (FLEX)
-            players[15], # Justin Tucker (K)
-            players[16], # 49ers DST
+            players[15],  # Justin Tucker (K)
+            players[16],  # 49ers DST
         ]
 
         constraints = RosterConstraints.standard()
