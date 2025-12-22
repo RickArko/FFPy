@@ -47,10 +47,7 @@ class Config:
         Returns:
             True if API key is set and valid
         """
-        return (
-            cls.SPORTSDATA_API_KEY != ""
-            and cls.SPORTSDATA_API_KEY != "your_sportsdata_api_key_here"
-        )
+        return cls.SPORTSDATA_API_KEY != "" and cls.SPORTSDATA_API_KEY != "your_sportsdata_api_key_here"
 
     @classmethod
     def get_active_api_key(cls) -> str:

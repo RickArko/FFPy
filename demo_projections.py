@@ -28,13 +28,9 @@ def main():
 
     # Top 5 projections
     print("\n[3] Top 5 Projected Players:")
-    top5 = projections.nlargest(5, "projected_points")[
-        ["player", "position", "team", "projected_points"]
-    ]
+    top5 = projections.nlargest(5, "projected_points")[["player", "position", "team", "projected_points"]]
     for idx, row in top5.iterrows():
-        print(
-            f"    {row['player']:20} ({row['position']}) - {row['projected_points']:.1f} pts"
-        )
+        print(f"    {row['player']:20} ({row['position']}) - {row['projected_points']:.1f} pts")
 
     # Position breakdown
     print("\n[4] Projections by Position:")

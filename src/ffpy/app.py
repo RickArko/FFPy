@@ -92,9 +92,7 @@ def main():
     with col1:
         st.metric("Total Players", len(projections))
     with col2:
-        st.metric(
-            "Avg Projected Points", f"{projections['projected_points'].mean():.1f}"
-        )
+        st.metric("Avg Projected Points", f"{projections['projected_points'].mean():.1f}")
     with col3:
         st.metric(
             "Top Player",
@@ -103,9 +101,7 @@ def main():
     with col4:
         st.metric(
             "Top Projection",
-            f"{top_players.iloc[0]['projected_points']:.1f}"
-            if len(top_players) > 0
-            else "N/A",
+            f"{top_players.iloc[0]['projected_points']:.1f}" if len(top_players) > 0 else "N/A",
         )
 
     st.markdown("---")

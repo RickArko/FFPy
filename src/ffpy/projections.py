@@ -43,9 +43,7 @@ class HistoricalProjectionModel:
             DataFrame with projections for all players
         """
         # Get list of all active players from recent weeks
-        recent_data = self.db.get_actual_stats(
-            season=season, week=max(1, week - lookback_weeks)
-        )
+        recent_data = self.db.get_actual_stats(season=season, week=max(1, week - lookback_weeks))
 
         if recent_data.empty:
             print(f"No historical data found for season {season}")
@@ -127,9 +125,7 @@ class HistoricalProjectionModel:
             if stat in history.columns:
                 values = history[stat].fillna(0).values
                 if len(values) > 0:
-                    weighted_avg = np.average(
-                        values[: len(weights)], weights=weights[: len(values)]
-                    )
+                    weighted_avg = np.average(values[: len(weights)], weights=weights[: len(values)])
 
                     # Add variance for realism (-5% to +5%)
                     variance = np.random.uniform(0.95, 1.05)
@@ -166,9 +162,7 @@ class HistoricalProjectionModel:
             return np.array([1.0])
 
         # Exponential decay: most recent = 1.0, oldest = (1-recent_weight)
-        weights = np.array(
-            [(1 - recent_weight) + recent_weight * (i / (n - 1)) for i in range(n)]
-        )
+        weights = np.array([(1 - recent_weight) + recent_weight * (i / (n - 1)) for i in range(n)])
 
         # Reverse so most recent is first
         weights = weights[::-1]
@@ -176,9 +170,7 @@ class HistoricalProjectionModel:
         # Normalize
         return weights / weights.sum()
 
-    def get_player_projection(
-        self, player_name: str, season: int, week: int
-    ) -> Optional[pd.DataFrame]:
+    def get_player_projection(self, player_name: str, season: int, week: int) -> Optional[pd.DataFrame]:
         """
         Get projection for a specific player with context.
 
@@ -199,14 +191,8 @@ class HistoricalProjectionModel:
         history = self.db.get_player_history(player_name, num_weeks=5)
 
         result = pd.DataFrame([projection])
-        result["recent_avg"] = (
-            history["actual_points"].mean() if not history.empty else 0
-        )
-        result["recent_high"] = (
-            history["actual_points"].max() if not history.empty else 0
-        )
-        result["recent_low"] = (
-            history["actual_points"].min() if not history.empty else 0
-        )
+        result["recent_avg"] = history["actual_points"].mean() if not history.empty else 0
+        result["recent_high"] = history["actual_points"].max() if not history.empty else 0
+        result["recent_low"] = history["actual_points"].min() if not history.empty else 0
 
         return result

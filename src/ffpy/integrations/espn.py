@@ -44,9 +44,7 @@ class ESPNIntegration(BaseAPIIntegration):
             response.raise_for_status()
 
             data = response.json()
-            return self._parse_espn_data(
-                data, week, stat_source_id=0
-            )  # 0 = actual stats
+            return self._parse_espn_data(data, week, stat_source_id=0)  # 0 = actual stats
 
         except Exception as e:
             print(f"ESPN API error fetching actuals: {e}")
@@ -77,17 +75,13 @@ class ESPNIntegration(BaseAPIIntegration):
             response.raise_for_status()
 
             data = response.json()
-            return self._parse_espn_data(
-                data, week, stat_source_id=1
-            )  # 1 = projections
+            return self._parse_espn_data(data, week, stat_source_id=1)  # 1 = projections
 
         except Exception as e:
             print(f"ESPN API error: {e}")
             return pd.DataFrame()
 
-    def _parse_espn_data(
-        self, data: dict, week: int, stat_source_id: int = 1
-    ) -> pd.DataFrame:
+    def _parse_espn_data(self, data: dict, week: int, stat_source_id: int = 1) -> pd.DataFrame:
         """
         Parse ESPN API response into standardized DataFrame.
 
@@ -137,9 +131,7 @@ class ESPNIntegration(BaseAPIIntegration):
                         "team": self._get_team_abbr(pro_team_id),
                         "position": position,
                         "opponent": extracted_stats.get("opponent", "BYE"),
-                        "projected_points": extracted_stats.get(
-                            "projected_points", 0.0
-                        ),
+                        "projected_points": extracted_stats.get("projected_points", 0.0),
                         "week": week,
                     }
 
@@ -157,9 +149,7 @@ class ESPNIntegration(BaseAPIIntegration):
                         {
                             "rushing_yards": projected_stats.get("rushing_yards", 0),
                             "rushing_tds": projected_stats.get("rushing_tds", 0),
-                            "receiving_yards": projected_stats.get(
-                                "receiving_yards", 0
-                            ),
+                            "receiving_yards": projected_stats.get("receiving_yards", 0),
                             "receiving_tds": projected_stats.get("receiving_tds", 0),
                             "receptions": projected_stats.get("receptions", 0),
                         }
@@ -187,10 +177,7 @@ class ESPNIntegration(BaseAPIIntegration):
         """
         for stat_entry in stats:
             # Look for stats matching the source ID and week
-            if (
-                stat_entry.get("statSourceId") == stat_source_id
-                and stat_entry.get("scoringPeriodId") == week
-            ):
+            if stat_entry.get("statSourceId") == stat_source_id and stat_entry.get("scoringPeriodId") == week:
                 raw_stats = stat_entry.get("stats", {})
 
                 # ESPN stat IDs (same for both actual and projected)

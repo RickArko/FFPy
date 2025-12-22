@@ -50,9 +50,7 @@ def collect_stats(season: int, start_week: int, end_week: int):
 
             if df.empty:
                 print(f"  [WARN] No data returned for week {week}")
-                db.log_api_request(
-                    "espn", season, week, "actuals", False, "No data returned"
-                )
+                db.log_api_request("espn", season, week, "actuals", False, "No data returned")
                 continue
 
             # Store in database
@@ -97,9 +95,7 @@ def main():
     parser = argparse.ArgumentParser(description="Collect historical NFL fantasy stats")
     parser.add_argument("--season", type=int, default=2024, help="NFL season year")
     parser.add_argument("--start-week", type=int, default=1, help="Starting week")
-    parser.add_argument(
-        "--end-week", type=int, default=17, help="Ending week (17 for regular season)"
-    )
+    parser.add_argument("--end-week", type=int, default=17, help="Ending week (17 for regular season)")
 
     args = parser.parse_args()
 

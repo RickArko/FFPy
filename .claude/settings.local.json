@@ -6,7 +6,8 @@
       "Bash(uv run streamlit:*)",
       "Bash(timeout /t 5 /nobreak)",
       "Bash(ping:*)",
-      "Bash(uv run pytest:*)"
+      "Bash(uv run pytest:*)",
+      "Bash(uv add:*)"
     ]
   }
 }

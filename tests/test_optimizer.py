@@ -363,3 +363,289 @@ class TestPlayerStatus:
         assert PlayerStatus.QUESTIONABLE.value == "questionable"
         assert PlayerStatus.OUT.value == "out"
         assert PlayerStatus.LOCKED.value == "locked"
+
+
+class TestLineupOptimizer:
+    """Tests for LineupOptimizer class."""
+
+    def create_sample_players(self) -> list:
+        """Create sample players for testing."""
+        return [
+            # QBs
+            Player("Patrick Mahomes", "QB", "KC", 25.5),
+            Player("Josh Allen", "QB", "BUF", 24.2),
+            Player("Jalen Hurts", "QB", "PHI", 23.1),
+            # RBs
+            Player("Christian McCaffrey", "RB", "SF", 22.3),
+            Player("Austin Ekeler", "RB", "WAS", 18.7),
+            Player("Bijan Robinson", "RB", "ATL", 17.5),
+            Player("James Cook", "RB", "BUF", 15.2),
+            # WRs
+            Player("Tyreek Hill", "WR", "MIA", 19.8),
+            Player("CeeDee Lamb", "WR", "DAL", 18.5),
+            Player("Justin Jefferson", "WR", "MIN", 18.2),
+            Player("Amon-Ra St. Brown", "WR", "DET", 16.9),
+            Player("Stefon Diggs", "WR", "HOU", 14.3),
+            # TEs
+            Player("Travis Kelce", "TE", "KC", 16.5),
+            Player("Mark Andrews", "TE", "BAL", 14.2),
+            Player("George Kittle", "TE", "SF", 13.1),
+            # K
+            Player("Justin Tucker", "K", "BAL", 9.5),
+            # DST
+            Player("49ers DST", "DST", "SF", 10.2),
+        ]
+
+    def test_basic_optimization(self):
+        """Test basic lineup optimization."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+
+        result = optimizer.optimize(players)
+
+        assert result.is_optimal
+        assert len(result.starters) == 9  # 1 QB + 2 RB + 2 WR + 1 TE + 1 FLEX + 1 K + 1 DST
+        assert result.total_points > 0
+        assert result.solve_time_ms > 0
+
+    def test_optimal_lineup_selects_best_players(self):
+        """Test that optimizer selects highest-projected players."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+
+        result = optimizer.optimize(players)
+
+        # Should select Patrick Mahomes (highest QB)
+        qb_names = [p.name for p in result.starters if p.position == "QB"]
+        assert "Patrick Mahomes" in qb_names
+
+        # Should select top 2 RBs
+        rb_names = [p.name for p in result.starters if p.position == "RB"]
+        assert "Christian McCaffrey" in rb_names
+        assert "Austin Ekeler" in rb_names
+
+    def test_flex_position_handling(self):
+        """Test that FLEX position is filled correctly."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+
+        result = optimizer.optimize(players)
+
+        # Count total RB + WR + TE
+        flex_eligible = [p for p in result.starters if p.position in ["RB", "WR", "TE"]]
+
+        # Should have: 2 RB + 2 WR + 1 TE + 1 FLEX = 6 total
+        assert len(flex_eligible) == 6
+
+    def test_locked_in_player(self):
+        """Test that locked-in players are forced to start."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.standard()
+
+        # Lock in a suboptimal QB
+        constraints.locked_in = {"Jalen Hurts"}
+
+        optimizer = LineupOptimizer(constraints)
+        result = optimizer.optimize(players)
+
+        # Jalen Hurts should be in lineup even though Mahomes/Allen are better
+        starter_names = [p.name for p in result.starters]
+        assert "Jalen Hurts" in starter_names
+
+    def test_locked_out_player(self):
+        """Test that locked-out players are forced to sit."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.standard()
+
+        # Lock out the best RB
+        constraints.locked_out = {"Christian McCaffrey"}
+
+        optimizer = LineupOptimizer(constraints)
+        result = optimizer.optimize(players)
+
+        # McCaffrey should not be in lineup
+        starter_names = [p.name for p in result.starters]
+        assert "Christian McCaffrey" not in starter_names
+
+        # But should be on bench
+        bench_names = [p.name for p in result.bench]
+        assert "Christian McCaffrey" in bench_names
+
+    def test_injured_players_excluded(self):
+        """Test that injured players are automatically excluded."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+
+        # Mark best player as injured
+        players[0].status = PlayerStatus.INJURED  # Patrick Mahomes
+
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+        result = optimizer.optimize(players)
+
+        # Mahomes should not be in lineup or bench
+        all_names = [p.name for p in result.starters + result.bench]
+        assert "Patrick Mahomes" not in all_names
+
+    def test_team_stack_limits(self):
+        """Test max players per team constraint."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.standard()
+
+        # Limit to max 2 players per team
+        constraints.max_players_per_team = 2
+
+        optimizer = LineupOptimizer(constraints)
+        result = optimizer.optimize(players)
+
+        # Count players per team
+        team_counts = {}
+        for player in result.starters:
+            team_counts[player.team] = team_counts.get(player.team, 0) + 1
+
+        # No team should have more than 2 players
+        for team, count in team_counts.items():
+            assert count <= 2, f"Team {team} has {count} players (max 2)"
+
+    def test_no_kicker_dst_constraints(self):
+        """Test optimization without kicker/DST."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.no_kicker_dst()
+        optimizer = LineupOptimizer(constraints)
+
+        result = optimizer.optimize(players)
+
+        assert len(result.starters) == 7  # 1 QB + 2 RB + 2 WR + 1 TE + 1 FLEX
+
+        # Should have no kicker or DST
+        positions = [p.position for p in result.starters]
+        assert "K" not in positions
+        assert "DST" not in positions
+
+    def test_improvement_calculation(self):
+        """Test improvement calculation vs current lineup."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+
+        # Create a suboptimal current lineup
+        current_lineup = [
+            players[2],  # Jalen Hurts (QB) - 3rd best
+            players[5],  # Bijan Robinson (RB) - 3rd best
+            players[6],  # James Cook (RB) - 4th best
+            players[10], # Amon-Ra St. Brown (WR)
+            players[11], # Stefon Diggs (WR) - 5th best
+            players[14], # George Kittle (TE) - 3rd best
+            players[4],  # Austin Ekeler (FLEX)
+            players[15], # Justin Tucker (K)
+            players[16], # 49ers DST
+        ]
+
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+        result = optimizer.optimize(players, current_lineup=current_lineup)
+
+        assert result.improvement_vs_current is not None
+        assert result.improvement_vs_current > 0  # Optimal should be better
+
+    def test_bench_sorting(self):
+        """Test that bench is sorted by projected points."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+
+        result = optimizer.optimize(players)
+
+        # Bench should be sorted descending by points
+        bench_points = [p.projected_points for p in result.bench]
+        assert bench_points == sorted(bench_points, reverse=True)
+
+    def test_analyze_lineup_output(self):
+        """Test lineup analysis formatting."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+
+        result = optimizer.optimize(players)
+        analysis = optimizer.analyze_lineup(result)
+
+        # Check output contains key elements
+        assert "OPTIMAL LINEUP" in analysis
+        assert "Total Projected Points" in analysis
+        assert "Solve Time" in analysis
+        assert "TOP BENCH OPTIONS" in analysis
+
+    def test_no_available_players_error(self):
+        """Test error when no players are available."""
+        from ffpy.optimizer import LineupOptimizer
+
+        # All players injured
+        players = [
+            Player("Injured QB", "QB", "KC", 25.0, status=PlayerStatus.INJURED),
+            Player("Injured RB", "RB", "SF", 20.0, status=PlayerStatus.OUT),
+        ]
+
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+
+        with pytest.raises(ValueError, match="No available players"):
+            optimizer.optimize(players)
+
+    def test_insufficient_position_players_error(self):
+        """Test error when not enough players for required positions."""
+        from ffpy.optimizer import LineupOptimizer
+
+        # Only 1 QB when we need 1 QB
+        players = [
+            Player("Only QB", "QB", "KC", 25.0),
+            # No RBs, WRs, TEs, etc.
+        ]
+
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+
+        with pytest.raises(ValueError, match="No available players for required position"):
+            optimizer.optimize(players)
+
+    def test_points_by_position(self):
+        """Test points_by_position breakdown."""
+        from ffpy.optimizer import LineupOptimizer
+
+        players = self.create_sample_players()
+        constraints = RosterConstraints.standard()
+        optimizer = LineupOptimizer(constraints)
+
+        result = optimizer.optimize(players)
+
+        # Should have points for each position
+        assert "QB" in result.points_by_position
+        assert "RB" in result.points_by_position
+        assert "WR" in result.points_by_position
+        assert "TE" in result.points_by_position
+
+        # QB points should match the selected QB's projection
+        qb_points = result.points_by_position["QB"]
+        qb_in_lineup = [p for p in result.starters if p.position == "QB"][0]
+        assert qb_points == qb_in_lineup.projected_points

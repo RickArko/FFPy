@@ -59,9 +59,7 @@ class FFPyDatabase:
 
     # ==================== PLAYER METHODS ====================
 
-    def get_or_create_player(
-        self, name: str, team: str, position: str, nfl_id: Optional[str] = None
-    ) -> int:
+    def get_or_create_player(self, name: str, team: str, position: str, nfl_id: Optional[str] = None) -> int:
         """
         Get player_id or create new player.
 
@@ -111,9 +109,7 @@ class FFPyDatabase:
 
     # ==================== ACTUAL STATS METHODS ====================
 
-    def store_actual_stats(
-        self, df: pd.DataFrame, season: int, week: int, source: str = "espn"
-    ):
+    def store_actual_stats(self, df: pd.DataFrame, season: int, week: int, source: str = "espn"):
         """
         Store actual game stats from DataFrame.
 
@@ -256,9 +252,7 @@ class FFPyDatabase:
 
     # ==================== API REQUEST TRACKING ====================
 
-    def check_api_request(
-        self, source: str, season: int, week: int, request_type: str = "actuals"
-    ) -> bool:
+    def check_api_request(self, source: str, season: int, week: int, request_type: str = "actuals") -> bool:
         """
         Check if we already fetched data for this request today.
 
@@ -328,9 +322,7 @@ class FFPyDatabase:
 
     # ==================== STATISTICS / ANALYTICS ====================
 
-    def get_player_averages(
-        self, player_name: str, num_weeks: int = 4
-    ) -> Dict[str, float]:
+    def get_player_averages(self, player_name: str, num_weeks: int = 4) -> Dict[str, float]:
         """
         Calculate player's recent averages.
 

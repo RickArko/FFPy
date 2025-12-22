@@ -347,9 +347,7 @@ def filter_by_position(df: pd.DataFrame, position: str) -> pd.DataFrame:
     Returns:
         Filtered DataFrame
     """
-    return df[df["position"] == position].sort_values(
-        "projected_points", ascending=False
-    )
+    return df[df["position"] == position].sort_values("projected_points", ascending=False)
 
 
 def get_top_n_players(df: pd.DataFrame, n: int = 10) -> pd.DataFrame:

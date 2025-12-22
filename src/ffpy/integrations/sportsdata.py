@@ -23,9 +23,7 @@ class SportsDataIntegration(BaseAPIIntegration):
     def is_available(self) -> bool:
         """Check if API key is configured."""
         return (
-            self.api_key is not None
-            and self.api_key != ""
-            and self.api_key != "your_sportsdata_api_key_here"
+            self.api_key is not None and self.api_key != "" and self.api_key != "your_sportsdata_api_key_here"
         )
 
     def get_projections(self, week: int, season: int = 2025) -> pd.DataFrame:
@@ -61,9 +59,7 @@ class SportsDataIntegration(BaseAPIIntegration):
             print(f"SportsDataIO API error: {e}")
             return pd.DataFrame()
 
-    def _get_position_projections(
-        self, position: str, week: int, season: int
-    ) -> pd.DataFrame:
+    def _get_position_projections(self, position: str, week: int, season: int) -> pd.DataFrame:
         """
         Get projections for a specific position.
 
@@ -107,9 +103,7 @@ class SportsDataIntegration(BaseAPIIntegration):
             print(f"SportsDataIO error for {position}: {e}")
             return pd.DataFrame()
 
-    def _parse_sportsdata_response(
-        self, data: list, position: str, week: int
-    ) -> pd.DataFrame:
+    def _parse_sportsdata_response(self, data: list, position: str, week: int) -> pd.DataFrame:
         """
         Parse SportsDataIO API response.
 
@@ -156,10 +150,8 @@ class SportsDataIntegration(BaseAPIIntegration):
                         {
                             "rushing_yards": player_data.get("RushingYards", 0) or 0,
                             "rushing_tds": player_data.get("RushingTouchdowns", 0) or 0,
-                            "receiving_yards": player_data.get("ReceivingYards", 0)
-                            or 0,
-                            "receiving_tds": player_data.get("ReceivingTouchdowns", 0)
-                            or 0,
+                            "receiving_yards": player_data.get("ReceivingYards", 0) or 0,
+                            "receiving_tds": player_data.get("ReceivingTouchdowns", 0) or 0,
                             "receptions": player_data.get("Receptions", 0) or 0,
                         }
                     )
