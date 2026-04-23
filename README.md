@@ -1,279 +1,107 @@
-# FFPy - Fantasy Football Point Projections
+# FFPy — Fantasy Football Python
 
-A web application for viewing fantasy football point projections by position and week. Built with Python, Streamlit, and uv.
-
-## Quick Start (2 Minutes)
-
-> **New to development?** See [QUICKSTART.md](QUICKSTART.md) for a beginner-friendly guide with no jargon.
-
-### The Simplest Way (Works Everywhere)
-
-**All users - just 2 commands:**
-
-```bash
-# 1. Install (one-time)
-uv sync
-
-# 2. Run
-uv run streamlit run src/ffpy/app.py
-```
-
-Your browser opens automatically to `http://localhost:8501`
-
-**That's it!** The app works immediately with free ESPN data (no API key needed).
-
----
-
-### Platform-Specific Shortcuts (Optional)
-
-**Windows - Double-click method:**
-- First time: Double-click `install.bat`
-- Every time: Double-click `run.bat`
-
-**Linux/macOS - Using make:**
-- First time: `make install`
-- Every time: `make run`
-
-> **Note:** These are just shortcuts for the universal commands above. Use whichever is easier for you!
-
-## Features
-
-- View top projected players by position (QB, RB, WR, TE)
-- Filter projections by NFL week (1-18)
-- Adjustable player display count
-- Position-specific statistics
-- Clean, responsive interface
-- Position breakdown view showing top 5 players per position
+A Streamlit app and Python toolkit for fantasy football projections, lineup optimization, and play-by-play analytics. Pulls data from [nflverse](https://nflverse.github.io/), ESPN, or SportsDataIO and runs everything locally against a SQLite database.
 
 ## Prerequisites
 
-- Python 3.13+
-- [uv](https://github.com/astral-sh/uv) package manager
+- A POSIX shell with `make` — Linux, macOS, or **Windows via WSL**
+- Internet access for the first-time dependency install
 
-To install uv:
-```bash
-# macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
+Everything else (`uv`, Python 3.13, the virtualenv, dependencies, DB schema) is installed by `make bootstrap`.
 
-# Windows
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-## Installation
-
-### Recommended Method (All Platforms)
-
-**One command that works everywhere:**
+## Quick start
 
 ```bash
-uv sync
+make bootstrap   # one-time: installs uv, deps, .env, DB schema
+make run         # starts Streamlit on http://localhost:8501
 ```
 
-This will:
-1. Automatically install Python if needed
-2. Create a virtual environment
-3. Install all dependencies (Streamlit, Pandas, Requests, python-dotenv)
-4. Set up the project for development
+See [QUICKSTART.md](QUICKSTART.md) for the two-minute walkthrough.
 
-**That's it!** No Python installation needed. No complex setup.
+## Make targets
 
----
+`make help` lists everything. Highlights:
 
-### Alternative Methods
+| Target                      | What it does                                     |
+|-----------------------------|--------------------------------------------------|
+| `make bootstrap`            | First-time setup (idempotent)                    |
+| `make install`              | `uv sync` only                                   |
+| `make run` / `make dev`     | Launch Streamlit (dev = auto-reload on save)     |
+| `make test` / `make cov`    | Pytest, optionally with coverage                 |
+| `make lint` / `make fmt`    | Ruff lint / format                               |
+| `make check`                | `lint` + `test` (CI entry point)                 |
+| `make db.migrate`           | Create or upgrade the SQLite schema              |
+| `make db.load SEASON=Y`     | Load a season of nflverse play-by-play           |
+| `make db.update`            | Incrementally append new games                   |
+| `make db.stats SEASON=Y`    | Collect ESPN actual stats for that season        |
+| `make db.mock SEASON=Y`     | Populate with realistic mock data                |
+| `make notebook`             | Jupyter Lab with the analysis dep group          |
+| `make clean` / `clean-all`  | Remove caches (+ `.venv`)                        |
 
-**Windows:** Double-click `install.bat`
-
-**Linux/macOS (if you have make installed):** `make install`
-
-> All methods do the same thing. Use whichever is easiest for you!
-
-### API Configuration (Optional)
-
-The app works out of the box with **ESPN's free API** (no signup required). For better data quality and reliability, you can configure a paid API.
-
-1. **Copy the environment template:**
-   ```bash
-   cp .env.example .env
-   ```
-
-2. **Choose your API provider:**
-
-   **Option A: ESPN (Default - Free)**
-   - No configuration needed!
-   - Uses unofficial ESPN API
-   - Good for development and testing
-
-   **Option B: SportsDataIO (Recommended for Production)**
-   - Sign up at [https://sportsdata.io/](https://sportsdata.io/)
-   - Choose NFL subscription (Free tier: 1000 calls/month)
-   - Copy your API key
-   - Edit `.env`:
-     ```bash
-     API_PROVIDER=sportsdata
-     SPORTSDATA_API_KEY=your_actual_api_key_here
-     ```
-
-3. **Verify your setup:**
-   - The app sidebar will show which API is active
-   - Toggle "Use Real-Time Data" to switch between API and sample data
-
-## Running the Application
-
-### Start the App
-
-**Recommended for everyone:**
+Database commands are thin wrappers over the `ffpy-db` CLI:
 
 ```bash
-uv run streamlit run src/ffpy/app.py
+uv run ffpy-db --help
+uv run ffpy-db load --season 2023 --no-ftn --validate
+uv run ffpy-db collect-stats --season 2024 --start-week 1 --end-week 17
 ```
 
-The app opens automatically in your browser at `http://localhost:8501`
+## Features
 
-**Shortcuts:**
-- Windows: Double-click `run.bat`
-- Linux/macOS: `make run` (if make is installed)
+- Streamlit app: projections, player comparison, pick'em analyzer
+- Lineup optimizer (PuLP) for PPR / Half-PPR / Standard, superflex, custom rosters
+- Historical projection model (weighted recent performance)
+- ESPN + SportsDataIO integrations with automatic fallback
+- Local SQLite with nflverse play-by-play, FTN charting, and snap counts
 
-### Development Mode
-
-For auto-reload when you edit code:
-
-```bash
-uv run streamlit run src/ffpy/app.py --server.runOnSave=true
-```
-
-Or on Linux/macOS with make: `make dev`
-
-## Project Structure
+## Project structure
 
 ```
 FFPy/
-├── src/
-│   └── ffpy/
-│       ├── __init__.py              # Package initialization
-│       ├── app.py                   # Main Streamlit application
-│       ├── data.py                  # Data fetching and caching
-│       ├── config.py                # Environment configuration
-│       └── integrations/
-│           ├── __init__.py          # Integrations package
-│           ├── base.py              # Base API integration class
-│           ├── espn.py              # ESPN API integration
-│           └── sportsdata.py        # SportsDataIO integration
-├── .env.example                     # Environment template
-├── .gitignore                       # Git ignore rules
-├── pyproject.toml                   # Project dependencies and metadata
-├── Makefile                         # Build commands (Linux/macOS)
-├── install.bat                      # Windows installation script
-├── run.bat                          # Windows run script
-└── README.md                        # This file
+├── Makefile               # All dev/ops commands
+├── pyproject.toml         # uv-managed deps, console scripts
+├── scripts/
+│   └── bootstrap.sh       # First-time setup
+├── src/ffpy/
+│   ├── app.py             # Streamlit entry       → `ffpy`
+│   ├── cli.py             # Database CLI          → `ffpy-db`
+│   ├── mock.py            # Mock data generator
+│   ├── database.py        # SQLite wrapper
+│   ├── nflverse_loader.py # nflverse → DB
+│   ├── projections.py     # Historical projection model
+│   ├── optimizer.py       # Lineup optimization
+│   ├── scoring.py         # Scoring systems
+│   ├── integrations/      # ESPN, SportsDataIO
+│   ├── migrations/        # SQL schema migrations
+│   └── pages/             # Streamlit pages
+├── config/                # Scoring + roster presets (JSON)
+├── tests/                 # pytest suite
+├── notebooks/             # EDA notebooks
+├── examples/              # Scripted demos
+└── docs/                  # Extended guides
 ```
 
-## Usage
+## Configuration
 
-1. **Toggle Data Source**: Enable "Use Real-Time Data" for live projections or disable for sample data
-2. **Select Week**: Use the sidebar to choose an NFL week (1-18)
-3. **Filter by Position**: Choose a specific position (QB, RB, WR, TE) or view all positions
-4. **Adjust Display Count**: Use the slider to show between 5-50 players
-5. **View Statistics**: See position-specific stats like passing yards, rushing yards, receptions, etc.
-6. **Position Breakdown**: When viewing all positions, scroll down to see top 5 players per position
-7. **Check API Status**: The sidebar shows which API provider is currently active
-
-## Real-Time Data
-
-The app now supports **real-time fantasy football data** from multiple sources:
-
-### Supported APIs
-- **ESPN Fantasy API** (Free, no auth required)
-  - Default option, works immediately
-  - Unofficial API, may have rate limits
-
-- **SportsDataIO** (Paid, official)
-  - Free tier: 1000 API calls/month
-  - Includes official projections, stats, injuries
-  - More reliable than unofficial sources
-
-### Caching
-- API responses are cached for 1 hour (configurable in `.env`)
-- Reduces API calls and improves performance
-- Clear cache by restarting the app
-
-### Fallback System
-1. Tries configured API (SportsDataIO if set up)
-2. Falls back to ESPN if primary fails
-3. Uses sample data if all APIs fail
-
-## Command Reference
-
-### Universal Commands (Work Everywhere)
+Copy the template and edit:
 
 ```bash
-uv sync                                    # Install dependencies (one-time)
-uv run streamlit run src/ffpy/app.py       # Run the application
-uv run streamlit run src/ffpy/app.py --server.runOnSave=true  # Dev mode with auto-reload
+cp .env.example .env
 ```
 
-### Shortcuts (Optional)
+Key settings:
 
-**Windows:**
-- Double-click `install.bat` or `run.bat`
-
-**Linux/macOS (requires make):**
-```bash
-make install    # Install dependencies
-make run        # Run the application
-make dev        # Development mode
-make clean      # Remove build artifacts
-make help       # Show all make commands
 ```
-
-> **Recommendation:** Use the universal `uv` commands - they work everywhere and don't require make!
-
-## Development
-
-To extend this application:
-
-1. **Add more API providers**: Create new integrations in `src/ffpy/integrations/`
-   - Implement `BaseAPIIntegration` class
-   - Add configuration to `.env.example`
-   - Update `data.py` to support new provider
-
-2. **Add more positions**: Include DST, K positions
-   - Update position filters in integrations
-   - Modify display logic in `app.py`
-
-3. **Add database storage**: Store historical projections
-   - SQLite for local development
-   - PostgreSQL for production (Supabase/Neon)
-
-4. **Historical analysis**: Add charts and trends using Plotly or Altair
-5. **User authentication**: Add user accounts to save custom projections
-6. **Export functionality**: Allow users to export projections to CSV
-7. **Comparison tools**: Compare projections from multiple sources
-
-## Dependencies
-
-- **streamlit** >= 1.40.0 - Web application framework
-- **pandas** >= 2.2.0 - Data manipulation and analysis
-- **requests** >= 2.31.0 - HTTP library for API calls
-- **python-dotenv** >= 1.0.0 - Environment variable management
+API_PROVIDER=espn          # "espn" (free) or "sportsdata" (paid)
+NFL_SEASON=2024
+DATABASE_PATH=~/.ffpy/ffpy.db
+ESPN_LEAGUE_ID=            # Optional: ESPN league integration
+```
 
 ## Contributing
 
-This is a fun project for learning. Feel free to extend and modify as needed.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Test guidance lives in [TESTING.md](TESTING.md). Deeper documentation (database schema, optimizer internals, Streamlit pages) lives in [`docs/`](docs/).
 
 ## License
 
-MIT License - Feel free to use this for your fantasy football leagues!
-
-## Future Enhancements
-
-- ✅ ~~Integration with real fantasy football APIs~~ (DONE)
-- Database storage for historical projections
-- Machine learning projection models
-- Weekly accuracy tracking against actual results
-- Player news and injury updates integration
-- Customizable scoring systems (PPR, Standard, Half-PPR)
-- Draft helper mode with ADP rankings
-- Waiver wire recommendations
-- Automated data refresh with scheduled jobs
-- Trade analyzer
-- Lineup optimizer
+MIT.

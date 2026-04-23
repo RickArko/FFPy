@@ -44,7 +44,7 @@ def main():
             print(f"\nTotal TD passes: {len(touchdowns)}")
         else:
             print(f"\nNo data found for {player_name} in {season}")
-            print("Try loading data first: python scripts/populate_plays.py --season 2024")
+            print("Try loading data first: make db.load SEASON=2024")
 
         # Example 2: Red zone efficiency for a team
         print("\n\nExample 2: Team Red Zone Efficiency")

@@ -523,6 +523,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "ipykernel" },
     { name = "nflreadpy" },
     { name = "pandas" },
     { name = "plotly" },
@@ -550,6 +551,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.4.3" },
+    { name = "ipykernel", specifier = ">=6.29.0" },
     { name = "nflreadpy", git = "https://github.com/nflverse/nflreadpy" },
     { name = "pandas", specifier = ">=2.2.0" },
     { name = "plotly", specifier = ">=6.5.0" },
