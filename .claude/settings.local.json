@@ -11,7 +11,19 @@
       "Bash(curl:*)",
       "Bash(python:*)",
       "WebSearch",
-      "WebFetch(domain:nflreadr.nflverse.com)"
+      "WebFetch(domain:nflreadr.nflverse.com)",
+      "Bash(git *)",
+      "Bash(gh auth *)",
+      "Bash(gh api *)",
+      "Bash(uv pip *)",
+      "Bash(uv run *)",
+      "Bash(chmod +x /home/ricka/Git/FFPy/scripts/bootstrap.sh)",
+      "Bash(make help *)",
+      "Bash(bash -n /home/ricka/Git/FFPy/scripts/bootstrap.sh)",
+      "Bash(make install *)",
+      "Bash(grep -v '\\\\.pub$')",
+      "Bash(ssh -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new git@github.com)",
+      "Bash(sort -u echo \"---\" ls /home/ricka/Git/FFPy/environment.y*)"
     ]
   }
 }

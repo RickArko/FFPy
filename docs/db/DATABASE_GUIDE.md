@@ -88,7 +88,7 @@ Output shows:
 ### 2. Launch Streamlit App
 
 ```bash
-uv run streamlit run src/ffpy/app.py
+make run
 ```
 
 Then:
@@ -205,7 +205,12 @@ CACHE_TTL=3600
 
 **Check**: `~/.ffpy/ffpy.db` exists
 
-**Regenerate**: Run `uv run python scripts/generate_mock_2024_data.py`
+**Regenerate**:
+```bash
+make db.mock SEASON=2024        # realistic mock data
+# or
+make db.load SEASON=2024        # real nflverse play-by-play
+```
 
 ## Future Enhancements
 
@@ -223,14 +228,13 @@ src/ffpy/
 ├── projections.py           # Historical projection model
 ├── data.py                  # Updated with historical support
 ├── app.py                   # Streamlit UI with model toggle
+├── cli.py                   # ffpy-db CLI (migrate/load/update/mock/...)
+├── mock.py                  # Mock data generator
 └── migrations/
     └── 001_initial_schema.sql   # Database schema
 
-scripts/
-└── generate_mock_2024_data.py   # Mock data generator
-
 demo_projections.py          # Demo script
-DATABASE_GUIDE.md           # This file
+docs/db/DATABASE_GUIDE.md    # This file
 ```
 
 ## Performance
@@ -255,4 +259,4 @@ DATABASE_GUIDE.md           # This file
 
 **Demo**: `uv run python demo_projections.py`
 
-**Web App**: `uv run streamlit run src/ffpy/app.py` → http://localhost:8501
+**Web App**: `make run` → http://localhost:8501

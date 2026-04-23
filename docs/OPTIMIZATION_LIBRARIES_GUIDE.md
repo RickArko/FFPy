@@ -95,9 +95,9 @@ uv add pyomo
 
 # With solver (GLPK or CBC)
 uv add pyomo glpk
-# OR
-conda install -c conda-forge pyomo glpk
 ```
+
+The system-level `glpk` solver binary is installed separately — see *Optional: Better Solvers* below for `apt`/`brew` commands.
 
 **Familiarity for Data Scientists:**
 - 🟡 **Moderately Familiar**: More abstract, resembles TensorFlow 1.x graph building
@@ -533,14 +533,11 @@ For faster solve times (optional):
 
 **GLPK (open-source):**
 ```bash
-# Windows (via conda)
-conda install -c conda-forge glpk
+# Linux / Windows (WSL)
+sudo apt-get install glpk-utils
 
 # Mac
 brew install glpk
-
-# Linux
-sudo apt-get install glpk-utils
 ```
 
 **CPLEX (academic license - IBM):**

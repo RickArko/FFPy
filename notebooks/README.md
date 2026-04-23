@@ -4,7 +4,7 @@ This directory contains Jupyter notebooks for exploratory data analysis and adva
 
 ## Setup
 
-Install analysis dependencies:
+Install analysis dependencies (or just run `make notebook`):
 
 ```bash
 uv sync --group analysis
@@ -52,18 +52,18 @@ Comprehensive exploratory data analysis of the FFPy database:
 
 ## Running the Notebooks
 
-### Option 1: Jupyter Notebook
+### Option 1: Makefile (recommended)
 
 ```bash
-uv run jupyter notebook
+make notebook
 ```
 
-Then navigate to `notebooks/eda/Players.ipynb` in the browser interface.
+Equivalent to `uv run --group analysis jupyter lab`. Navigate to `notebooks/eda/Players.ipynb` in the browser.
 
-### Option 2: JupyterLab (Recommended)
+### Option 2: Jupyter Notebook
 
 ```bash
-uv run jupyter lab
+uv run --group analysis jupyter notebook
 ```
 
 ### Option 3: VS Code
@@ -160,7 +160,9 @@ uv sync --group analysis
 
 Make sure the database is populated:
 ```bash
-uv run python scripts/generate_mock_2024_data.py
+make db.mock SEASON=2024        # realistic mock data
+# or
+make db.load SEASON=2024        # real nflverse play-by-play
 ```
 
 ### Kernel crashes
@@ -184,4 +186,4 @@ To add a new notebook:
 
 ---
 
-**Quick Start**: `uv sync --group analysis && uv run jupyter lab`
+**Quick Start**: `make notebook`

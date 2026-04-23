@@ -73,14 +73,10 @@ The Player Comparison UI is a comprehensive Streamlit application that allows yo
 ### Starting the App
 
 ```bash
-# Navigate to project directory
-cd C:\GIT\Fun\FFPy
-
-# Run Streamlit app
-uv run streamlit run src/ffpy/app.py
+make run
 ```
 
-The app will open in your default browser at `http://localhost:8501`
+The app opens in your default browser at `http://localhost:8501`.
 
 ### Navigation
 
@@ -241,7 +237,9 @@ if position == 'QB':
 ### "No projection data available"
 **Solution:** Make sure you've collected historical stats:
 ```bash
-uv run python scripts/collect_historical_stats.py
+make db.stats SEASON=2024                         # real ESPN stats
+# or for offline/dev:
+make db.mock SEASON=2024                          # realistic mock data
 ```
 
 ### "No historical data available in database"

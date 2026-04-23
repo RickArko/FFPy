@@ -10,12 +10,14 @@ Follow [QUICKSTART.md](QUICKSTART.md) to get the app running on your machine.
 
 **Summary:**
 ```bash
-# Install
-uv sync
+# First time: installs uv, deps, .env, DB schema
+make bootstrap
 
 # Run
-uv run streamlit run src/ffpy/app.py
+make run
 ```
+
+Run `make help` to see every target. Windows users: run from **WSL**.
 
 ### 2. Make Your Changes
 
@@ -27,12 +29,17 @@ Edit the code using any text editor:
 
 ### 3. Test Your Changes
 
-Run the app to see your changes:
+Run the app with auto-reload so your edits are picked up on save:
+
 ```bash
-uv run streamlit run src/ffpy/app.py
+make dev
 ```
 
-The app auto-reloads when you save files!
+Run the test suite before opening a PR:
+
+```bash
+make check   # ruff + pytest
+```
 
 ## Project Structure (Where to Edit)
 
@@ -161,7 +168,7 @@ Build your own projections:
 
 1. **Run the app:**
    ```bash
-   uv run streamlit run src/ffpy/app.py
+   make run
    ```
 
 2. **Check all features still work:**
@@ -169,6 +176,11 @@ Build your own projections:
    - Change weeks
    - Change positions
    - Check metrics update
+
+3. **Run the automated suite:**
+   ```bash
+   make check
+   ```
 
 ### Advanced Testing
 

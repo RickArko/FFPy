@@ -18,10 +18,14 @@ dependencies = [
     "plotly>=6.5.0",
     "nflreadpy",
     "tqdm>=4.67.1",
+    # Pin ipykernel to 6.x — 7.x has protocol changes that hang notebooks
+    # with some jupyter_client/jupyterlab combinations.
+    "ipykernel>=6.29.5,<7",
 ]
 
 [project.scripts]
 ffpy = "ffpy.app:main"
+ffpy-db = "ffpy.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.9.18,<0.10.0"]
@@ -53,3 +57,17 @@ quote-style = "double"
 
 [tool.uv.sources]
 nflreadpy = { git = "https://github.com/nflverse/nflreadpy" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["src/ffpy"]
+branch = true
+omit = ["*/migrations/*", "*/pages/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+precision = 1
