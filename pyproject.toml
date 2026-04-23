@@ -18,7 +18,9 @@ dependencies = [
     "plotly>=6.5.0",
     "nflreadpy",
     "tqdm>=4.67.1",
-    "ipykernel>=6.29.0",
+    # Pin ipykernel to 6.x — 7.x has protocol changes that hang notebooks
+    # with some jupyter_client/jupyterlab combinations.
+    "ipykernel>=6.29.5,<7",
 ]
 
 [project.scripts]
