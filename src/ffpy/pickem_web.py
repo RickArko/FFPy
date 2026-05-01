@@ -9,11 +9,18 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Literal, Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from ffpy.auth import (
+    AuthenticatedUser,
+    TokenVerificationError,
+    TokenVerifier,
+    build_token_verifier_from_config,
+)
 from ffpy.config import Config
 from ffpy.database import FFPyDatabase
 from ffpy.pickem_backtest import (
@@ -25,6 +32,16 @@ from ffpy.pickem_backtest import (
     UnderdogTargeted,
     WeekResult,
     WinProbBlend,
+)
+from ffpy.repositories.base import HistoricalGamesRepository
+from ffpy.repositories.sqlite_games import SQLiteHistoricalGamesRepository
+from ffpy.usage_logging import (
+    NoopUsageEventLogger,
+    SQLiteUsageEventLogger,
+    UsageEvent,
+    UsageEventLogger,
+    encode_strategy_names,
+    hash_identifier,
 )
 
 
@@ -262,8 +279,8 @@ def _frame_records(frame) -> List[Dict[str, Any]]:
     return json.loads(frame.to_json(orient="records"))
 
 
-def _coverage_payload(db: FFPyDatabase, season_type: str) -> Dict[str, Any]:
-    coverage = db.get_data_coverage(season_type=season_type)
+def _coverage_payload(repository: HistoricalGamesRepository, season_type: str) -> Dict[str, Any]:
+    coverage = repository.get_data_coverage(season_type=season_type)
     records = _frame_records(coverage)
 
     seasons = sorted({int(row["season"]) for row in records})
@@ -309,11 +326,40 @@ def _coverage_payload(db: FFPyDatabase, season_type: str) -> Dict[str, Any]:
     }
 
 
-def create_app(db_path: Optional[str] = None) -> FastAPI:
+def _estimate_cost_units(
+    *,
+    season_start: int,
+    season_end: int,
+    week_start: int,
+    week_end: int,
+    strategy_count: int,
+) -> int:
+    seasons = (season_end - season_start) + 1
+    weeks = (week_end - week_start) + 1
+    return max(1, seasons * weeks * strategy_count)
+
+
+def create_app(
+    db_path: Optional[str] = None,
+    *,
+    require_auth: Optional[bool] = None,
+    auth_verifier: Optional[TokenVerifier] = None,
+    usage_logger: Optional[UsageEventLogger] = None,
+) -> FastAPI:
     """App factory for production use and tests."""
 
     resolved_db_path = db_path or Config.DATABASE_PATH
     static_dir = Path(__file__).parent / "web" / "pickem_tester"
+    auth_enabled = Config.WEB_AUTH_ENABLED if require_auth is None else require_auth
+    resolved_auth_verifier = auth_verifier or build_token_verifier_from_config()
+    if auth_enabled and resolved_auth_verifier is None:
+        raise ValueError("Auth is enabled but no token verifier is configured")
+    resolved_usage_logger = usage_logger or (
+        SQLiteUsageEventLogger(resolved_db_path)
+        if resolved_db_path
+        else NoopUsageEventLogger()
+    )
+    bearer = HTTPBearer(auto_error=False)
 
     app = FastAPI(
         title="FFPy Pick'em Strategy Tester",
@@ -321,13 +367,117 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         description="FastAPI backend and Vue frontend for historical NFL pick'em backtests.",
     )
     app.state.db_path = resolved_db_path
+    app.state.auth_enabled = auth_enabled
 
-    def get_db() -> Iterator[FFPyDatabase]:
+    def get_repository() -> Iterator[SQLiteHistoricalGamesRepository]:
         db = FFPyDatabase(db_path=resolved_db_path)
+        repository = SQLiteHistoricalGamesRepository(db)
         try:
-            yield db
+            yield repository
         finally:
-            db.close()
+            repository.close()
+
+    def _build_usage_event(
+        *,
+        request: Request,
+        route: str,
+        event_type: str,
+        success: bool,
+        strategy_names: List[str],
+        cost_units: int,
+        user: Optional[AuthenticatedUser] = None,
+        denied_reason: Optional[str] = None,
+    ) -> UsageEvent:
+        client_ip = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+        return UsageEvent(
+            route=route,
+            event_type=event_type,
+            success=success,
+            user_id=user.user_id if user else None,
+            email=user.email if user else None,
+            denied_reason=denied_reason,
+            strategy_names_json=encode_strategy_names(strategy_names),
+            cost_units=cost_units,
+            ip_hash=hash_identifier(client_ip),
+            user_agent_hash=hash_identifier(user_agent),
+            request_fingerprint=hash_identifier(
+                f"{client_ip}:{user_agent}:{route}:{encode_strategy_names(strategy_names)}"
+            ),
+        )
+
+    def _log_event(event: UsageEvent) -> None:
+        resolved_usage_logger.log_event(event)
+
+    def _require_verified_user(
+        request: Request,
+        credentials: Optional[HTTPAuthorizationCredentials],
+        *,
+        route: str,
+        event_type: str,
+        strategy_names: List[str],
+        cost_units: int,
+    ) -> Optional[AuthenticatedUser]:
+        if not auth_enabled:
+            return None
+
+        if credentials is None:
+            _log_event(
+                _build_usage_event(
+                    request=request,
+                    route=route,
+                    event_type=event_type,
+                    success=False,
+                    strategy_names=strategy_names,
+                    cost_units=cost_units,
+                    denied_reason="missing_bearer_token",
+                )
+            )
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        assert resolved_auth_verifier is not None
+        try:
+            user = resolved_auth_verifier.verify_access_token(credentials.credentials)
+        except TokenVerificationError as exc:
+            _log_event(
+                _build_usage_event(
+                    request=request,
+                    route=route,
+                    event_type=event_type,
+                    success=False,
+                    strategy_names=strategy_names,
+                    cost_units=cost_units,
+                    denied_reason="invalid_bearer_token",
+                )
+            )
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+        if not user.email_confirmed:
+            _log_event(
+                _build_usage_event(
+                    request=request,
+                    route=route,
+                    event_type=event_type,
+                    success=False,
+                    strategy_names=strategy_names,
+                    cost_units=cost_units,
+                    user=user,
+                    denied_reason="email_not_verified",
+                )
+            )
+            raise HTTPException(status_code=403, detail="Verified email required")
+
+        return user
+
+    def _get_current_user(
+        credentials: Optional[HTTPAuthorizationCredentials],
+    ) -> Optional[AuthenticatedUser]:
+        if credentials is None or resolved_auth_verifier is None:
+            return None
+        try:
+            return resolved_auth_verifier.verify_access_token(credentials.credentials)
+        except TokenVerificationError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     app.mount("/assets", StaticFiles(directory=str(static_dir)), name="assets")
 
@@ -337,7 +487,22 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/health")
     def health() -> Dict[str, Any]:
-        return {"status": "ok", "database_path": resolved_db_path}
+        return {
+            "status": "ok",
+            "database_path": resolved_db_path,
+            "auth_required": auth_enabled,
+        }
+
+    @app.get("/api/auth/me")
+    def auth_me(
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+    ) -> Dict[str, Any]:
+        user = _get_current_user(credentials)
+        return {
+            "authenticated": user is not None,
+            "auth_required": auth_enabled,
+            "user": user.to_dict() if user else None,
+        }
 
     @app.get("/api/strategies")
     def strategies() -> Dict[str, Any]:
@@ -351,24 +516,42 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     @app.get("/api/coverage")
     def coverage(
         season_type: str = "REG",
-        db: FFPyDatabase = Depends(get_db),
+        repository: SQLiteHistoricalGamesRepository = Depends(get_repository),
     ) -> Dict[str, Any]:
         normalized = season_type.upper()
         if normalized not in {"REG", "POST", "PRE"}:
             raise HTTPException(status_code=400, detail="season_type must be REG, POST, or PRE")
-        payload = _coverage_payload(db, normalized)
+        payload = _coverage_payload(repository, normalized)
         payload["season_type"] = normalized
         return payload
 
     @app.post("/api/backtests/run")
     def run_backtest(
+        http_request: Request,
         request: BacktestRunRequest,
-        db: FFPyDatabase = Depends(get_db),
+        repository: SQLiteHistoricalGamesRepository = Depends(get_repository),
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
     ) -> Dict[str, Any]:
         _validate_window(request)
+        strategy_names = [request.strategy.name]
+        cost_units = _estimate_cost_units(
+            season_start=request.season_start,
+            season_end=request.season_end,
+            week_start=request.week_start,
+            week_end=request.week_end,
+            strategy_count=1,
+        )
+        current_user = _require_verified_user(
+            http_request,
+            credentials,
+            route="/api/backtests/run",
+            event_type="backtest_run",
+            strategy_names=strategy_names,
+            cost_units=cost_units,
+        )
         try:
             strategy = _build_strategy(request.strategy)
-            backtester = Backtester(db)
+            backtester = Backtester(repository)
             result = backtester.run(
                 strategy,
                 season_start=request.season_start,
@@ -386,6 +569,18 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         summary = result.to_summary_dict()
         summary["run_id"] = result.run_id
 
+        _log_event(
+            _build_usage_event(
+                request=http_request,
+                route="/api/backtests/run",
+                event_type="backtest_run",
+                success=True,
+                strategy_names=strategy_names,
+                cost_units=cost_units,
+                user=current_user,
+            )
+        )
+
         return {
             "summary": summary,
             "weekly_results": [
@@ -395,16 +590,34 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
     @app.post("/api/backtests/compare")
     def compare_backtests(
+        http_request: Request,
         request: BacktestCompareRequest,
-        db: FFPyDatabase = Depends(get_db),
+        repository: SQLiteHistoricalGamesRepository = Depends(get_repository),
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
     ) -> Dict[str, Any]:
         _validate_window(request)
         if len(request.strategies) == 0:
             raise HTTPException(status_code=400, detail="Select at least one strategy to compare")
 
+        strategy_names = [strategy.name for strategy in request.strategies]
+        cost_units = _estimate_cost_units(
+            season_start=request.season_start,
+            season_end=request.season_end,
+            week_start=request.week_start,
+            week_end=request.week_end,
+            strategy_count=len(request.strategies),
+        )
+        current_user = _require_verified_user(
+            http_request,
+            credentials,
+            route="/api/backtests/compare",
+            event_type="backtest_compare",
+            strategy_names=strategy_names,
+            cost_units=cost_units,
+        )
         try:
             strategies = [_build_strategy(strategy) for strategy in request.strategies]
-            leaderboard = Backtester(db).compare(
+            leaderboard = Backtester(repository).compare(
                 strategies,
                 season_start=request.season_start,
                 season_end=request.season_end,
@@ -415,6 +628,18 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        _log_event(
+            _build_usage_event(
+                request=http_request,
+                route="/api/backtests/compare",
+                event_type="backtest_compare",
+                success=True,
+                strategy_names=strategy_names,
+                cost_units=cost_units,
+                user=current_user,
+            )
+        )
 
         return {
             "leaderboard": _frame_records(leaderboard),

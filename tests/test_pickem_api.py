@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from ffpy.auth import SupabaseTokenVerifier
 from ffpy.database import FFPyDatabase
 from ffpy.pickem_web import create_app
+from ffpy.usage_logging import InMemoryUsageEventLogger
 
 
 @pytest.fixture
@@ -44,6 +48,61 @@ def client(api_db: FFPyDatabase) -> TestClient:
     app = create_app(db_path=str(api_db.db_path))
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def auth_secret() -> str:
+    return "super-secret-test-key-with-32-bytes"
+
+
+@pytest.fixture
+def auth_verifier(auth_secret: str) -> SupabaseTokenVerifier:
+    return SupabaseTokenVerifier(
+        jwt_secret=auth_secret,
+        audience="authenticated",
+        fetch_user_on_verify=False,
+    )
+
+
+@pytest.fixture
+def usage_logger() -> InMemoryUsageEventLogger:
+    return InMemoryUsageEventLogger()
+
+
+@pytest.fixture
+def auth_client(
+    api_db: FFPyDatabase,
+    auth_verifier: SupabaseTokenVerifier,
+    usage_logger: InMemoryUsageEventLogger,
+) -> TestClient:
+    app = create_app(
+        db_path=str(api_db.db_path),
+        require_auth=True,
+        auth_verifier=auth_verifier,
+        usage_logger=usage_logger,
+    )
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def _make_access_token(
+    secret: str,
+    *,
+    email_confirmed: bool,
+    role: str = "authenticated",
+) -> str:
+    now = datetime.now(tz=timezone.utc)
+    claims = {
+        "sub": "72e6cadc-8476-4db1-9d68-b5c0a1982f0f",
+        "email": "demo@example.com",
+        "role": role,
+        "aud": "authenticated",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=30)).timestamp()),
+    }
+    if email_confirmed:
+        claims["email_confirmed_at"] = now.isoformat()
+    return jwt.encode(claims, secret, algorithm="HS256")
 
 
 def test_root_serves_frontend(client: TestClient):
@@ -136,3 +195,83 @@ def test_run_backtest_rejects_unknown_strategy(client: TestClient):
     )
     assert response.status_code == 400
     assert "Unknown strategy" in response.json()["detail"]
+
+
+def test_auth_me_reports_auth_requirement(auth_client: TestClient):
+    response = auth_client.get("/api/auth/me")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["auth_required"] is True
+    assert payload["authenticated"] is False
+
+
+def test_protected_run_requires_auth_when_enabled(
+    auth_client: TestClient,
+    usage_logger: InMemoryUsageEventLogger,
+):
+    response = auth_client.post(
+        "/api/backtests/run",
+        json={
+            "strategy": {"name": "AllFavorites", "params": {}},
+            "season_start": 2022,
+            "season_end": 2022,
+            "week_start": 1,
+            "week_end": 2,
+            "season_type": "REG",
+            "require_full_coverage": True,
+            "persist": False,
+        },
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required"
+    assert usage_logger.events[-1].denied_reason == "missing_bearer_token"
+
+
+def test_protected_run_requires_verified_email(
+    auth_client: TestClient,
+    auth_secret: str,
+    usage_logger: InMemoryUsageEventLogger,
+):
+    token = _make_access_token(auth_secret, email_confirmed=False)
+    response = auth_client.post(
+        "/api/backtests/run",
+        json={
+            "strategy": {"name": "AllFavorites", "params": {}},
+            "season_start": 2022,
+            "season_end": 2022,
+            "week_start": 1,
+            "week_end": 2,
+            "season_type": "REG",
+            "require_full_coverage": True,
+            "persist": False,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Verified email required"
+    assert usage_logger.events[-1].denied_reason == "email_not_verified"
+
+
+def test_verified_user_can_run_protected_backtest(
+    auth_client: TestClient,
+    auth_secret: str,
+    usage_logger: InMemoryUsageEventLogger,
+):
+    token = _make_access_token(auth_secret, email_confirmed=True)
+    response = auth_client.post(
+        "/api/backtests/run",
+        json={
+            "strategy": {"name": "AllFavorites", "params": {}},
+            "season_start": 2022,
+            "season_end": 2022,
+            "week_start": 1,
+            "week_end": 2,
+            "season_type": "REG",
+            "require_full_coverage": True,
+            "persist": False,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["summary"]["correct"] == 5
+    assert usage_logger.events[-1].success is True

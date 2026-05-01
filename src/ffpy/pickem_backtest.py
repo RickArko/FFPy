@@ -22,6 +22,8 @@ from typing import Any, Dict, List, Optional, Sequence
 import pandas as pd
 
 from ffpy.database import FFPyDatabase
+from ffpy.repositories.base import HistoricalGamesRepository
+from ffpy.repositories.sqlite_games import SQLiteHistoricalGamesRepository
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -440,8 +442,13 @@ def _grade(pick: Pick, row: pd.Series) -> Optional[int]:
 class Backtester:
     """Run pick'em strategies over historical (season, week) windows."""
 
-    def __init__(self, db: FFPyDatabase):
-        self.db = db
+    def __init__(self, repository: HistoricalGamesRepository | FFPyDatabase):
+        if isinstance(repository, FFPyDatabase):
+            self.repository: HistoricalGamesRepository = (
+                SQLiteHistoricalGamesRepository(repository)
+            )
+        else:
+            self.repository = repository
 
     def run(
         self,
@@ -477,7 +484,7 @@ class Backtester:
 
         weekly: List[WeekResult] = []
         for season in range(season_start, season_end + 1):
-            games = self.db.get_historical_games(
+            games = self.repository.get_historical_games(
                 season=season, season_type=season_type, finished_only=True
             )
             if games.empty:
@@ -552,7 +559,7 @@ class Backtester:
         week_end: int,
         season_type: str,
     ) -> None:
-        cov = self.db.get_data_coverage(
+        cov = self.repository.get_data_coverage(
             season_start=season_start, season_end=season_end, season_type=season_type
         )
         if cov.empty:
@@ -590,7 +597,12 @@ class Backtester:
         )
 
     def _persist(self, r: BacktestResult, note: Optional[str] = None) -> int:
-        cur = self.db.conn.cursor()
+        conn = getattr(self.repository, "conn", None)
+        if conn is None:
+            raise ValueError(
+                "persist=True requires a repository with persistence support"
+            )
+        cur = conn.cursor()
         cur.execute(
             """INSERT INTO backtest_runs (
                 strategy_name, strategy_params,
@@ -639,5 +651,5 @@ class Backtester:
                 pick_rows,
             )
 
-        self.db.conn.commit()
+        conn.commit()
         return run_id
