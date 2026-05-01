@@ -9,6 +9,8 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "streamlit>=1.40.0",
+    "fastapi>=0.116.1",
+    "uvicorn>=0.35.0",
     "pandas>=2.2.0",
     "requests>=2.31.0",
     "python-dotenv>=1.0.0",
@@ -26,6 +28,7 @@ dependencies = [
 [project.scripts]
 ffpy = "ffpy.app:main"
 ffpy-db = "ffpy.cli:main"
+ffpy-pickem-web = "ffpy.pickem_web:main"
 
 [build-system]
 requires = ["uv_build>=0.9.18,<0.10.0"]
@@ -34,6 +37,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "coverage>=7.13.0",
+    "httpx>=0.28.1",
     "pytest>=9.0.2",
     "ruff>=0.14.10",
 ]

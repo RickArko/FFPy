@@ -3,7 +3,7 @@
 # See `make help` for all targets.
 
 .DEFAULT_GOAL := help
-.PHONY: help bootstrap install run dev notebook test cov lint fmt check \
+.PHONY: help bootstrap install run dev pickem-web notebook test cov lint fmt check \
         db.migrate db.load db.update db.stats db.mock clean clean-all
 
 # Override on the CLI, e.g. `make db.load SEASON=2023`
@@ -37,6 +37,9 @@ run: ## Start the Streamlit app (PORT=8501)
 
 dev: ## Start the app with auto-reload
 	$(UV) run streamlit run src/ffpy/app.py --server.port $(PORT) --server.runOnSave=true
+
+pickem-web: ## Start the FastAPI + Vue pick'em tester (PORT=8000 recommended)
+	.venv/bin/python -m ffpy.pickem_web --port $(PORT)
 
 notebook: ## Launch Jupyter Lab (analysis dep group)
 	$(UV) run --group analysis jupyter lab

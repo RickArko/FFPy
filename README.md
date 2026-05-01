@@ -1,6 +1,6 @@
 # FFPy — Fantasy Football Python
 
-A Streamlit app and Python toolkit for fantasy football projections, lineup optimization, and play-by-play analytics. Pulls data from [nflverse](https://nflverse.github.io/), ESPN, or SportsDataIO and runs everything locally against a SQLite database.
+A Streamlit app and Python toolkit for fantasy football projections, lineup optimization, play-by-play analytics, and pick'em backtesting. Pulls data from [nflverse](https://nflverse.github.io/), ESPN, or SportsDataIO and runs everything locally against a SQLite database.
 
 ## Prerequisites
 
@@ -14,6 +14,7 @@ Everything else (`uv`, Python 3.13, the virtualenv, dependencies, DB schema) is 
 ```bash
 make bootstrap   # one-time: installs uv, deps, .env, DB schema
 make run         # starts Streamlit on http://localhost:8501
+make pickem-web PORT=8000   # starts the FastAPI + Vue pick'em tester
 ```
 
 See [QUICKSTART.md](QUICKSTART.md) for the two-minute walkthrough.
@@ -27,6 +28,7 @@ See [QUICKSTART.md](QUICKSTART.md) for the two-minute walkthrough.
 | `make bootstrap`            | First-time setup (idempotent)                    |
 | `make install`              | `uv sync` only                                   |
 | `make run` / `make dev`     | Launch Streamlit (dev = auto-reload on save)     |
+| `make pickem-web`           | Launch the FastAPI + Vue pick'em strategy tester |
 | `make test` / `make cov`    | Pytest, optionally with coverage                 |
 | `make lint` / `make fmt`    | Ruff lint / format                               |
 | `make check`                | `lint` + `test` (CI entry point)                 |
@@ -49,6 +51,7 @@ uv run ffpy-db collect-stats --season 2024 --start-week 1 --end-week 17
 ## Features
 
 - Streamlit app: projections, player comparison, pick'em analyzer
+- FastAPI + Vue pick'em strategy tester for historical backtests and strategy comparison
 - Lineup optimizer (PuLP) for PPR / Half-PPR / Standard, superflex, custom rosters
 - Historical projection model (weighted recent performance)
 - ESPN + SportsDataIO integrations with automatic fallback
@@ -64,6 +67,7 @@ FFPy/
 │   └── bootstrap.sh       # First-time setup
 ├── src/ffpy/
 │   ├── app.py             # Streamlit entry       → `ffpy`
+│   ├── pickem_web.py      # FastAPI web app       → `ffpy-pickem-web`
 │   ├── cli.py             # Database CLI          → `ffpy-db`
 │   ├── mock.py            # Mock data generator
 │   ├── database.py        # SQLite wrapper
@@ -73,7 +77,8 @@ FFPy/
 │   ├── scoring.py         # Scoring systems
 │   ├── integrations/      # ESPN, SportsDataIO
 │   ├── migrations/        # SQL schema migrations
-│   └── pages/             # Streamlit pages
+│   ├── pages/             # Streamlit pages
+│   └── web/               # Static assets for the pick'em tester UI
 ├── config/                # Scoring + roster presets (JSON)
 ├── tests/                 # pytest suite
 ├── notebooks/             # EDA notebooks
@@ -100,7 +105,7 @@ ESPN_LEAGUE_ID=            # Optional: ESPN league integration
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Test guidance lives in [TESTING.md](TESTING.md). Deeper documentation (database schema, optimizer internals, Streamlit pages) lives in [`docs/`](docs/).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Test guidance lives in [TESTING.md](TESTING.md). Deeper documentation (database schema, optimizer internals, Streamlit pages, and the Supabase deployment/auth plan) lives in [`docs/`](docs/), including [docs/security/SUPABASE_HARDENED_IMPLEMENTATION_PLAN.md](docs/security/SUPABASE_HARDENED_IMPLEMENTATION_PLAN.md).
 
 ## License
 
