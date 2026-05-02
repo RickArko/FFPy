@@ -1,11 +1,11 @@
 """Database operations for FFPy - Focus on historical actual stats."""
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+from typing import Dict, List, Optional
+
 import pandas as pd
-from datetime import datetime, date
-import os
 
 
 class FFPyDatabase:
@@ -470,7 +470,7 @@ class FFPyDatabase:
                     batch_inserted = len(batch)
                     inserted += batch_inserted
                     pbar.update(batch_inserted)
-                except Exception as e:
+                except Exception:
                     # If batch fails (likely duplicates), try row by row
                     batch_skipped = 0
                     for _, row in batch.iterrows():
@@ -548,14 +548,14 @@ class FFPyDatabase:
                     batch_inserted = len(batch)
                     inserted += batch_inserted
                     pbar.update(batch_inserted)
-                except:
+                except Exception:
                     # Skip duplicates
                     for _, row in batch.iterrows():
                         try:
                             row_df = row.to_frame().T
                             row_df.to_sql("ftn_charting", self.conn, if_exists="append", index=False)
                             inserted += 1
-                        except:
+                        except Exception:
                             pass
                         pbar.update(1)
 
@@ -620,14 +620,14 @@ class FFPyDatabase:
                     batch_inserted = len(batch)
                     inserted += batch_inserted
                     pbar.update(batch_inserted)
-                except:
+                except Exception:
                     # Skip duplicates
                     for _, row in batch.iterrows():
                         try:
                             row_df = row.to_frame().T
                             row_df.to_sql("snap_counts", self.conn, if_exists="append", index=False)
                             inserted += 1
-                        except:
+                        except Exception:
                             pass
                         pbar.update(1)
 
@@ -902,7 +902,7 @@ class FFPyDatabase:
         Returns:
             Dictionary of red zone stats
         """
-        query = f"""
+        query = """
             SELECT
                 COUNT(*) as plays,
                 SUM(CASE WHEN rusher_player_name = ? THEN 1 ELSE 0 END) as rushes,

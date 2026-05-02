@@ -49,7 +49,6 @@ from ffpy.optimizer import (
     RosterConstraints,
 )
 
-
 ROSTER_PRESETS = {
     "skill-only": RosterConstraints.no_kicker_dst,
     "standard": RosterConstraints.standard,

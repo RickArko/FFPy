@@ -24,7 +24,7 @@ def main():
     model = HistoricalProjectionModel(db=db)
     projections = model.generate_projections(season=2024, week=18, lookback_weeks=4)
     print(f"    Players projected: {len(projections)}")
-    print(f"    Using 4-week lookback with 60% recent weight")
+    print("    Using 4-week lookback with 60% recent weight")
 
     # Top 5 projections
     print("\n[3] Top 5 Projected Players:")

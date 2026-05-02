@@ -7,9 +7,9 @@ optimal fantasy football lineup given a set of players and projections.
 
 from ffpy.optimizer import (
     LineupOptimizer,
-    RosterConstraints,
     Player,
     PlayerStatus,
+    RosterConstraints,
 )
 
 
@@ -89,8 +89,8 @@ def example_2_player_locks():
     result = optimizer.optimize(players)
 
     print(optimizer.analyze_lineup(result))
-    print(f"\nNote: Josh Allen and Travis Kelce are FORCED to start")
-    print(f"Note: Christian McCaffrey is FORCED to sit (despite high projection)")
+    print("\nNote: Josh Allen and Travis Kelce are FORCED to start")
+    print("Note: Christian McCaffrey is FORCED to sit (despite high projection)")
     print()
 
 
@@ -120,8 +120,8 @@ def example_3_injured_players():
     result = optimizer.optimize(players)
 
     print(optimizer.analyze_lineup(result))
-    print(f"\nNote: Josh Allen (INJURED) and CeeDee Lamb (OUT) are automatically excluded")
-    print(f"Note: Austin Ekeler (QUESTIONABLE) is still eligible to play")
+    print("\nNote: Josh Allen (INJURED) and CeeDee Lamb (OUT) are automatically excluded")
+    print("Note: Austin Ekeler (QUESTIONABLE) is still eligible to play")
     print()
 
 
@@ -162,10 +162,10 @@ def example_4_team_stack_limits():
     for player in result.starters:
         team_counts[player.team] = team_counts.get(player.team, 0) + 1
 
-    print(f"\nTeam distribution:")
+    print("\nTeam distribution:")
     for team, count in sorted(team_counts.items()):
         print(f"  {team}: {count} player(s)")
-    print(f"\nNote: No team has more than 2 players (stack limit enforced)")
+    print("\nNote: No team has more than 2 players (stack limit enforced)")
     print()
 
 
@@ -194,7 +194,7 @@ def example_5_no_kicker_dst():
     result = optimizer.optimize(players)
 
     print(optimizer.analyze_lineup(result))
-    print(f"\nNote: Only skill positions (QB, RB, WR, TE) are selected")
+    print("\nNote: Only skill positions (QB, RB, WR, TE) are selected")
     print()
 
 

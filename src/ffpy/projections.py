@@ -5,9 +5,11 @@ This module generates fantasy projections by analyzing each player's
 recent actual performance and applying statistical models.
 """
 
-import pandas as pd
+from typing import Optional
+
 import numpy as np
-from typing import Optional, List
+import pandas as pd
+
 from ffpy.database import FFPyDatabase
 
 
@@ -55,7 +57,6 @@ class HistoricalProjectionModel:
 
         for _, player_row in players.iterrows():
             player_name = player_row["player"]
-            position = player_row["position"]
 
             # Get player's recent performance
             projection = self.project_player(

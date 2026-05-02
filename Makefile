@@ -3,7 +3,8 @@
 # See `make help` for all targets.
 
 .DEFAULT_GOAL := help
-.PHONY: help bootstrap install run dev pickem-web notebook test cov lint fmt check \
+.PHONY: help bootstrap install run dev pickem-web pickem-web-auth-local \
+        pickem-web-auth-supabase pickem-auth-token notebook test cov lint fmt check \
         db.migrate db.load db.update db.stats db.mock clean clean-all
 
 # Override on the CLI, e.g. `make db.load SEASON=2023`
@@ -12,6 +13,9 @@ START_WEEK ?= 1
 END_WEEK   ?= 17
 PORT       ?= 8501
 UV         ?= uv
+AUTH_JWT_SECRET ?= local-supabase-jwt-secret-change-me-123456
+AUTH_EMAIL      ?= demo@example.com
+TOKEN_ARGS      ?= --confirmed
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "; \
@@ -40,6 +44,15 @@ dev: ## Start the app with auto-reload
 
 pickem-web: ## Start the FastAPI + Vue pick'em tester (PORT=8000 recommended)
 	.venv/bin/python -m ffpy.pickem_web --port $(PORT)
+
+pickem-web-auth-local: ## Start the pick'em tester with local auth enabled (HS256 dev tokens)
+	WEB_AUTH_ENABLED=true SUPABASE_JWT_SECRET="$(AUTH_JWT_SECRET)" SUPABASE_FETCH_USER_ON_VERIFY=false .venv/bin/python -m ffpy.pickem_web --port $(PORT)
+
+pickem-web-auth-supabase: ## Start the pick'em tester with auth enabled using Supabase settings from .env
+	WEB_AUTH_ENABLED=true .venv/bin/python -m ffpy.pickem_web --port $(PORT)
+
+pickem-auth-token: ## Mint a local bearer token for pickem-web-auth-local
+	.venv/bin/python -m ffpy.dev_auth_token --secret "$(AUTH_JWT_SECRET)" --email "$(AUTH_EMAIL)" $(TOKEN_ARGS)
 
 notebook: ## Launch Jupyter Lab (analysis dep group)
 	$(UV) run --group analysis jupyter lab

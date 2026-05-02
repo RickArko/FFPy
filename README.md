@@ -15,6 +15,7 @@ Everything else (`uv`, Python 3.13, the virtualenv, dependencies, DB schema) is 
 make bootstrap   # one-time: installs uv, deps, .env, DB schema
 make run         # starts Streamlit on http://localhost:8501
 make pickem-web PORT=8000   # starts the FastAPI + Vue pick'em tester
+make pickem-web-auth-local PORT=8000   # auth-enabled local backend with dev JWTs
 ```
 
 See [QUICKSTART.md](QUICKSTART.md) for the two-minute walkthrough.
@@ -29,6 +30,9 @@ See [QUICKSTART.md](QUICKSTART.md) for the two-minute walkthrough.
 | `make install`              | `uv sync` only                                   |
 | `make run` / `make dev`     | Launch Streamlit (dev = auto-reload on save)     |
 | `make pickem-web`           | Launch the FastAPI + Vue pick'em strategy tester |
+| `make pickem-web-auth-local`| Launch the pick'em tester with local auth enabled|
+| `make pickem-web-auth-supabase` | Launch the pick'em tester against Supabase auth |
+| `make pickem-auth-token`    | Mint a local bearer token for auth testing       |
 | `make test` / `make cov`    | Pytest, optionally with coverage                 |
 | `make lint` / `make fmt`    | Ruff lint / format                               |
 | `make check`                | `lint` + `test` (CI entry point)                 |
@@ -102,6 +106,48 @@ NFL_SEASON=2024
 DATABASE_PATH=~/.ffpy/ffpy.db
 ESPN_LEAGUE_ID=            # Optional: ESPN league integration
 ```
+
+## Local auth testing
+
+The backend auth gate is ready, but the Vue app does not yet have a Supabase login UI. For now, the easiest way to test the hardened backend locally is API-first:
+
+```bash
+make pickem-web-auth-local PORT=8000
+make pickem-auth-token
+```
+
+That prints a verified bearer token you can use with `curl`, Postman, or the FastAPI docs. Example:
+
+```bash
+TOKEN="$(make -s pickem-auth-token)"
+curl -X POST http://127.0.0.1:8000/api/backtests/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strategy": {"name": "AllFavorites", "params": {}},
+    "season_start": 2022,
+    "season_end": 2022,
+    "week_start": 1,
+    "week_end": 2,
+    "season_type": "REG",
+    "require_full_coverage": true,
+    "persist": false
+  }'
+```
+
+To test the rejection path, mint an unverified token:
+
+```bash
+make pickem-auth-token TOKEN_ARGS=--unconfirmed
+```
+
+When you have a real Supabase project configured in `.env`, run:
+
+```bash
+make pickem-web-auth-supabase PORT=8000
+```
+
+That enables auth using `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and related settings from `.env`.
 
 ## Contributing
 

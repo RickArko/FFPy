@@ -4,14 +4,13 @@ NFL Pick'em Competition Analyzer
 Interactive tool for analyzing NFL games and generating optimal pick'em strategies.
 """
 
-import streamlit as st
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+import streamlit as st
 
-from ffpy.pickem import PickemAnalyzer, create_sample_pickem_data, NFLGame
-
+from ffpy.pickem import PickemAnalyzer, create_sample_pickem_data
 
 # Page config
 st.set_page_config(page_title="Pick'em Analyzer", page_icon="🏈", layout="wide")

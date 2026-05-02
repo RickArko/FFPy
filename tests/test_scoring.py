@@ -1,6 +1,5 @@
 """Unit tests for scoring configuration and fantasy points calculation."""
 
-import pytest
 from ffpy.scoring import ScoringConfig, calculate_fantasy_points
 
 
@@ -208,5 +207,4 @@ class TestCalculateFantasyPoints:
         }
 
         points = calculate_fantasy_points(stats, config)
-        expected = 2.0 - 6.0 - 4.0
         assert points == -8.0

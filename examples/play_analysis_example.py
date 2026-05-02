@@ -7,8 +7,9 @@ Usage:
     uv run python examples/play_analysis_example.py
 """
 
-from ffpy.database import FFPyDatabase
 import pandas as pd
+
+from ffpy.database import FFPyDatabase
 
 
 def main():
@@ -141,7 +142,7 @@ def main():
         plays_count = pd.read_sql("SELECT COUNT(*) as count FROM plays", db.conn)
         games_count = pd.read_sql("SELECT COUNT(*) as count FROM games", db.conn)
 
-        print(f"\nDatabase statistics:")
+        print("\nDatabase statistics:")
         print(f"  Total plays: {plays_count['count'].iloc[0]:,}")
         print(f"  Total games: {games_count['count'].iloc[0]:,}")
 

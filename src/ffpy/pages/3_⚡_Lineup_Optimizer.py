@@ -18,7 +18,6 @@ from ffpy.optimizer import (
     RosterConstraints,
 )
 
-
 ROSTER_PRESETS = {
     "Skill Positions Only (QB/RB/WR/TE/FLEX)": RosterConstraints.no_kicker_dst,
     "Standard (QB/RB/WR/TE/FLEX/K/DST)": RosterConstraints.standard,

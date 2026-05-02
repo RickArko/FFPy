@@ -1,8 +1,9 @@
 """Base class for API integrations."""
 
 from abc import ABC, abstractmethod
-import pandas as pd
 from typing import Optional
+
+import pandas as pd
 
 
 class BaseAPIIntegration(ABC):

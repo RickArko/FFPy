@@ -6,16 +6,15 @@ across various metrics including projections, historical performance, consistenc
 and scoring systems.
 """
 
-import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
-from typing import List, Dict
+from typing import List
 
-from ffpy.data import get_projections, get_positions
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
+from ffpy.data import get_positions, get_projections
 from ffpy.database import FFPyDatabase
 from ffpy.scoring import ScoringConfig, calculate_fantasy_points
-from ffpy.config import Config
 
 
 def main():
