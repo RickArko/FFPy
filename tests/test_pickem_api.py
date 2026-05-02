@@ -45,8 +45,10 @@ def api_db(tmp_path: Path) -> FFPyDatabase:
 
 
 @pytest.fixture
-def client(api_db: FFPyDatabase) -> TestClient:
-    app = create_app(db_path=str(api_db.db_path))
+def client(api_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setattr(Config, "SUPABASE_URL", "")
+    monkeypatch.setattr(Config, "SUPABASE_ANON_KEY", "")
+    app = create_app(db_path=str(api_db.db_path), require_auth=False)
     with TestClient(app) as test_client:
         yield test_client
 

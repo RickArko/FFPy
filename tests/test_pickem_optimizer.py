@@ -429,9 +429,25 @@ class TestWalkForward:
 REAL_DB_PATH = Path.home() / ".ffpy" / "ffpy.db"
 
 
+def _real_db_has_seasons(*seasons: int) -> bool:
+    """Skip helper: confirm the local DB has REG games for every requested season."""
+    if not REAL_DB_PATH.exists():
+        return False
+    import sqlite3
+
+    with sqlite3.connect(str(REAL_DB_PATH)) as conn:
+        placeholders = ",".join("?" * len(seasons))
+        rows = conn.execute(
+            f"SELECT season FROM games WHERE season_type='REG' AND season IN ({placeholders}) "
+            "GROUP BY season",
+            seasons,
+        ).fetchall()
+    return len(rows) == len(seasons)
+
+
 @pytest.mark.skipif(
-    not REAL_DB_PATH.exists(),
-    reason=f"Real local DB not present at {REAL_DB_PATH}",
+    not _real_db_has_seasons(2021, 2022),
+    reason=f"Real local DB at {REAL_DB_PATH} missing REG games for 2021-2022",
 )
 class TestOptimizerRealDB:
     def test_homeboost_train_test_2021_to_2022(self):
