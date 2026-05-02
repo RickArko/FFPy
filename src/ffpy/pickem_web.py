@@ -333,6 +333,19 @@ def _estimate_cost_units(
     return max(1, seasons * weeks * strategy_count)
 
 
+def _public_auth_config(auth_enabled: bool) -> Dict[str, Any]:
+    browser_auth_available = bool(
+        auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_ANON_KEY
+    )
+    return {
+        "auth_required": auth_enabled,
+        "browser_auth_available": browser_auth_available,
+        "supabase_url": Config.SUPABASE_URL if browser_auth_available else None,
+        "supabase_anon_key": Config.SUPABASE_ANON_KEY if browser_auth_available else None,
+        "public_app_url": Config.PUBLIC_APP_URL,
+    }
+
+
 def create_app(
     db_path: Optional[str] = None,
     *,
@@ -495,6 +508,10 @@ def create_app(
             "auth_required": auth_enabled,
             "user": user.to_dict() if user else None,
         }
+
+    @app.get("/api/auth/config")
+    def auth_config() -> Dict[str, Any]:
+        return _public_auth_config(auth_enabled)
 
     @app.get("/api/strategies")
     def strategies() -> Dict[str, Any]:

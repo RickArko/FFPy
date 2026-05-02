@@ -20,6 +20,25 @@ createApp({
       status: null,
       error: null,
       loading: false,
+      authLoading: true,
+      authSubmitting: false,
+      authConfig: {
+        auth_required: false,
+        browser_auth_available: false,
+        supabase_url: null,
+        supabase_anon_key: null,
+        public_app_url: window.location.origin,
+      },
+      authForm: {
+        mode: "signin",
+        email: "",
+        password: "",
+      },
+      authSession: null,
+      authUser: null,
+      pendingVerificationEmail: null,
+      supabaseClient: null,
+      authSubscription: null,
       singleForm: {
         strategyName: "",
         season_start: new Date().getFullYear(),
@@ -47,18 +66,123 @@ createApp({
     };
   },
   computed: {
+    authRequired() {
+      return Boolean(this.authConfig.auth_required);
+    },
+    browserAuthAvailable() {
+      return Boolean(this.authConfig.browser_auth_available);
+    },
+    isAuthenticated() {
+      return Boolean(this.authSession && this.authSession.access_token);
+    },
+    isVerifiedUser() {
+      return Boolean(this.authUser && this.authUser.email_confirmed);
+    },
+    authLockedReason() {
+      if (!this.authRequired) {
+        return null;
+      }
+      if (this.authLoading) {
+        return "Checking your current auth session.";
+      }
+      if (!this.browserAuthAvailable) {
+        return "Browser sign-in is unavailable until SUPABASE_URL and SUPABASE_ANON_KEY are configured.";
+      }
+      if (!this.isAuthenticated) {
+        return "Sign in with a verified email to unlock protected backtests.";
+      }
+      if (!this.isVerifiedUser) {
+        return "Verify your email, then refresh your session before running backtests.";
+      }
+      return null;
+    },
+    authStateTitle() {
+      if (!this.authRequired) {
+        return "Open local mode";
+      }
+      if (this.authLoading) {
+        return "Checking session";
+      }
+      if (!this.browserAuthAvailable) {
+        return "Token-only testing";
+      }
+      if (this.isVerifiedUser) {
+        return "Verified and ready";
+      }
+      if (this.isAuthenticated) {
+        return "Signed in, awaiting verification";
+      }
+      if (this.pendingVerificationEmail) {
+        return "Verification email sent";
+      }
+      return "Sign in required";
+    },
+    authStateBody() {
+      if (!this.authRequired) {
+        return "This environment leaves auth off, so the tester behaves like a local sandbox.";
+      }
+      if (this.authLoading) {
+        return "Looking for an existing Supabase session and syncing it with the FastAPI backend.";
+      }
+      if (!this.browserAuthAvailable) {
+        return "The backend auth gate is on, but this page cannot render a Supabase login form without public project config.";
+      }
+      if (this.isVerifiedUser) {
+        return "Your verified session is attached to API requests automatically. Backtests and compare runs are unlocked.";
+      }
+      if (this.isAuthenticated) {
+        return "You are signed in, but the backend still sees this email as unverified. Finish the email confirmation flow, then refresh or sign in again.";
+      }
+      if (this.pendingVerificationEmail) {
+        return `Check ${this.pendingVerificationEmail} for the verification link. Once you confirm, sign in here to unlock protected runs.`;
+      }
+      return "Create an account or sign in with email/password. Supabase handles the session, and the backend verifies email confirmation before expensive runs.";
+    },
+    authPillLabel() {
+      if (!this.authRequired) {
+        return "Auth disabled";
+      }
+      if (this.isVerifiedUser) {
+        return "Verified session";
+      }
+      return "Auth required";
+    },
+    authButtonLabel() {
+      if (this.authSubmitting) {
+        return this.authForm.mode === "signup" ? "Creating account..." : "Signing in...";
+      }
+      return this.authForm.mode === "signup" ? "Create Account" : "Sign In";
+    },
     selectedStrategy() {
       return this.strategies.find((strategy) => strategy.name === this.singleForm.strategyName) || null;
     },
+    singleRunDisabled() {
+      return this.loading || Boolean(this.authLockedReason);
+    },
     compareDisabled() {
-      return this.loading || this.compareSelection.length === 0;
+      return this.loading || this.compareSelection.length === 0 || Boolean(this.authLockedReason);
     },
   },
   methods: {
+    currentAccessToken() {
+      return this.authSession ? this.authSession.access_token : null;
+    },
+    buildHeaders(extraHeaders = {}, includeJsonContentType = true) {
+      const headers = { ...extraHeaders };
+      const token = this.currentAccessToken();
+      if (includeJsonContentType && !headers["Content-Type"]) {
+        headers["Content-Type"] = "application/json";
+      }
+      if (token && !headers.Authorization) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+      return headers;
+    },
     async fetchJson(url, options = {}) {
+      const includeJsonContentType = options.body !== undefined;
       const response = await fetch(url, {
-        headers: { "Content-Type": "application/json" },
         ...options,
+        headers: this.buildHeaders(options.headers || {}, includeJsonContentType),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -125,10 +249,189 @@ createApp({
       this.error = null;
       this.status = null;
     },
+    async fetchPublicAuthConfig() {
+      const response = await fetch("/api/auth/config");
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || "Could not load auth config");
+      }
+      return payload;
+    },
+    async initializeBrowserAuth() {
+      if (!this.browserAuthAvailable) {
+        this.supabaseClient = null;
+        this.authSession = null;
+        this.authUser = null;
+        return;
+      }
+
+      if (!globalThis.supabase || typeof globalThis.supabase.createClient !== "function") {
+        throw new Error("Supabase browser SDK failed to load.");
+      }
+
+      this.supabaseClient = globalThis.supabase.createClient(
+        this.authConfig.supabase_url,
+        this.authConfig.supabase_anon_key,
+        {
+          auth: {
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: true,
+          },
+        },
+      );
+
+      const sessionResult = await this.supabaseClient.auth.getSession();
+      if (sessionResult.error) {
+        throw sessionResult.error;
+      }
+      this.authSession = sessionResult.data.session;
+      await this.refreshCurrentUser();
+
+      const subscriptionResult = this.supabaseClient.auth.onAuthStateChange((_, session) => {
+        this.authSession = session;
+        if (!session) {
+          this.authUser = null;
+          return;
+        }
+        Promise.resolve()
+          .then(() => this.refreshCurrentUser())
+          .catch((error) => {
+            this.error = error.message || "Could not refresh auth session";
+          });
+      });
+      this.authSubscription = subscriptionResult.data.subscription;
+    },
+    async refreshCurrentUser() {
+      if (!this.authSession) {
+        this.authUser = null;
+        return;
+      }
+      const payload = await this.fetchJson("/api/auth/me", { method: "GET" });
+      this.authUser = payload.user;
+      if (this.authUser && this.authUser.email_confirmed) {
+        this.pendingVerificationEmail = null;
+      }
+    },
+    async submitAuthForm() {
+      if (!this.supabaseClient) {
+        this.error = "Browser sign-in is not configured in this environment.";
+        return;
+      }
+
+      this.authSubmitting = true;
+      this.clearMessages();
+
+      try {
+        let result;
+        if (this.authForm.mode === "signup") {
+          result = await this.supabaseClient.auth.signUp({
+            email: this.authForm.email,
+            password: this.authForm.password,
+            options: {
+              emailRedirectTo: this.authConfig.public_app_url || window.location.origin,
+            },
+          });
+        } else {
+          result = await this.supabaseClient.auth.signInWithPassword({
+            email: this.authForm.email,
+            password: this.authForm.password,
+          });
+        }
+
+        if (result.error) {
+          throw result.error;
+        }
+
+        this.authSession = result.data.session;
+        this.authForm.password = "";
+
+        if (result.data.session) {
+          await this.refreshCurrentUser();
+          this.pendingVerificationEmail = null;
+          this.status = this.isVerifiedUser
+            ? "Signed in. Protected backtests are ready."
+            : "Signed in, but email verification is still pending.";
+          return;
+        }
+
+        if (this.authForm.mode === "signup") {
+          this.pendingVerificationEmail = this.authForm.email;
+          this.status = `Account created. Check ${this.authForm.email} for the verification link, then sign in here.`;
+          return;
+        }
+
+        this.status = "Sign-in flow completed. Refresh the page if your new session does not appear yet.";
+      } catch (error) {
+        this.error = error.message || "Authentication failed";
+      } finally {
+        this.authSubmitting = false;
+      }
+    },
+    async signOut() {
+      if (!this.supabaseClient) {
+        return;
+      }
+
+      this.authSubmitting = true;
+      this.clearMessages();
+
+      try {
+        const result = await this.supabaseClient.auth.signOut();
+        if (result.error) {
+          throw result.error;
+        }
+        this.authSession = null;
+        this.authUser = null;
+        this.pendingVerificationEmail = null;
+        this.status = "Signed out.";
+      } catch (error) {
+        this.error = error.message || "Could not sign out";
+      } finally {
+        this.authSubmitting = false;
+      }
+    },
+    async refreshVerificationStatus() {
+      if (!this.supabaseClient) {
+        this.error = "Browser sign-in is not configured in this environment.";
+        return;
+      }
+
+      this.authSubmitting = true;
+      this.clearMessages();
+
+      try {
+        const sessionResult = await this.supabaseClient.auth.getSession();
+        if (sessionResult.error) {
+          throw sessionResult.error;
+        }
+        this.authSession = sessionResult.data.session;
+        await this.refreshCurrentUser();
+        this.status = this.isVerifiedUser
+          ? "Email verified. Protected backtests are unlocked."
+          : "Verification is still pending. After clicking the email link, sign in again if needed.";
+      } catch (error) {
+        this.error = error.message || "Could not refresh verification status";
+      } finally {
+        this.authSubmitting = false;
+      }
+    },
+    ensureProtectedActionReady() {
+      if (!this.authLockedReason) {
+        return true;
+      }
+      this.error = this.authLockedReason;
+      return false;
+    },
     async bootstrap() {
       this.loading = true;
+      this.authLoading = true;
       this.clearMessages();
       try {
+        this.authConfig = await this.fetchPublicAuthConfig();
+        await this.initializeBrowserAuth();
+        this.authLoading = false;
+
         const [strategiesPayload, coveragePayload] = await Promise.all([
           this.fetchJson("/api/strategies"),
           this.fetchJson("/api/coverage"),
@@ -137,11 +440,17 @@ createApp({
         this.coverage = coveragePayload;
         this.syncDefaultWindow(coveragePayload.default_window);
         this.initializeParams();
-        this.status = `Loaded ${this.strategies.length} strategies and ${coveragePayload.rows.length} tracked week windows.`;
+
+        if (this.authLockedReason) {
+          this.status = `Loaded ${this.strategies.length} strategies and ${coveragePayload.rows.length} tracked week windows. ${this.authLockedReason}`;
+        } else {
+          this.status = `Loaded ${this.strategies.length} strategies and ${coveragePayload.rows.length} tracked week windows.`;
+        }
       } catch (error) {
         this.error = error.message;
       } finally {
         this.loading = false;
+        this.authLoading = false;
       }
     },
     singlePayload() {
@@ -175,6 +484,10 @@ createApp({
       };
     },
     async runSingle() {
+      if (!this.ensureProtectedActionReady()) {
+        return;
+      }
+
       this.loading = true;
       this.clearMessages();
       this.compareResult = null;
@@ -191,6 +504,10 @@ createApp({
       }
     },
     async runCompare() {
+      if (!this.ensureProtectedActionReady()) {
+        return;
+      }
+
       this.loading = true;
       this.clearMessages();
       this.singleResult = null;
@@ -207,8 +524,14 @@ createApp({
       }
     },
   },
-  mounted() {
-    this.bootstrap();
+  async mounted() {
+    await this.bootstrap();
+  },
+  beforeUnmount() {
+    if (this.authSubscription) {
+      this.authSubscription.unsubscribe();
+      this.authSubscription = null;
+    }
   },
   template: `
     <div class="shell">
@@ -223,8 +546,108 @@ createApp({
           <span class="pill">FastAPI backend</span>
           <span class="pill">Historical backtests</span>
           <span class="pill">Multi-strategy compare</span>
+          <span class="pill">{{ authPillLabel }}</span>
         </div>
       </header>
+
+      <section class="panel auth-panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Access Gate</h2>
+          <p class="panel-subtitle">
+            Supabase handles email/password auth in the browser. The FastAPI backend only unlocks expensive backtest routes for verified users.
+          </p>
+        </div>
+        <div class="panel-body">
+          <div class="auth-layout">
+            <div class="auth-state-card">
+              <span class="section-label">Current state</span>
+              <h3>{{ authStateTitle }}</h3>
+              <p>{{ authStateBody }}</p>
+              <div class="hero-strip auth-strip">
+                <span class="pill">{{ authPillLabel }}</span>
+                <span class="pill" v-if="browserAuthAvailable">Supabase browser sign-in</span>
+                <span class="pill" v-if="isVerifiedUser">Protected routes unlocked</span>
+              </div>
+            </div>
+
+            <div class="auth-card">
+              <template v-if="authRequired && browserAuthAvailable">
+                <div v-if="isAuthenticated" class="strategy-stack">
+                  <div class="field">
+                    <label>Signed in as</label>
+                    <div class="auth-readout">{{ authUser?.email || authSession?.user?.email || 'Authenticated user' }}</div>
+                  </div>
+                  <div class="auth-readout auth-readout-soft">
+                    {{
+                      isVerifiedUser
+                        ? 'Email verified. You can run and compare strategies now.'
+                        : 'Email verification is still pending. Finish the email confirmation flow, then refresh or sign in again.'
+                    }}
+                  </div>
+                  <div class="inline-actions">
+                    <button class="mode-button" type="button" :disabled="authSubmitting" @click="refreshVerificationStatus">
+                      {{ authSubmitting ? 'Refreshing...' : 'Refresh Status' }}
+                    </button>
+                    <button class="mode-button" type="button" :disabled="authSubmitting" @click="signOut">
+                      {{ authSubmitting ? 'Working...' : 'Sign Out' }}
+                    </button>
+                  </div>
+                </div>
+
+                <div v-else class="strategy-stack">
+                  <div class="mode-switch auth-mode-switch">
+                    <button
+                      class="mode-button"
+                      :class="{ 'is-active': authForm.mode === 'signin' }"
+                      type="button"
+                      @click="authForm.mode = 'signin'"
+                    >
+                      Sign In
+                    </button>
+                    <button
+                      class="mode-button"
+                      :class="{ 'is-active': authForm.mode === 'signup' }"
+                      type="button"
+                      @click="authForm.mode = 'signup'"
+                    >
+                      Create Account
+                    </button>
+                  </div>
+
+                  <div class="field">
+                    <label for="auth-email">Email</label>
+                    <input id="auth-email" v-model.trim="authForm.email" type="email" placeholder="you@example.com" />
+                  </div>
+
+                  <div class="field">
+                    <label for="auth-password">Password</label>
+                    <input id="auth-password" v-model="authForm.password" type="password" placeholder="Use a strong password" />
+                  </div>
+
+                  <p class="field-help" v-if="authForm.mode === 'signup'">
+                    Supabase will send a verification email before protected backtests unlock.
+                  </p>
+                  <p class="field-help" v-if="pendingVerificationEmail">
+                    Waiting on verification for {{ pendingVerificationEmail }}.
+                  </p>
+
+                  <button class="action-button" type="button" :disabled="authSubmitting || loading" @click="submitAuthForm">
+                    {{ authButtonLabel }}
+                  </button>
+                </div>
+              </template>
+
+              <div v-else-if="authRequired" class="empty-state">
+                Browser sign-in is unavailable in this environment. Add SUPABASE_URL and SUPABASE_ANON_KEY for a real Supabase project, or use the local bearer-token workflow.
+              </div>
+
+              <div v-else class="empty-state">
+                Auth is disabled here, so this page behaves like an open local lab.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div class="content-grid">
         <section class="panel">
@@ -252,6 +675,10 @@ createApp({
               >
                 Compare Many
               </button>
+            </div>
+
+            <div v-if="authLockedReason" class="empty-state auth-guardrail">
+              {{ authLockedReason }}
             </div>
 
             <div v-if="mode === 'single'" class="strategy-stack">
@@ -329,7 +756,7 @@ createApp({
                 Persist this run into the backtest tables
               </label>
 
-              <button class="action-button" type="button" :disabled="loading" @click="runSingle">
+              <button class="action-button" type="button" :disabled="singleRunDisabled" @click="runSingle">
                 {{ loading ? 'Running backtest...' : 'Run Backtest' }}
               </button>
             </div>

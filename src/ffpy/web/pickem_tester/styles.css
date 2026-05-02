@@ -107,6 +107,71 @@ body {
   margin-top: 24px;
 }
 
+.auth-panel {
+  margin-top: 24px;
+}
+
+.auth-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 420px);
+  gap: 18px;
+}
+
+.auth-state-card,
+.auth-card {
+  height: 100%;
+  border: 1px solid rgba(15, 103, 118, 0.12);
+  border-radius: 20px;
+  background: var(--surface-strong);
+  padding: 18px;
+}
+
+.auth-state-card h3 {
+  margin: 10px 0 0;
+  font-size: 1.25rem;
+}
+
+.auth-state-card p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-strip {
+  margin-top: 16px;
+}
+
+.auth-mode-switch {
+  margin-bottom: 0;
+}
+
+.auth-readout {
+  border: 1px solid rgba(15, 103, 118, 0.12);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.82);
+  word-break: break-word;
+}
+
+.auth-readout-soft {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.inline-actions .mode-button {
+  flex: 1 1 180px;
+}
+
+.auth-guardrail {
+  margin-bottom: 16px;
+}
+
 .panel {
   border: 1px solid var(--line);
   border-radius: 24px;
@@ -400,6 +465,7 @@ tbody tr:last-child td {
 }
 
 @media (max-width: 1024px) {
+  .auth-layout,
   .content-grid,
   .metric-grid {
     grid-template-columns: 1fr;

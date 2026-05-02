@@ -33,7 +33,8 @@
       "Bash(.venv/bin/python -m pytest tests/test_pickem_backtest.py -v --tb=short)",
       "Bash(.venv/bin/python -m pytest tests/ --tb=short -q)",
       "Bash(.venv/bin/python *)",
-      "Bash(.venv/bin/ruff check *)"
+      "Bash(.venv/bin/ruff check *)",
+      "Bash(grep -n \"^\\\\.env$\\\\|^\\\\.env\\\\b\" /home/ricka/Git/FFPy/.gitignore)"
     ]
   }
 }

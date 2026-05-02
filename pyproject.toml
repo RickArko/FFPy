@@ -24,6 +24,8 @@ dependencies = [
     # Pin ipykernel to 6.x — 7.x has protocol changes that hang notebooks
     # with some jupyter_client/jupyterlab combinations.
     "ipykernel>=6.29.5,<7",
+    "matplotlib>=3.10.8",
+    "seaborn>=0.13.2",
 ]
 
 [project.scripts]

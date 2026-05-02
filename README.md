@@ -109,7 +109,7 @@ ESPN_LEAGUE_ID=            # Optional: ESPN league integration
 
 ## Local auth testing
 
-The backend auth gate is ready, but the Vue app does not yet have a Supabase login UI. For now, the easiest way to test the hardened backend locally is API-first:
+The Vue app now renders a minimal Supabase email/password sign-in shell when a real Supabase project is configured. For the purely local auth target, there is still no browser sign-in because that mode only uses an HS256 dev secret, so the easiest way to test it remains API-first:
 
 ```bash
 make pickem-web-auth-local PORT=8000
@@ -147,7 +147,7 @@ When you have a real Supabase project configured in `.env`, run:
 make pickem-web-auth-supabase PORT=8000
 ```
 
-That enables auth using `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and related settings from `.env`.
+That enables auth using `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and related settings from `.env`. The Vue frontend will render a minimal Supabase email/password sign-in panel automatically when that public config is present.
 
 ## Contributing
 

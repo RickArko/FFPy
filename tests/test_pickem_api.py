@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ffpy.auth import SupabaseTokenVerifier
+from ffpy.config import Config
 from ffpy.database import FFPyDatabase
 from ffpy.pickem_web import create_app
 from ffpy.usage_logging import InMemoryUsageEventLogger
@@ -195,6 +196,44 @@ def test_run_backtest_rejects_unknown_strategy(client: TestClient):
     )
     assert response.status_code == 400
     assert "Unknown strategy" in response.json()["detail"]
+
+
+def test_auth_config_reports_open_local_mode(client: TestClient):
+    response = client.get("/api/auth/config")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["auth_required"] is False
+    assert payload["browser_auth_available"] is False
+    assert payload["supabase_url"] is None
+    assert payload["supabase_anon_key"] is None
+
+
+def test_auth_config_exposes_public_supabase_settings_for_browser_sign_in(
+    api_db: FFPyDatabase,
+    auth_verifier: SupabaseTokenVerifier,
+    usage_logger: InMemoryUsageEventLogger,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(Config, "SUPABASE_URL", "https://demo.supabase.co")
+    monkeypatch.setattr(Config, "SUPABASE_ANON_KEY", "anon-demo-key")
+    monkeypatch.setattr(Config, "PUBLIC_APP_URL", "http://localhost:8000")
+
+    app = create_app(
+        db_path=str(api_db.db_path),
+        require_auth=True,
+        auth_verifier=auth_verifier,
+        usage_logger=usage_logger,
+    )
+    with TestClient(app) as test_client:
+        response = test_client.get("/api/auth/config")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["auth_required"] is True
+    assert payload["browser_auth_available"] is True
+    assert payload["supabase_url"] == "https://demo.supabase.co"
+    assert payload["supabase_anon_key"] == "anon-demo-key"
+    assert payload["public_app_url"] == "http://localhost:8000"
 
 
 def test_auth_me_reports_auth_requirement(auth_client: TestClient):

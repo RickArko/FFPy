@@ -27,7 +27,9 @@ class Config:
     CACHE_TTL = int(os.getenv("CACHE_TTL", "3600"))  # 1 hour default
 
     # Database Configuration
-    DATABASE_PATH = os.getenv("DATABASE_PATH", str(Path.home() / ".ffpy" / "ffpy.db"))
+    DATABASE_PATH = os.path.expanduser(
+        os.getenv("DATABASE_PATH", str(Path.home() / ".ffpy" / "ffpy.db"))
+    )
     DATABASE_TYPE = os.getenv("DATABASE_TYPE", "sqlite")
 
     # Public web app configuration
