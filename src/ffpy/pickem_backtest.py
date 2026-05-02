@@ -70,9 +70,7 @@ class WeekResult:
 
     @property
     def confidence_earned(self) -> int:
-        return sum(
-            (gp.pick.confidence or 0) for gp in self.graded_picks if gp.correct == 1
-        )
+        return sum((gp.pick.confidence or 0) for gp in self.graded_picks if gp.correct == 1)
 
     @property
     def confidence_max(self) -> int:
@@ -124,11 +122,7 @@ class BacktestResult:
 
     @property
     def confidence_pct(self) -> float:
-        return (
-            self.confidence_earned / self.confidence_max
-            if self.confidence_max > 0
-            else 0.0
-        )
+        return self.confidence_earned / self.confidence_max if self.confidence_max > 0 else 0.0
 
     def to_summary_dict(self) -> Dict[str, Any]:
         return {
@@ -214,9 +208,7 @@ class AllFavorites(PickStrategy):
         for _, row in games_df.iterrows():
             if pd.isna(row["spread_line"]):
                 continue
-            team = _favorite_team(
-                float(row["spread_line"]), row["home_team"], row["away_team"]
-            )
+            team = _favorite_team(float(row["spread_line"]), row["home_team"], row["away_team"])
             picks.append(Pick(game_id=row["game_id"], selected_team=team))
         return picks
 
@@ -236,15 +228,11 @@ class ConfidenceBySpread(PickStrategy):
         if df.empty:
             return []
         df["abs_spread"] = df["spread_line"].abs()
-        df = df.sort_values(
-            ["abs_spread", "game_id"], ascending=[False, True]
-        ).reset_index(drop=True)
+        df = df.sort_values(["abs_spread", "game_id"], ascending=[False, True]).reset_index(drop=True)
         n = len(df)
         picks: List[Pick] = []
         for i, row in df.iterrows():
-            team = _favorite_team(
-                float(row["spread_line"]), row["home_team"], row["away_team"]
-            )
+            team = _favorite_team(float(row["spread_line"]), row["home_team"], row["away_team"])
             picks.append(
                 Pick(
                     game_id=row["game_id"],
@@ -263,9 +251,7 @@ def _confidence_by_abs_spread(df: pd.DataFrame) -> pd.DataFrame:
     """
     out = df.copy()
     out["abs_spread"] = out["spread_line"].abs()
-    return out.sort_values(
-        ["abs_spread", "game_id"], ascending=[False, True]
-    ).reset_index(drop=True)
+    return out.sort_values(["abs_spread", "game_id"], ascending=[False, True]).reset_index(drop=True)
 
 
 class WinProbBlend(PickStrategy):
@@ -289,20 +275,14 @@ class WinProbBlend(PickStrategy):
         if df.empty:
             return []
         df["adj_spread"] = df["spread_line"] + self.home_advantage
-        df["home_wp"] = df["adj_spread"].apply(
-            lambda s: spread_to_wp(float(s), self.std)
-        )
+        df["home_wp"] = df["adj_spread"].apply(lambda s: spread_to_wp(float(s), self.std))
         df["edge"] = (df["home_wp"] - 0.5).abs()
-        df = df.sort_values(
-            ["edge", "game_id"], ascending=[False, True]
-        ).reset_index(drop=True)
+        df = df.sort_values(["edge", "game_id"], ascending=[False, True]).reset_index(drop=True)
         n = len(df)
         picks: List[Pick] = []
         for i, row in df.iterrows():
             team = row["home_team"] if row["home_wp"] >= 0.5 else row["away_team"]
-            picks.append(
-                Pick(game_id=row["game_id"], selected_team=team, confidence=n - int(i))
-            )
+            picks.append(Pick(game_id=row["game_id"], selected_team=team, confidence=n - int(i)))
         return picks
 
 
@@ -332,9 +312,7 @@ class HomeBoost(PickStrategy):
                 team = row["home_team"]
             else:
                 team = _favorite_team(spread, row["home_team"], row["away_team"])
-            picks.append(
-                Pick(game_id=row["game_id"], selected_team=team, confidence=n - int(i))
-            )
+            picks.append(Pick(game_id=row["game_id"], selected_team=team, confidence=n - int(i)))
         return picks
 
 
@@ -366,9 +344,7 @@ class UnderdogTargeted(PickStrategy):
                 team = away if fav == home else home  # the dog
             else:
                 team = fav
-            picks.append(
-                Pick(game_id=row["game_id"], selected_team=team, confidence=n - int(i))
-            )
+            picks.append(Pick(game_id=row["game_id"], selected_team=team, confidence=n - int(i)))
         return picks
 
 
@@ -386,11 +362,7 @@ class Consensus(PickStrategy):
     def __init__(self, strategies: Sequence[PickStrategy]):
         if len(strategies) == 0:
             raise ValueError("Consensus requires at least one inner strategy")
-        super().__init__(
-            strategies=[
-                {"name": s.name, "params": dict(s.params)} for s in strategies
-            ]
-        )
+        super().__init__(strategies=[{"name": s.name, "params": dict(s.params)} for s in strategies])
         self.strategies: List[PickStrategy] = list(strategies)
 
     def pick(self, games_df: pd.DataFrame) -> List[Pick]:
@@ -413,14 +385,10 @@ class Consensus(PickStrategy):
                 continue
             ranked = votes.most_common()
             if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
-                team = _favorite_team(
-                    float(row["spread_line"]), row["home_team"], row["away_team"]
-                )
+                team = _favorite_team(float(row["spread_line"]), row["home_team"], row["away_team"])
             else:
                 team = ranked[0][0]
-            picks.append(
-                Pick(game_id=gid, selected_team=team, confidence=n - int(i))
-            )
+            picks.append(Pick(game_id=gid, selected_team=team, confidence=n - int(i)))
         return picks
 
 
@@ -433,9 +401,7 @@ def _grade(pick: Pick, row: pd.Series) -> Optional[int]:
     """Return 1 if pick correct, 0 if wrong, None if tie."""
     if row["home_score"] == row["away_score"]:
         return None
-    winner = (
-        row["home_team"] if row["home_score"] > row["away_score"] else row["away_team"]
-    )
+    winner = row["home_team"] if row["home_score"] > row["away_score"] else row["away_team"]
     return 1 if pick.selected_team == winner else 0
 
 
@@ -444,9 +410,7 @@ class Backtester:
 
     def __init__(self, repository: HistoricalGamesRepository | FFPyDatabase):
         if isinstance(repository, FFPyDatabase):
-            self.repository: HistoricalGamesRepository = (
-                SQLiteHistoricalGamesRepository(repository)
-            )
+            self.repository: HistoricalGamesRepository = SQLiteHistoricalGamesRepository(repository)
         else:
             self.repository = repository
 
@@ -489,16 +453,12 @@ class Backtester:
             )
             if games.empty:
                 continue
-            games = games[
-                (games["week"] >= week_start) & (games["week"] <= week_end)
-            ]
+            games = games[(games["week"] >= week_start) & (games["week"] <= week_end)]
             if games.empty:
                 continue
 
             for week, week_df in games.groupby("week", sort=True):
-                weekly.append(
-                    self._run_week(strategy, int(season), int(week), week_df)
-                )
+                weekly.append(self._run_week(strategy, int(season), int(week), week_df))
 
         result = BacktestResult(
             strategy_name=strategy.name,
@@ -570,9 +530,9 @@ class Backtester:
         cov = cov[(cov["week"] >= week_start) & (cov["week"] <= week_end)]
         unusable = cov[cov["fully_usable"] == 0]
         if not unusable.empty:
-            preview = unusable[
-                ["season", "week", "n_games", "with_spread", "with_scores"]
-            ].to_string(index=False)
+            preview = unusable[["season", "week", "n_games", "with_spread", "with_scores"]].to_string(
+                index=False
+            )
             raise ValueError(
                 f"{len(unusable)} (season, week) windows are not fully usable.\n"
                 f"Pass require_full_coverage=False to skip them.\n{preview}"
@@ -592,16 +552,12 @@ class Backtester:
             if pk.game_id not in idx.index:
                 continue  # strategy returned a game not in this week's slate
             graded.append(GradedPick(pick=pk, correct=_grade(pk, idx.loc[pk.game_id])))
-        return WeekResult(
-            season=season, week=week, n_games=len(week_df), graded_picks=graded
-        )
+        return WeekResult(season=season, week=week, n_games=len(week_df), graded_picks=graded)
 
     def _persist(self, r: BacktestResult, note: Optional[str] = None) -> int:
         conn = getattr(self.repository, "conn", None)
         if conn is None:
-            raise ValueError(
-                "persist=True requires a repository with persistence support"
-            )
+            raise ValueError("persist=True requires a repository with persistence support")
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO backtest_runs (

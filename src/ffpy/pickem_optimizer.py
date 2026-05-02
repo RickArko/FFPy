@@ -121,9 +121,7 @@ def _resolve_metric(metric: Metric) -> Tuple[str, Callable[[BacktestResult], flo
         return ("win_rate", lambda r: r.win_rate)
     if metric == "confidence_pct":
         return ("confidence_pct", lambda r: r.confidence_pct)
-    raise ValueError(
-        f"Unknown metric {metric!r}. Use 'win_rate', 'confidence_pct', or a callable."
-    )
+    raise ValueError(f"Unknown metric {metric!r}. Use 'win_rate', 'confidence_pct', or a callable.")
 
 
 def _cartesian(param_grid: Dict[str, Sequence[Any]]) -> List[Dict[str, Any]]:
@@ -298,9 +296,7 @@ class StrategyOptimizer:
         """
         seasons = sorted(set(seasons))
         if len(seasons) < min_train_seasons + 1:
-            raise ValueError(
-                f"walk_forward needs ≥ {min_train_seasons + 1} seasons, got {len(seasons)}"
-            )
+            raise ValueError(f"walk_forward needs ≥ {min_train_seasons + 1} seasons, got {len(seasons)}")
 
         folds: List[WalkForwardFold] = []
         for i in range(min_train_seasons, len(seasons)):

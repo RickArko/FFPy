@@ -98,9 +98,7 @@ def format_json(result: LineupResult) -> str:
             "solve_time_ms": round(result.solve_time_ms, 1),
             "is_optimal": result.is_optimal,
             "improvement_vs_current": (
-                round(result.improvement_vs_current, 2)
-                if result.improvement_vs_current is not None
-                else None
+                round(result.improvement_vs_current, 2) if result.improvement_vs_current is not None else None
             ),
             "starters": [
                 {
@@ -137,9 +135,7 @@ def format_csv(result: LineupResult) -> str:
             ["starter", p.position, p.name, p.team, p.opponent or "", round(p.projected_points, 2)]
         )
     for p in result.bench:
-        writer.writerow(
-            ["bench", p.position, p.name, p.team, p.opponent or "", round(p.projected_points, 2)]
-        )
+        writer.writerow(["bench", p.position, p.name, p.team, p.opponent or "", round(p.projected_points, 2)])
     return buf.getvalue()
 
 
@@ -222,7 +218,9 @@ def main():
 
     overlap = set(args.lock_in) & set(args.lock_out)
     if overlap:
-        print(f"ERROR: players cannot be both locked-in and locked-out: {', '.join(overlap)}", file=sys.stderr)
+        print(
+            f"ERROR: players cannot be both locked-in and locked-out: {', '.join(overlap)}", file=sys.stderr
+        )
         sys.exit(1)
 
     constraints.locked_in = set(args.lock_in)

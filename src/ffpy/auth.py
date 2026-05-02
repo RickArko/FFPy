@@ -63,14 +63,10 @@ class SupabaseTokenVerifier:
         self.anon_key = anon_key
         self.jwt_secret = jwt_secret
         self.audience = audience
-        self.issuer = issuer or (
-            f"{self.supabase_url}/auth/v1" if self.supabase_url else None
-        )
+        self.issuer = issuer or (f"{self.supabase_url}/auth/v1" if self.supabase_url else None)
         self.fetch_user_on_verify = fetch_user_on_verify
         self.timeout_seconds = timeout_seconds
-        self.userinfo_url = (
-            f"{self.supabase_url}/auth/v1/user" if self.supabase_url else None
-        )
+        self.userinfo_url = f"{self.supabase_url}/auth/v1/user" if self.supabase_url else None
         self._jwks_client = (
             jwt.PyJWKClient(f"{self.supabase_url}/auth/v1/.well-known/jwks.json")
             if self.supabase_url and not self.jwt_secret

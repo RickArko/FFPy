@@ -202,9 +202,7 @@ def main():
             )
 
     # === RESULTS TABS ===
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["🟢 Starting Lineup", "💺 Bench", "📊 Breakdown", "📋 Text Report"]
-    )
+    tab1, tab2, tab3, tab4 = st.tabs(["🟢 Starting Lineup", "💺 Bench", "📊 Breakdown", "📋 Text Report"])
 
     with tab1:
         _show_starters(result)

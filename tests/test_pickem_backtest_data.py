@@ -17,6 +17,7 @@ from ffpy.database import FFPyDatabase
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def fresh_db(tmp_path: Path) -> FFPyDatabase:
     """A brand-new DB in an isolated tmp path. Runs 001 + 003 via init_database."""
@@ -45,9 +46,9 @@ def db_with_games(fresh_db: FFPyDatabase) -> FFPyDatabase:
                               spread_line, total_line, game_finished)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
         [
-            ("2022_01_ARI_KC", 2022, "REG", 1, "2022-09-11", "KC",  "ARI", 44, 21, -6.5, 54.0),
+            ("2022_01_ARI_KC", 2022, "REG", 1, "2022-09-11", "KC", "ARI", 44, 21, -6.5, 54.0),
             ("2022_01_NYG_TEN", 2022, "REG", 1, "2022-09-11", "TEN", "NYG", 20, 21, -5.5, 43.5),
-            ("2022_01_LAC_LV",  2022, "REG", 1, "2022-09-11", "LV",  "LAC", 19, 24, -3.0, 52.5),
+            ("2022_01_LAC_LV", 2022, "REG", 1, "2022-09-11", "LV", "LAC", 19, 24, -3.0, 52.5),
         ],
     )
 
@@ -59,7 +60,19 @@ def db_with_games(fresh_db: FFPyDatabase) -> FFPyDatabase:
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
         [
             ("2022_02_BUF_MIA", 2022, "REG", 2, "2022-09-18", "MIA", "BUF", 21, 19, 3.5, 53.0),
-            ("2022_02_DAL_CIN", 2022, "REG", 2, "2022-09-18", "DAL", "CIN", 20, 17, None, 45.0),  # missing spread
+            (
+                "2022_02_DAL_CIN",
+                2022,
+                "REG",
+                2,
+                "2022-09-18",
+                "DAL",
+                "CIN",
+                20,
+                17,
+                None,
+                45.0,
+            ),  # missing spread
         ],
     )
 
@@ -98,6 +111,7 @@ def db_with_games(fresh_db: FFPyDatabase) -> FFPyDatabase:
 # Migration 003 — backtest schema is created by init_database
 # ---------------------------------------------------------------------------
 
+
 class TestBacktestSchema:
     def test_backtest_runs_table_exists(self, fresh_db):
         row = pd.read_sql(
@@ -126,8 +140,7 @@ class TestBacktestSchema:
                    total_games, correct, incorrect, ties,
                    confidence_earned, confidence_max)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("AllFavorites", json.dumps({}), 2021, 2022, 1, 18, "REG",
-             500, 330, 165, 5, 6800, 9500),
+            ("AllFavorites", json.dumps({}), 2021, 2022, 1, 18, "REG", 500, 330, 165, 5, 6800, 9500),
         )
         run_id = cur.lastrowid
         fresh_db.conn.commit()
@@ -140,10 +153,8 @@ class TestBacktestSchema:
         )
         fresh_db.conn.commit()
 
-        runs = pd.read_sql("SELECT * FROM backtest_runs WHERE run_id = ?",
-                           fresh_db.conn, params=(run_id,))
-        picks = pd.read_sql("SELECT * FROM backtest_picks WHERE run_id = ?",
-                            fresh_db.conn, params=(run_id,))
+        runs = pd.read_sql("SELECT * FROM backtest_runs WHERE run_id = ?", fresh_db.conn, params=(run_id,))
+        picks = pd.read_sql("SELECT * FROM backtest_picks WHERE run_id = ?", fresh_db.conn, params=(run_id,))
         assert len(runs) == 1 and runs.iloc[0]["strategy_name"] == "AllFavorites"
         assert len(picks) == 1 and picks.iloc[0]["selected_team"] == "CAR"
 
@@ -151,6 +162,7 @@ class TestBacktestSchema:
 # ---------------------------------------------------------------------------
 # get_historical_games
 # ---------------------------------------------------------------------------
+
 
 class TestGetHistoricalGames:
     def test_returns_season_by_default(self, db_with_games):
@@ -181,9 +193,23 @@ class TestGetHistoricalGames:
 
     def test_expected_columns_present(self, db_with_games):
         df = db_with_games.get_historical_games(2022, week=1)
-        for col in ("game_id", "season", "season_type", "week", "game_date",
-                    "home_team", "away_team", "home_score", "away_score",
-                    "spread_line", "total_line", "roof", "surface", "temp", "wind"):
+        for col in (
+            "game_id",
+            "season",
+            "season_type",
+            "week",
+            "game_date",
+            "home_team",
+            "away_team",
+            "home_score",
+            "away_score",
+            "spread_line",
+            "total_line",
+            "roof",
+            "surface",
+            "temp",
+            "wind",
+        ):
             assert col in df.columns, f"missing column: {col}"
 
     def test_includes_rows_with_missing_spread(self, db_with_games):
@@ -209,6 +235,7 @@ class TestGetHistoricalGames:
 # ---------------------------------------------------------------------------
 # get_data_coverage
 # ---------------------------------------------------------------------------
+
 
 class TestGetDataCoverage:
     def test_returns_per_week_rows(self, db_with_games):

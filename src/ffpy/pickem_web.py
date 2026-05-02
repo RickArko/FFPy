@@ -227,9 +227,7 @@ def _build_strategy(selection: StrategySelectionRequest) -> PickStrategy:
     allowed_params = {param.name: param for param in spec.params}
     unexpected = sorted(set(selection.params) - set(allowed_params))
     if unexpected:
-        raise ValueError(
-            f"Unexpected params for {selection.name}: {', '.join(unexpected)}"
-        )
+        raise ValueError(f"Unexpected params for {selection.name}: {', '.join(unexpected)}")
 
     params: Dict[str, Any] = {}
     for param in spec.params:
@@ -260,15 +258,11 @@ def _serialize_week_result(result: WeekResult) -> Dict[str, Any]:
         "incorrect": result.incorrect,
         "ties": result.ties,
         "win_rate": round(result.correct / decided, 4) if decided > 0 else 0.0,
-        "coverage_rate": round(len(result.graded_picks) / result.n_games, 4)
-        if result.n_games
-        else 0.0,
+        "coverage_rate": round(len(result.graded_picks) / result.n_games, 4) if result.n_games else 0.0,
         "confidence_earned": result.confidence_earned,
         "confidence_max": result.confidence_max,
         "confidence_pct": (
-            round(result.confidence_earned / result.confidence_max, 4)
-            if result.confidence_max > 0
-            else 0.0
+            round(result.confidence_earned / result.confidence_max, 4) if result.confidence_max > 0 else 0.0
         ),
     }
 
@@ -355,9 +349,7 @@ def create_app(
     if auth_enabled and resolved_auth_verifier is None:
         raise ValueError("Auth is enabled but no token verifier is configured")
     resolved_usage_logger = usage_logger or (
-        SQLiteUsageEventLogger(resolved_db_path)
-        if resolved_db_path
-        else NoopUsageEventLogger()
+        SQLiteUsageEventLogger(resolved_db_path) if resolved_db_path else NoopUsageEventLogger()
     )
     bearer = HTTPBearer(auto_error=False)
 
@@ -508,8 +500,7 @@ def create_app(
     def strategies() -> Dict[str, Any]:
         return {
             "strategies": [
-                spec.to_dict()
-                for spec in sorted(STRATEGY_SPECS.values(), key=lambda item: item.label)
+                spec.to_dict() for spec in sorted(STRATEGY_SPECS.values(), key=lambda item: item.label)
             ]
         }
 
@@ -583,9 +574,7 @@ def create_app(
 
         return {
             "summary": summary,
-            "weekly_results": [
-                _serialize_week_result(week_result) for week_result in result.weekly_results
-            ],
+            "weekly_results": [_serialize_week_result(week_result) for week_result in result.weekly_results],
         }
 
     @app.post("/api/backtests/compare")

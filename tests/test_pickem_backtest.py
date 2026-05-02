@@ -63,14 +63,26 @@ def db_with_two_weeks(fresh_db: FFPyDatabase) -> FFPyDatabase:
 
     rows = [
         # ---- Week 1 ----
-        ("2022_01_ARI_KC",  2022, "REG", 1, "2022-09-11", "KC",  "ARI", 44, 21,  6.5, 54.0),  # home fav wins
-        ("2022_01_NYG_TEN", 2022, "REG", 1, "2022-09-11", "TEN", "NYG", 20, 21,  5.5, 43.5),  # home fav loses
-        ("2022_01_LAC_LV",  2022, "REG", 1, "2022-09-11", "LV",  "LAC", 19, 24, -3.0, 52.5),  # away fav (LAC) wins
-        ("2022_01_BUF_NE",  2022, "REG", 1, "2022-09-11", "BUF", "NE",  21, 17,  0.0, 44.0),  # pickem; home wins
+        ("2022_01_ARI_KC", 2022, "REG", 1, "2022-09-11", "KC", "ARI", 44, 21, 6.5, 54.0),  # home fav wins
+        ("2022_01_NYG_TEN", 2022, "REG", 1, "2022-09-11", "TEN", "NYG", 20, 21, 5.5, 43.5),  # home fav loses
+        (
+            "2022_01_LAC_LV",
+            2022,
+            "REG",
+            1,
+            "2022-09-11",
+            "LV",
+            "LAC",
+            19,
+            24,
+            -3.0,
+            52.5,
+        ),  # away fav (LAC) wins
+        ("2022_01_BUF_NE", 2022, "REG", 1, "2022-09-11", "BUF", "NE", 21, 17, 0.0, 44.0),  # pickem; home wins
         # ---- Week 2 ----
-        ("2022_02_NYG_DAL", 2022, "REG", 2, "2022-09-18", "DAL", "NYG", 28, 14,  7.0, 45.0),   # home fav wins
-        ("2022_02_SF_SEA",  2022, "REG", 2, "2022-09-18", "SEA", "SF",  17, 27,-10.0, 41.5),   # away fav wins
-        ("2022_02_IND_NYG", 2022, "REG", 2, "2022-09-18", "NYG", "IND", 20, 20,  3.0, 45.5),   # tie
+        ("2022_02_NYG_DAL", 2022, "REG", 2, "2022-09-18", "DAL", "NYG", 28, 14, 7.0, 45.0),  # home fav wins
+        ("2022_02_SF_SEA", 2022, "REG", 2, "2022-09-18", "SEA", "SF", 17, 27, -10.0, 41.5),  # away fav wins
+        ("2022_02_IND_NYG", 2022, "REG", 2, "2022-09-18", "NYG", "IND", 20, 20, 3.0, 45.5),  # tie
     ]
     cur.executemany(
         """INSERT INTO games (game_id, season, season_type, week, game_date,
@@ -123,41 +135,66 @@ class TestGrade:
 
 class TestAllFavorites:
     def test_picks_home_when_positive_spread(self):
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "KC",
+                    "away_team": "ARI",
+                    "spread_line": 6.5,
+                }
+            ]
+        )
         picks = AllFavorites().pick(df)
         assert len(picks) == 1 and picks[0].selected_team == "KC"
 
     def test_picks_away_when_negative_spread(self):
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "LV", "away_team": "LAC", "spread_line": -3.0,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "LV",
+                    "away_team": "LAC",
+                    "spread_line": -3.0,
+                }
+            ]
+        )
         picks = AllFavorites().pick(df)
         assert picks[0].selected_team == "LAC"
 
     def test_skips_games_with_null_spread(self):
-        df = pd.DataFrame([
-            {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
-            {"game_id": "g2", "home_team": "DAL", "away_team": "CIN", "spread_line": None},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
+                {"game_id": "g2", "home_team": "DAL", "away_team": "CIN", "spread_line": None},
+            ]
+        )
         picks = AllFavorites().pick(df)
         assert len(picks) == 1 and picks[0].game_id == "g1"
 
     def test_no_confidence_assigned(self):
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "KC",
+                    "away_team": "ARI",
+                    "spread_line": 6.5,
+                }
+            ]
+        )
         assert AllFavorites().pick(df)[0].confidence is None
 
 
 class TestConfidenceBySpread:
     def test_assigns_descending_confidence(self):
-        df = pd.DataFrame([
-            {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
-            {"game_id": "g2", "home_team": "MIN", "away_team": "GB", "spread_line": -2.5},
-            {"game_id": "g3", "home_team": "BUF", "away_team": "MIA", "spread_line": 10.0},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
+                {"game_id": "g2", "home_team": "MIN", "away_team": "GB", "spread_line": -2.5},
+                {"game_id": "g3", "home_team": "BUF", "away_team": "MIA", "spread_line": 10.0},
+            ]
+        )
         picks = ConfidenceBySpread().pick(df)
         # Confidence rank: |spread| 10.0 > 6.5 > 2.5 → conf 3, 2, 1
         by_id = {p.game_id: p for p in picks}
@@ -166,19 +203,23 @@ class TestConfidenceBySpread:
         assert by_id["g2"].confidence == 1
 
     def test_picks_correct_team_per_spread_direction(self):
-        df = pd.DataFrame([
-            {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
-            {"game_id": "g2", "home_team": "MIN", "away_team": "GB", "spread_line": -2.5},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
+                {"game_id": "g2", "home_team": "MIN", "away_team": "GB", "spread_line": -2.5},
+            ]
+        )
         by_id = {p.game_id: p for p in ConfidenceBySpread().pick(df)}
-        assert by_id["g1"].selected_team == "KC"   # home favorite (positive spread)
-        assert by_id["g2"].selected_team == "GB"   # away favorite (negative spread)
+        assert by_id["g1"].selected_team == "KC"  # home favorite (positive spread)
+        assert by_id["g2"].selected_team == "GB"  # away favorite (negative spread)
 
     def test_skips_null_spread_games(self):
-        df = pd.DataFrame([
-            {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
-            {"game_id": "g2", "home_team": "DAL", "away_team": "CIN", "spread_line": None},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
+                {"game_id": "g2", "home_team": "DAL", "away_team": "CIN", "spread_line": None},
+            ]
+        )
         picks = ConfidenceBySpread().pick(df)
         assert len(picks) == 1
         # With only 1 valid game, that pick gets confidence n=1
@@ -186,10 +227,12 @@ class TestConfidenceBySpread:
 
     def test_tiebreak_by_game_id(self):
         """Two games with equal |spread| should rank deterministically."""
-        df = pd.DataFrame([
-            {"game_id": "z_late", "home_team": "AAA", "away_team": "BBB", "spread_line": 3.0},
-            {"game_id": "a_early", "home_team": "CCC", "away_team": "DDD", "spread_line": -3.0},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "z_late", "home_team": "AAA", "away_team": "BBB", "spread_line": 3.0},
+                {"game_id": "a_early", "home_team": "CCC", "away_team": "DDD", "spread_line": -3.0},
+            ]
+        )
         picks = ConfidenceBySpread().pick(df)
         # Tiebreak ascending by game_id → "a_early" ranked higher (more confident)
         by_id = {p.game_id: p for p in picks}
@@ -212,17 +255,32 @@ def _gp(team: str, correct, conf=None) -> GradedPick:
 
 class TestWeekResultAggregates:
     def test_counts(self):
-        wr = WeekResult(season=2022, week=1, n_games=4, graded_picks=[
-            _gp("KC", 1, 4), _gp("ARI", 0, 3), _gp("NYG", None, 2), _gp("BUF", 1, 1),
-        ])
+        wr = WeekResult(
+            season=2022,
+            week=1,
+            n_games=4,
+            graded_picks=[
+                _gp("KC", 1, 4),
+                _gp("ARI", 0, 3),
+                _gp("NYG", None, 2),
+                _gp("BUF", 1, 1),
+            ],
+        )
         assert wr.correct == 2
         assert wr.incorrect == 1
         assert wr.ties == 1
 
     def test_confidence_aggregates(self):
-        wr = WeekResult(season=2022, week=1, n_games=3, graded_picks=[
-            _gp("KC", 1, 3), _gp("ARI", 0, 2), _gp("NYG", None, 1),
-        ])
+        wr = WeekResult(
+            season=2022,
+            week=1,
+            n_games=3,
+            graded_picks=[
+                _gp("KC", 1, 3),
+                _gp("ARI", 0, 2),
+                _gp("NYG", None, 1),
+            ],
+        )
         # earned = sum of conf where correct == 1
         assert wr.confidence_earned == 3
         # max = sum of all confidences (None for tie still counts toward max)
@@ -314,7 +372,11 @@ class TestBacktesterCoverageEnforcement:
         db_with_two_weeks.conn.commit()
         bt = Backtester(db_with_two_weeks)
         r = bt.run(
-            AllFavorites(), 2022, 2022, week_start=1, week_end=3,
+            AllFavorites(),
+            2022,
+            2022,
+            week_start=1,
+            week_end=3,
             require_full_coverage=False,
         )
         # Strategy itself skips the NULL-spread row, so total picks is unchanged
@@ -327,14 +389,20 @@ class TestBacktesterPersist:
     def test_persist_writes_run_and_picks(self, db_with_two_weeks):
         bt = Backtester(db_with_two_weeks)
         r = bt.run(
-            ConfidenceBySpread(), 2022, 2022, week_start=1, week_end=2,
-            persist=True, note="phase 2 acceptance",
+            ConfidenceBySpread(),
+            2022,
+            2022,
+            week_start=1,
+            week_end=2,
+            persist=True,
+            note="phase 2 acceptance",
         )
         assert r.run_id is not None
 
         runs = pd.read_sql(
             "SELECT * FROM backtest_runs WHERE run_id = ?",
-            db_with_two_weeks.conn, params=(r.run_id,),
+            db_with_two_weeks.conn,
+            params=(r.run_id,),
         )
         assert len(runs) == 1
         run = runs.iloc[0]
@@ -347,7 +415,8 @@ class TestBacktesterPersist:
 
         picks = pd.read_sql(
             "SELECT * FROM backtest_picks WHERE run_id = ? ORDER BY pick_id",
-            db_with_two_weeks.conn, params=(r.run_id,),
+            db_with_two_weeks.conn,
+            params=(r.run_id,),
         )
         # Week 1: 4 picks; Week 2: 3 picks → 7 picks
         assert len(picks) == 7
@@ -360,7 +429,8 @@ class TestBacktesterPersist:
         r = bt.run(AllFavorites(), 2022, 2022, week_start=1, week_end=2, persist=True)
         runs = pd.read_sql(
             "SELECT note FROM backtest_runs WHERE run_id = ?",
-            db_with_two_weeks.conn, params=(r.run_id,),
+            db_with_two_weeks.conn,
+            params=(r.run_id,),
         )
         assert pd.isna(runs.iloc[0]["note"])
 
@@ -373,7 +443,8 @@ class TestBacktesterPersist:
         db_with_two_weeks.conn.commit()
         remaining = pd.read_sql(
             "SELECT COUNT(*) AS n FROM backtest_picks WHERE run_id = ?",
-            db_with_two_weeks.conn, params=(r.run_id,),
+            db_with_two_weeks.conn,
+            params=(r.run_id,),
         )
         assert remaining.iloc[0]["n"] == 0
 
@@ -383,11 +454,19 @@ class TestCompare:
         bt = Backtester(db_with_two_weeks)
         df = bt.compare(
             [AllFavorites(), ConfidenceBySpread()],
-            season_start=2022, season_end=2022, week_start=1, week_end=2,
+            season_start=2022,
+            season_end=2022,
+            week_start=1,
+            week_end=2,
         )
         assert list(df.columns) >= [
-            "strategy", "n_games", "correct", "incorrect",
-            "ties", "win_rate", "confidence_pct",
+            "strategy",
+            "n_games",
+            "correct",
+            "incorrect",
+            "ties",
+            "win_rate",
+            "confidence_pct",
         ]
         assert set(df["strategy"]) == {"AllFavorites", "ConfidenceBySpread"}
         # win_rate should be sorted descending
@@ -428,28 +507,39 @@ class TestSpreadToWp:
 class TestWinProbBlend:
     def test_zero_advantage_matches_favorite(self):
         """With advantage=0, picks must agree with AllFavorites direction."""
-        df = pd.DataFrame([
-            {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
-            {"game_id": "g2", "home_team": "MIN", "away_team": "GB", "spread_line": -3.0},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 6.5},
+                {"game_id": "g2", "home_team": "MIN", "away_team": "GB", "spread_line": -3.0},
+            ]
+        )
         wpb = {p.game_id: p.selected_team for p in WinProbBlend(home_advantage=0.0).pick(df)}
         af = {p.game_id: p.selected_team for p in AllFavorites().pick(df)}
         assert wpb == af
 
     def test_home_advantage_flips_close_games(self):
         """A 1-pt away favorite + 2.5 home boost flips to home pick."""
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "BUF", "away_team": "MIA", "spread_line": -1.0,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "BUF",
+                    "away_team": "MIA",
+                    "spread_line": -1.0,
+                }
+            ]
+        )
         # adjusted = -1 + 2.5 = +1.5 → home WP > 0.5 → pick BUF
         assert WinProbBlend(home_advantage=2.5).pick(df)[0].selected_team == "BUF"
 
     def test_confidence_assigned_descending(self):
-        df = pd.DataFrame([
-            {"game_id": "g1", "home_team": "AAA", "away_team": "BBB", "spread_line": 2.0},
-            {"game_id": "g2", "home_team": "CCC", "away_team": "DDD", "spread_line": 14.0},
-            {"game_id": "g3", "home_team": "EEE", "away_team": "FFF", "spread_line": -7.0},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "g1", "home_team": "AAA", "away_team": "BBB", "spread_line": 2.0},
+                {"game_id": "g2", "home_team": "CCC", "away_team": "DDD", "spread_line": 14.0},
+                {"game_id": "g3", "home_team": "EEE", "away_team": "FFF", "spread_line": -7.0},
+            ]
+        )
         picks = {p.game_id: p.confidence for p in WinProbBlend(home_advantage=0).pick(df)}
         # |edge| ranking: 14.0 > 7.0 > 2.0 → conf 3, 2, 1
         assert picks["g2"] == 3
@@ -457,10 +547,12 @@ class TestWinProbBlend:
         assert picks["g1"] == 1
 
     def test_skips_null_spread(self):
-        df = pd.DataFrame([
-            {"game_id": "g1", "home_team": "AAA", "away_team": "BBB", "spread_line": 7.0},
-            {"game_id": "g2", "home_team": "CCC", "away_team": "DDD", "spread_line": None},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "g1", "home_team": "AAA", "away_team": "BBB", "spread_line": 7.0},
+                {"game_id": "g2", "home_team": "CCC", "away_team": "DDD", "spread_line": None},
+            ]
+        )
         picks = WinProbBlend().pick(df)
         assert len(picks) == 1 and picks[0].game_id == "g1"
 
@@ -471,62 +563,118 @@ class TestWinProbBlend:
 
 class TestHomeBoost:
     def test_picks_home_when_close(self):
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "BUF", "away_team": "MIA", "spread_line": -2.0,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "BUF",
+                    "away_team": "MIA",
+                    "spread_line": -2.0,
+                }
+            ]
+        )
         # |spread|=2 ≤ threshold=3 → pick home (BUF) even though MIA was favored
         assert HomeBoost(threshold=3.0).pick(df)[0].selected_team == "BUF"
 
     def test_picks_favorite_when_not_close(self):
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "MIN", "away_team": "GB", "spread_line": -7.0,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "MIN",
+                    "away_team": "GB",
+                    "spread_line": -7.0,
+                }
+            ]
+        )
         # |spread|=7 > threshold=3 → favorite (GB away)
         assert HomeBoost(threshold=3.0).pick(df)[0].selected_team == "GB"
 
     def test_threshold_is_inclusive(self):
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "X", "away_team": "Y", "spread_line": -3.0,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "X",
+                    "away_team": "Y",
+                    "spread_line": -3.0,
+                }
+            ]
+        )
         # |spread|=3 == threshold → pick home
         assert HomeBoost(threshold=3.0).pick(df)[0].selected_team == "X"
 
     def test_pickem_picks_home(self):
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "X", "away_team": "Y", "spread_line": 0.0,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "X",
+                    "away_team": "Y",
+                    "spread_line": 0.0,
+                }
+            ]
+        )
         assert HomeBoost(threshold=3.0).pick(df)[0].selected_team == "X"
 
 
 class TestUnderdogTargeted:
     def test_picks_dog_when_close(self):
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "BUF", "away_team": "MIA", "spread_line": 2.5,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "BUF",
+                    "away_team": "MIA",
+                    "spread_line": 2.5,
+                }
+            ]
+        )
         # BUF home favored by 2.5 → dog is MIA (away). |spread|=2.5 ≤ 3 → pick MIA
         assert UnderdogTargeted(threshold=3.0).pick(df)[0].selected_team == "MIA"
 
     def test_picks_favorite_when_not_close(self):
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 7.0,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "KC",
+                    "away_team": "ARI",
+                    "spread_line": 7.0,
+                }
+            ]
+        )
         # |spread|=7 > 3 → pick favorite (KC home)
         assert UnderdogTargeted(threshold=3.0).pick(df)[0].selected_team == "KC"
 
     def test_pickem_falls_back_to_home(self):
         """For spread=0, neither team is the 'dog' — keep home default."""
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "X", "away_team": "Y", "spread_line": 0.0,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "X",
+                    "away_team": "Y",
+                    "spread_line": 0.0,
+                }
+            ]
+        )
         assert UnderdogTargeted(threshold=3.0).pick(df)[0].selected_team == "X"
 
 
 class TestConsensus:
     def test_majority_wins(self):
         """3 strategies: 2 vote KC, 1 votes ARI → KC wins."""
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "KC", "away_team": "ARI", "spread_line": 2.0,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "KC",
+                    "away_team": "ARI",
+                    "spread_line": 2.0,
+                }
+            ]
+        )
         # AllFavorites picks KC (positive spread, home favored)
         # HomeBoost(threshold=3) picks KC (close → home)
         # UnderdogTargeted(threshold=3) picks ARI (close → dog)
@@ -536,9 +684,16 @@ class TestConsensus:
 
     def test_tie_falls_back_to_favorite(self):
         """2-2 vote tie → pick favorite by spread."""
-        df = pd.DataFrame([{
-            "game_id": "g1", "home_team": "BUF", "away_team": "MIA", "spread_line": 1.5,
-        }])
+        df = pd.DataFrame(
+            [
+                {
+                    "game_id": "g1",
+                    "home_team": "BUF",
+                    "away_team": "MIA",
+                    "spread_line": 1.5,
+                }
+            ]
+        )
         # BUF home favored by 1.5
         # AllFavorites: BUF
         # HomeBoost(threshold=3): BUF (close → home)
@@ -552,20 +707,24 @@ class TestConsensus:
         assert c.pick(df)[0].selected_team == "BUF"
 
     def test_confidence_ranked_by_abs_spread(self):
-        df = pd.DataFrame([
-            {"game_id": "g1", "home_team": "AAA", "away_team": "BBB", "spread_line": 2.0},
-            {"game_id": "g2", "home_team": "CCC", "away_team": "DDD", "spread_line": 10.0},
-            {"game_id": "g3", "home_team": "EEE", "away_team": "FFF", "spread_line": -6.0},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "g1", "home_team": "AAA", "away_team": "BBB", "spread_line": 2.0},
+                {"game_id": "g2", "home_team": "CCC", "away_team": "DDD", "spread_line": 10.0},
+                {"game_id": "g3", "home_team": "EEE", "away_team": "FFF", "spread_line": -6.0},
+            ]
+        )
         c = Consensus([AllFavorites(), HomeBoost(3.0)])
         by_id = {p.game_id: p.confidence for p in c.pick(df)}
         assert by_id == {"g2": 3, "g3": 2, "g1": 1}
 
     def test_skips_null_spread(self):
-        df = pd.DataFrame([
-            {"game_id": "g1", "home_team": "X", "away_team": "Y", "spread_line": 5.0},
-            {"game_id": "g2", "home_team": "P", "away_team": "Q", "spread_line": None},
-        ])
+        df = pd.DataFrame(
+            [
+                {"game_id": "g1", "home_team": "X", "away_team": "Y", "spread_line": 5.0},
+                {"game_id": "g2", "home_team": "P", "away_team": "Q", "spread_line": None},
+            ]
+        )
         picks = Consensus([AllFavorites()]).pick(df)
         assert len(picks) == 1 and picks[0].game_id == "g1"
 
@@ -606,7 +765,8 @@ class TestPhase3WithBacktester:
         r = bt.run(c, 2022, 2022, week_start=1, week_end=2, persist=True)
         runs = pd.read_sql(
             "SELECT strategy_params FROM backtest_runs WHERE run_id = ?",
-            db_with_two_weeks.conn, params=(r.run_id,),
+            db_with_two_weeks.conn,
+            params=(r.run_id,),
         )
         params = json.loads(runs.iloc[0]["strategy_params"])
         assert [s["name"] for s in params["strategies"]] == ["AllFavorites", "HomeBoost"]

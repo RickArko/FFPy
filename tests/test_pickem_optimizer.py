@@ -29,9 +29,7 @@ from ffpy.pickem_optimizer import (
 # ---------------------------------------------------------------------------
 
 
-def _seed_season(
-    cur, season: int, rows: List[Tuple[str, str, str, int, int, float]]
-) -> None:
+def _seed_season(cur, season: int, rows: List[Tuple[str, str, str, int, int, float]]) -> None:
     """rows: list of (game_id_suffix, home, away, home_score, away_score, spread)."""
     for suffix, home, away, hs, as_, sp in rows:
         cur.execute(
@@ -80,7 +78,7 @@ def db_multi_season(fresh_db: FFPyDatabase) -> FFPyDatabase:
         2021,
         [
             ("A", "HA1", "AA1", 17, 14, -2.0),  # away "fav" by 2 → home wins (upset)
-            ("B", "HB1", "AB1", 28, 14, 5.0),   # home fav, home wins
+            ("B", "HB1", "AB1", 28, 14, 5.0),  # home fav, home wins
             ("C", "HC1", "AC1", 14, 24, -4.0),  # away fav by 4, away wins
             ("D", "HD1", "AD1", 35, 17, 10.0),  # home fav big, home wins
         ],
@@ -93,7 +91,7 @@ def db_multi_season(fresh_db: FFPyDatabase) -> FFPyDatabase:
         2022,
         [
             ("A", "HA2", "AA2", 14, 17, -2.0),  # away fav by 2, away wins
-            ("B", "HB2", "AB2", 28, 14, 5.0),   # home fav, home wins
+            ("B", "HB2", "AB2", 28, 14, 5.0),  # home fav, home wins
             ("C", "HC2", "AC2", 14, 24, -4.0),  # away fav by 4, away wins
             ("D", "HD2", "AD2", 35, 17, 10.0),  # home fav big, home wins
         ],
@@ -216,9 +214,7 @@ class TestGridSearch:
     def test_custom_metric(self, db_multi_season):
         """A user-supplied metric callable should be ranked correctly."""
         # Negative win_rate → optimizer should pick the WORST strategy
-        opt = StrategyOptimizer(
-            db_multi_season, HomeBoost, metric=lambda r: -r.win_rate
-        )
+        opt = StrategyOptimizer(db_multi_season, HomeBoost, metric=lambda r: -r.win_rate)
         r = opt.grid_search(
             {"threshold": [1.0, 3.0, 6.0]},
             season_start=2021,
@@ -240,13 +236,15 @@ class TestRandomSearch:
         r1 = opt.random_search(
             {"threshold": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]},
             n_iter=4,
-            season_start=2021, season_end=2021,
+            season_start=2021,
+            season_end=2021,
             seed=7,
         )
         r2 = opt.random_search(
             {"threshold": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]},
             n_iter=4,
-            season_start=2021, season_end=2021,
+            season_start=2021,
+            season_end=2021,
             seed=7,
         )
         assert r1.best_params == r2.best_params
@@ -259,7 +257,8 @@ class TestRandomSearch:
         r = opt.random_search(
             {"threshold": [1.0, 3.0, 6.0]},
             n_iter=10,
-            season_start=2021, season_end=2021,
+            season_start=2021,
+            season_end=2021,
         )
         assert len(r.leaderboard) <= 3
 
@@ -267,16 +266,20 @@ class TestRandomSearch:
         opt = StrategyOptimizer(db_multi_season, HomeBoost)
         with pytest.raises(ValueError, match="n_iter"):
             opt.random_search(
-                {"threshold": [1.0]}, n_iter=0,
-                season_start=2021, season_end=2021,
+                {"threshold": [1.0]},
+                n_iter=0,
+                season_start=2021,
+                season_end=2021,
             )
 
     def test_empty_dist_raises(self, db_multi_season):
         opt = StrategyOptimizer(db_multi_season, HomeBoost)
         with pytest.raises(ValueError, match="param_dist"):
             opt.random_search(
-                {}, n_iter=5,
-                season_start=2021, season_end=2021,
+                {},
+                n_iter=5,
+                season_start=2021,
+                season_end=2021,
             )
 
 
@@ -384,7 +387,9 @@ class TestWalkForward:
         opt = StrategyOptimizer(db_multi_season, HomeBoost)
         with pytest.raises(ValueError, match=r"≥ 2 seasons"):
             opt.walk_forward(
-                {"threshold": [1.0]}, seasons=[2021], min_train_seasons=1,
+                {"threshold": [1.0]},
+                seasons=[2021],
+                min_train_seasons=1,
             )
 
     def test_to_frame_returns_dataframe(self, db_multi_season):
@@ -395,8 +400,15 @@ class TestWalkForward:
         )
         df = r.to_frame()
         assert len(df) == 2
-        for col in ("train_seasons", "test_season", "best_params",
-                    "train_metric", "test_metric", "gap", "n_test_games"):
+        for col in (
+            "train_seasons",
+            "test_season",
+            "best_params",
+            "train_metric",
+            "test_metric",
+            "gap",
+            "n_test_games",
+        ):
             assert col in df.columns
 
     def test_avg_metrics_match_fold_means(self, db_multi_season):
