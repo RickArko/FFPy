@@ -6,8 +6,8 @@ from the nflverse ecosystem via nflreadpy.
 """
 
 import logging
-from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Dict, Optional
+
 import pandas as pd
 import polars as pl
 
@@ -19,8 +19,8 @@ except ImportError:
         "uv add 'nflreadpy @ git+https://github.com/nflverse/nflreadpy'"
     )
 
-from ffpy.database import FFPyDatabase
 from ffpy.config import Config
+from ffpy.database import FFPyDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +181,7 @@ class NFLVerseLoader:
 
         if verbose:
             print(f"\n{'=' * 60}")
-            print(f"Historical load complete!")
+            print("Historical load complete!")
             print(f"  Total games: {total_stats['games']}")
             print(f"  Total plays: {total_stats['plays']}")
             if total_stats["ftn"] > 0:
@@ -299,7 +299,7 @@ class NFLVerseLoader:
             # Handle duplicate games (already exists)
             if "UNIQUE constraint failed" in str(e):
                 if verbose:
-                    print(f"  [OK] Games already exist (skipped duplicates)")
+                    print("  [OK] Games already exist (skipped duplicates)")
                 return 0
             else:
                 raise
@@ -324,7 +324,7 @@ class NFLVerseLoader:
             # Handle duplicate plays (already exists)
             if "UNIQUE constraint failed" in str(e):
                 if verbose:
-                    print(f"  [OK] Plays already exist (skipped duplicates)")
+                    print("  [OK] Plays already exist (skipped duplicates)")
                 return 0
             else:
                 raise
@@ -348,7 +348,7 @@ class NFLVerseLoader:
         except Exception as e:
             if "UNIQUE constraint failed" in str(e):
                 if verbose:
-                    print(f"  [OK] FTN charting already exists (skipped duplicates)")
+                    print("  [OK] FTN charting already exists (skipped duplicates)")
                 return 0
             else:
                 raise
@@ -372,7 +372,7 @@ class NFLVerseLoader:
         except Exception as e:
             if "UNIQUE constraint failed" in str(e):
                 if verbose:
-                    print(f"  [OK] Snap counts already exist (skipped duplicates)")
+                    print("  [OK] Snap counts already exist (skipped duplicates)")
                 return 0
             else:
                 raise

@@ -19,12 +19,12 @@ Setup:
 """
 
 import os
+
 from dotenv import load_dotenv
 
-from ffpy.integrations.espn_league import ESPNLeagueIntegration
 from ffpy.integrations.espn import ESPNIntegration
-from ffpy.optimizer import LineupOptimizer, RosterConstraints, Player, PlayerStatus
-from ffpy.scoring import ScoringConfig
+from ffpy.integrations.espn_league import ESPNLeagueIntegration
+from ffpy.optimizer import LineupOptimizer, Player, PlayerStatus, RosterConstraints
 
 # Load environment variables
 load_dotenv()

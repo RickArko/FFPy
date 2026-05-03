@@ -109,10 +109,7 @@ def cmd_collect_stats(args: argparse.Namespace) -> int:
     espn = ESPNIntegration()
     total = 0
     try:
-        print(
-            f"Collecting actual stats for {args.season}, "
-            f"weeks {args.start_week}-{args.end_week}"
-        )
+        print(f"Collecting actual stats for {args.season}, weeks {args.start_week}-{args.end_week}")
         for week in range(args.start_week, args.end_week + 1):
             print(f"[Week {week}/{args.end_week}] ", end="", flush=True)
             if db.check_api_request("espn", args.season, week, "actuals"):

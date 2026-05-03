@@ -5,10 +5,13 @@ This module provides tools to optimize fantasy football lineups using
 constraint-based optimization (Integer Linear Programming).
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
-from enum import Enum
 import json
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import TYPE_CHECKING, Dict, List, Optional, Set
+
+if TYPE_CHECKING:
+    from pulp import LpVariable
 
 
 class PlayerStatus(Enum):
@@ -301,12 +304,12 @@ class LineupOptimizer:
         """
         try:
             from pulp import (
+                PULP_CBC_CMD,
                 LpMaximize,
                 LpProblem,
+                LpStatus,
                 LpVariable,
                 lpSum,
-                LpStatus,
-                PULP_CBC_CMD,
                 value,
             )
         except ImportError:

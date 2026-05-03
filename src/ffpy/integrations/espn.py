@@ -1,8 +1,10 @@
 """ESPN Fantasy Football API integration."""
 
-import requests
-import pandas as pd
 from typing import Optional
+
+import pandas as pd
+import requests
+
 from .base import BaseAPIIntegration
 
 
@@ -139,25 +141,25 @@ class ESPNIntegration(BaseAPIIntegration):
                 if position == "QB":
                     player_record.update(
                         {
-                            "passing_yards": projected_stats.get("passing_yards", 0),
-                            "passing_tds": projected_stats.get("passing_tds", 0),
-                            "rushing_yards": projected_stats.get("rushing_yards", 0),
+                            "passing_yards": extracted_stats.get("passing_yards", 0),
+                            "passing_tds": extracted_stats.get("passing_tds", 0),
+                            "rushing_yards": extracted_stats.get("rushing_yards", 0),
                         }
                     )
                 elif position in ["RB", "WR", "TE"]:
                     player_record.update(
                         {
-                            "rushing_yards": projected_stats.get("rushing_yards", 0),
-                            "rushing_tds": projected_stats.get("rushing_tds", 0),
-                            "receiving_yards": projected_stats.get("receiving_yards", 0),
-                            "receiving_tds": projected_stats.get("receiving_tds", 0),
-                            "receptions": projected_stats.get("receptions", 0),
+                            "rushing_yards": extracted_stats.get("rushing_yards", 0),
+                            "rushing_tds": extracted_stats.get("rushing_tds", 0),
+                            "receiving_yards": extracted_stats.get("receiving_yards", 0),
+                            "receiving_tds": extracted_stats.get("receiving_tds", 0),
+                            "receptions": extracted_stats.get("receptions", 0),
                         }
                     )
 
                 players.append(player_record)
 
-            except Exception as e:
+            except Exception:
                 # Skip malformed player data
                 continue
 

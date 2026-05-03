@@ -7,11 +7,11 @@ including rosters, lineups, standings, and matchups.
 Requires authentication cookies (swid and espn_s2) for private leagues.
 """
 
-import requests
-import pandas as pd
-from typing import Optional, List, Dict, Any
 import os
-from ffpy.config import Config
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+import requests
 
 
 class ESPNLeagueIntegration:
@@ -350,6 +350,7 @@ class ESPNLeagueIntegration:
 def main():
     """Example usage of ESPN League Integration."""
     import os
+
     from dotenv import load_dotenv
 
     load_dotenv()

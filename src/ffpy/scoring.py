@@ -5,10 +5,9 @@ This module handles different fantasy football scoring systems (PPR, Half-PPR, S
 and provides utilities to convert player stats into fantasy points.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, Optional
 import json
-from pathlib import Path
+from dataclasses import dataclass, field
+from typing import Dict
 
 
 @dataclass

@@ -1,15 +1,15 @@
 """Fantasy Football Point Projection Web App."""
 
-import streamlit as st
 import pandas as pd
+import streamlit as st
+
+from ffpy.config import Config
 from ffpy.data import (
-    get_projections,
-    get_sample_projections,
-    get_positions,
     filter_by_position,
+    get_positions,
+    get_projections,
     get_top_n_players,
 )
-from ffpy.config import Config
 
 
 def main():

@@ -1,12 +1,13 @@
 """Data module for fantasy football projections."""
 
+from typing import List
+
 import pandas as pd
 import streamlit as st
-from typing import List, Dict, Optional
+
 from ffpy.config import Config
 from ffpy.integrations import ESPNIntegration, SportsDataIntegration
 from ffpy.projections import HistoricalProjectionModel
-from ffpy.database import FFPyDatabase
 
 
 def get_sample_projections(week: int = 1) -> pd.DataFrame:

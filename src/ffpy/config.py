@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -26,8 +27,43 @@ class Config:
     CACHE_TTL = int(os.getenv("CACHE_TTL", "3600"))  # 1 hour default
 
     # Database Configuration
-    DATABASE_PATH = os.getenv("DATABASE_PATH", str(Path.home() / ".ffpy" / "ffpy.db"))
+    DATABASE_PATH = os.path.expanduser(
+        os.getenv("DATABASE_PATH", str(Path.home() / ".ffpy" / "ffpy.db"))
+    )
     DATABASE_TYPE = os.getenv("DATABASE_TYPE", "sqlite")
+
+    # Public web app configuration
+    PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "http://localhost:8000")
+    WEB_AUTH_ENABLED = os.getenv("WEB_AUTH_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+
+    # Supabase auth configuration
+    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+    SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+    SUPABASE_JWT_AUDIENCE = os.getenv("SUPABASE_JWT_AUDIENCE", "authenticated")
+    SUPABASE_FETCH_USER_ON_VERIFY = os.getenv("SUPABASE_FETCH_USER_ON_VERIFY", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+    # Anti-abuse configuration
+    TURNSTILE_SITE_KEY = os.getenv("TURNSTILE_SITE_KEY", "")
+    TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "")
+    UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL", "")
+    UPSTASH_REDIS_REST_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
+    ABUSE_HASH_SALT = os.getenv("ABUSE_HASH_SALT", "")
+    SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    MAX_BACKTESTS_PER_HOUR = int(os.getenv("MAX_BACKTESTS_PER_HOUR", "10"))
+    MAX_COMPARES_PER_HOUR = int(os.getenv("MAX_COMPARES_PER_HOUR", "3"))
+    MAX_DAILY_COST_UNITS = int(os.getenv("MAX_DAILY_COST_UNITS", "100"))
 
     @classmethod
     def get_api_provider(cls) -> str:
@@ -76,4 +112,5 @@ class Config:
             "sportsdata_configured": cls.is_sportsdata_configured(),
             "nfl_season": cls.NFL_SEASON,
             "cache_ttl": cls.CACHE_TTL,
+            "web_auth_enabled": cls.WEB_AUTH_ENABLED,
         }

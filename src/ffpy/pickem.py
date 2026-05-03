@@ -9,11 +9,12 @@ This module helps with weekly NFL pick'em competitions by providing:
 - Optimal pick strategies
 """
 
-import pandas as pd
-import requests
-from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+
+import pandas as pd
+import requests
 
 
 @dataclass
@@ -211,7 +212,7 @@ class PickemAnalyzer:
             if event.get("date"):
                 try:
                     game_time = datetime.fromisoformat(event["date"].replace("Z", "+00:00"))
-                except:
+                except (ValueError, TypeError, AttributeError):
                     pass
 
             return NFLGame(

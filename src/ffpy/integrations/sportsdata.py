@@ -1,8 +1,10 @@
 """SportsDataIO Fantasy Football API integration."""
 
-import requests
-import pandas as pd
 from typing import Optional
+
+import pandas as pd
+import requests
+
 from .base import BaseAPIIntegration
 
 
@@ -71,15 +73,6 @@ class SportsDataIntegration(BaseAPIIntegration):
         Returns:
             DataFrame with position projections
         """
-        # SportsDataIO endpoint format
-        endpoint_map = {
-            "QB": "scores/json/FantasyDefenseProjectionsByWeek",  # Changed to a generic one
-            "RB": "scores/json/FantasyDefenseProjectionsByWeek",
-            "WR": "scores/json/FantasyDefenseProjectionsByWeek",
-            "TE": "scores/json/FantasyDefenseProjectionsByWeek",
-        }
-
-        # Actually, let's use the player projections endpoint
         url = f"{self.BASE_URL}/projections/json/PlayerGameProjectionStatsByWeek/{season}/{week}"
 
         headers = {"Ocp-Apim-Subscription-Key": self.api_key}
@@ -160,7 +153,7 @@ class SportsDataIntegration(BaseAPIIntegration):
                 if fantasy_points > 0:
                     players.append(player_record)
 
-            except Exception as e:
+            except Exception:
                 continue
 
         return pd.DataFrame(players)

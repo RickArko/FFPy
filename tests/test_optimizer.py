@@ -1,11 +1,12 @@
 """Unit tests for lineup optimizer components."""
 
 import pytest
+
 from ffpy.optimizer import (
+    LineupResult,
     Player,
     PlayerStatus,
     RosterConstraints,
-    LineupResult,
 )
 
 

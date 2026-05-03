@@ -18,7 +18,6 @@ from ffpy.optimizer import (
     RosterConstraints,
 )
 
-
 ROSTER_PRESETS = {
     "Skill Positions Only (QB/RB/WR/TE/FLEX)": RosterConstraints.no_kicker_dst,
     "Standard (QB/RB/WR/TE/FLEX/K/DST)": RosterConstraints.standard,
@@ -202,9 +201,7 @@ def main():
             )
 
     # === RESULTS TABS ===
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["🟢 Starting Lineup", "💺 Bench", "📊 Breakdown", "📋 Text Report"]
-    )
+    tab1, tab2, tab3, tab4 = st.tabs(["🟢 Starting Lineup", "💺 Bench", "📊 Breakdown", "📋 Text Report"])
 
     with tab1:
         _show_starters(result)

@@ -1,11 +1,11 @@
 """Database operations for FFPy - Focus on historical actual stats."""
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+from typing import Dict, List, Optional
+
 import pandas as pd
-from datetime import datetime, date
-import os
 
 
 class FFPyDatabase:
@@ -35,13 +35,17 @@ class FFPyDatabase:
         self.init_database()
 
     def init_database(self):
-        """Create tables if they don't exist."""
-        schema_path = Path(__file__).parent / "migrations" / "001_initial_schema.sql"
+        """Create tables if they don't exist.
 
-        with open(schema_path, "r") as f:
-            schema_sql = f.read()
-
-        self.conn.executescript(schema_sql)
+        Runs 001 (core: players, actual_stats, projections, api_requests) and 003
+        (backtest: backtest_runs, backtest_picks). The 002 pbp schema is opt-in
+        via run_migration('002_play_by_play_schema.sql') because it's heavy and
+        not every workflow needs it.
+        """
+        migrations_dir = Path(__file__).parent / "migrations"
+        for name in ("001_initial_schema.sql", "003_backtest_schema.sql"):
+            with open(migrations_dir / name, "r") as f:
+                self.conn.executescript(f.read())
         self.conn.commit()
 
     def close(self):
@@ -466,7 +470,7 @@ class FFPyDatabase:
                     batch_inserted = len(batch)
                     inserted += batch_inserted
                     pbar.update(batch_inserted)
-                except Exception as e:
+                except Exception:
                     # If batch fails (likely duplicates), try row by row
                     batch_skipped = 0
                     for _, row in batch.iterrows():
@@ -544,14 +548,14 @@ class FFPyDatabase:
                     batch_inserted = len(batch)
                     inserted += batch_inserted
                     pbar.update(batch_inserted)
-                except:
+                except Exception:
                     # Skip duplicates
                     for _, row in batch.iterrows():
                         try:
                             row_df = row.to_frame().T
                             row_df.to_sql("ftn_charting", self.conn, if_exists="append", index=False)
                             inserted += 1
-                        except:
+                        except Exception:
                             pass
                         pbar.update(1)
 
@@ -616,14 +620,14 @@ class FFPyDatabase:
                     batch_inserted = len(batch)
                     inserted += batch_inserted
                     pbar.update(batch_inserted)
-                except:
+                except Exception:
                     # Skip duplicates
                     for _, row in batch.iterrows():
                         try:
                             row_df = row.to_frame().T
                             row_df.to_sql("snap_counts", self.conn, if_exists="append", index=False)
                             inserted += 1
-                        except:
+                        except Exception:
                             pass
                         pbar.update(1)
 
@@ -898,7 +902,7 @@ class FFPyDatabase:
         Returns:
             Dictionary of red zone stats
         """
-        query = f"""
+        query = """
             SELECT
                 COUNT(*) as plays,
                 SUM(CASE WHEN rusher_player_name = ? THEN 1 ELSE 0 END) as rushes,
@@ -960,3 +964,108 @@ class FFPyDatabase:
         query += " ORDER BY week"
 
         return pd.read_sql(query, self.conn, params=params)
+
+    # ==================== HISTORICAL GAMES (BACKTEST SUPPORT) ====================
+
+    def get_historical_games(
+        self,
+        season: int,
+        week: Optional[int] = None,
+        season_type: str = "REG",
+        finished_only: bool = True,
+    ) -> pd.DataFrame:
+        """Fetch completed games for backtesting pick'em strategies.
+
+        Returns one row per game with pre-game market data (spread_line,
+        total_line) and final scores. Only pulls finished games by default so
+        that backtesters never accidentally see in-progress or unplayed weeks.
+
+        Args:
+            season: NFL season year.
+            week: Optional week filter (None = whole season).
+            season_type: 'REG', 'POST', or 'PRE'. Default 'REG'.
+            finished_only: If True (default), exclude rows where either score is NULL.
+
+        Returns:
+            DataFrame with: game_id, season, season_type, week, game_date,
+            home_team, away_team, home_score, away_score, spread_line,
+            total_line, roof, surface, temp, wind. Sorted by week, game_date.
+        """
+        query = """
+            SELECT game_id, season, season_type, week, game_date,
+                   home_team, away_team, home_score, away_score,
+                   spread_line, total_line,
+                   roof, surface, temp, wind
+            FROM games
+            WHERE season = ? AND season_type = ?
+        """
+        params: List = [season, season_type]
+
+        if week is not None:
+            query += " AND week = ?"
+            params.append(week)
+
+        if finished_only:
+            query += " AND home_score IS NOT NULL AND away_score IS NOT NULL"
+
+        query += " ORDER BY week, game_date, game_id"
+        return pd.read_sql(query, self.conn, params=params)
+
+    def get_data_coverage(
+        self,
+        season_start: Optional[int] = None,
+        season_end: Optional[int] = None,
+        season_type: str = "REG",
+    ) -> pd.DataFrame:
+        """Audit historical game-data completeness per (season, week).
+
+        A (season, week) window is "fully_usable" for backtesting only when every
+        game in that window has both a final score and a spread_line. Backtesters
+        should refuse to run over non-fully-usable windows unless explicitly
+        opted in.
+
+        Args:
+            season_start: Inclusive lower bound (None = no bound).
+            season_end:   Inclusive upper bound (None = no bound).
+            season_type: 'REG', 'POST', or 'PRE'. Default 'REG'.
+
+        Returns:
+            DataFrame with: season, week, n_games, with_spread, with_total,
+            with_scores, pct_with_spread, fully_usable (1/0). Sorted by
+            season, week.
+        """
+        clauses = ["season_type = ?"]
+        params: List = [season_type]
+
+        if season_start is not None:
+            clauses.append("season >= ?")
+            params.append(season_start)
+        if season_end is not None:
+            clauses.append("season <= ?")
+            params.append(season_end)
+
+        where_sql = " AND ".join(clauses)
+        query = f"""
+            SELECT
+                season,
+                week,
+                COUNT(*) AS n_games,
+                SUM(CASE WHEN spread_line IS NOT NULL THEN 1 ELSE 0 END) AS with_spread,
+                SUM(CASE WHEN total_line  IS NOT NULL THEN 1 ELSE 0 END) AS with_total,
+                SUM(CASE WHEN home_score IS NOT NULL
+                          AND away_score IS NOT NULL THEN 1 ELSE 0 END) AS with_scores
+            FROM games
+            WHERE {where_sql}
+            GROUP BY season, week
+            ORDER BY season, week
+        """
+        df = pd.read_sql(query, self.conn, params=params)
+
+        if df.empty:
+            return df
+
+        df["pct_with_spread"] = (100.0 * df["with_spread"] / df["n_games"]).round(1)
+        df["fully_usable"] = (
+            (df["with_spread"] == df["n_games"]) & (df["with_scores"] == df["n_games"])
+        ).astype(int)
+        return df
