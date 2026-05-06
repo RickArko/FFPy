@@ -34,7 +34,10 @@
       "Bash(.venv/bin/python -m pytest tests/ --tb=short -q)",
       "Bash(.venv/bin/python *)",
       "Bash(.venv/bin/ruff check *)",
-      "Bash(grep -n \"^\\\\.env$\\\\|^\\\\.env\\\\b\" /home/ricka/Git/FFPy/.gitignore)"
+      "Bash(grep -n \"^\\\\.env$\\\\|^\\\\.env\\\\b\" /home/ricka/Git/FFPy/.gitignore)",
+      "Bash(gh repo *)",
+      "Bash(pnpm --filter @open-design/desktop build)",
+      "Bash(pnpm tools-dev *)"
     ]
   }
 }
