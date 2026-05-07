@@ -334,9 +334,7 @@ def _estimate_cost_units(
 
 
 def _public_auth_config(auth_enabled: bool) -> Dict[str, Any]:
-    browser_auth_available = bool(
-        auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_ANON_KEY
-    )
+    browser_auth_available = bool(auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_ANON_KEY)
     return {
         "auth_required": auth_enabled,
         "browser_auth_available": browser_auth_available,

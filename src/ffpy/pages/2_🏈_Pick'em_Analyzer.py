@@ -4,7 +4,6 @@ NFL Pick'em Competition Analyzer
 Interactive tool for analyzing NFL games and generating optimal pick'em strategies.
 """
 
-
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
