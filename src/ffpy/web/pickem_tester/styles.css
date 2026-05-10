@@ -1,24 +1,110 @@
+/* =========================================================================
+   FFPy Pick'em — token system + base. Tokens originate from
+   design-export/theme.css (single source of truth). Component styles below
+   were not changed; Variant C "Stadium" Results styles appended near bottom.
+   ========================================================================= */
+
 :root {
-  --bg: #f5efe3;
-  --bg-accent: #eadcc2;
-  --surface: rgba(255, 252, 246, 0.86);
-  --surface-strong: rgba(255, 252, 246, 0.96);
-  --line: rgba(20, 53, 74, 0.14);
-  --ink: #1a2f3c;
-  --muted: #5e7280;
-  --teal: #0f6776;
-  --teal-deep: #0a4955;
-  --gold: #d18f2c;
-  --rust: #a44621;
-  --success: #167353;
-  --danger: #9b2c2c;
-  --shadow: 0 24px 60px rgba(26, 47, 60, 0.12);
-  font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+  /* ---- Brand color ---------------------------------------------------- */
+  --bg:              #f5efe3;
+  --bg-accent:       #eadcc2;
+  --surface:         rgba(255, 252, 246, 0.86);
+  --surface-strong:  rgba(255, 252, 246, 0.96);
+  --surface-deep:    rgba(255, 248, 234, 0.92);
+  --line:            rgba(20, 53, 74, 0.14);
+  --line-strong:     rgba(20, 53, 74, 0.22);
+  --ink:             #1a2f3c;
+  --ink-soft:        #2a4250;
+  --muted:           #5e7280;
+  --teal:            #0f6776;
+  --teal-deep:       #0a4955;
+  --teal-faint:      rgba(15, 103, 118, 0.08);
+  --gold:            #d18f2c;
+  --gold-soft:       rgba(209, 143, 44, 0.18);
+  --rust:            #a44621;
+  --success:         #167353;
+  --success-soft:    rgba(22, 115, 83, 0.12);
+  --danger:          #9b2c2c;
+  --danger-soft:     rgba(155, 44, 44, 0.12);
+  --cream-on-teal:   #f8f4eb;
+
+  /* ---- Type ----------------------------------------------------------- */
+  --font-sans:       "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+  --font-display:    Georgia, "Times New Roman", "Iowan Old Style", serif;
+  --font-mono:       "SF Mono", "JetBrains Mono", Consolas, monospace;
+  --fs-xs:           0.75rem;
+  --fs-sm:           0.875rem;
+  --fs-base:         1rem;
+  --fs-md:           1.125rem;
+  --fs-lg:           1.32rem;
+  --fs-xl:           1.75rem;
+  --fs-2xl:          2.4rem;
+  --fs-display:      clamp(2.6rem, 5.4vw, 4.6rem);
+  --fs-hero-h1:      clamp(2.1rem, 4vw, 3.6rem);
+  --lh-tight:        1.05;
+  --lh-snug:         1.25;
+  --lh-base:         1.55;
+  --tracking-loose:  0.16em;
+  --tracking-snug:   -0.01em;
+
+  /* ---- Spacing -------------------------------------------------------- */
+  --space-1: 4px; --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-7: 32px;
+  --space-8: 48px; --space-9: 64px;
+
+  /* ---- Radii ---------------------------------------------------------- */
+  --r-xs: 8px; --r-sm: 12px; --r-md: 16px;
+  --r-lg: 20px; --r-xl: 24px; --r-2xl: 28px;
+  --r-pill: 999px;
+
+  /* ---- Elevation ------------------------------------------------------ */
+  --elev-1: 0 4px 12px rgba(26, 47, 60, 0.06);
+  --elev-2: 0 12px 30px rgba(15, 103, 118, 0.14);
+  --elev-3: 0 24px 60px rgba(26, 47, 60, 0.16);
+  --shadow: var(--elev-3);
+
+  /* ---- Motion --------------------------------------------------------- */
+  --ease-out:      cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 140ms;
+  --duration-base: 220ms;
+  --duration-slow: 420ms;
+
+  font-family: var(--font-sans);
   color: var(--ink);
   background:
-    radial-gradient(circle at top left, rgba(209, 143, 44, 0.18), transparent 32%),
-    radial-gradient(circle at top right, rgba(15, 103, 118, 0.2), transparent 36%),
+    radial-gradient(circle at top left,  var(--gold-soft), transparent 32%),
+    radial-gradient(circle at top right, rgba(15, 103, 118, 0.20), transparent 36%),
     linear-gradient(180deg, #f8f4eb 0%, var(--bg) 100%);
+}
+
+/* ---- Helper classes -------------------------------------------------- */
+.display { font-family: var(--font-display); font-weight: 400; letter-spacing: var(--tracking-snug); line-height: var(--lh-tight); }
+.eyebrow { font-size: var(--fs-xs); font-weight: 700; letter-spacing: var(--tracking-loose); text-transform: uppercase; color: var(--muted); }
+.tnum  { font-variant-numeric: tabular-nums; }
+.lnum  { font-variant-numeric: lining-nums tabular-nums; }
+.osnum { font-variant-numeric: oldstyle-nums proportional-nums; }
+.bar-track {
+  position: relative;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: rgba(15, 103, 118, 0.12);
+  overflow: hidden;
+}
+.bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--teal), var(--gold));
+  transition: width var(--duration-slow) var(--ease-out);
+}
+.bar-fill.is-loss { background: linear-gradient(90deg, var(--rust), var(--danger)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bar-fill { transition: none; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 * {
@@ -464,6 +550,270 @@ tbody tr:last-child td {
   margin-top: 8px;
 }
 
+/* =========================================================================
+   Variant C — "Stadium" Results panel.
+   Replaces the metric-grid + table layout used by `singleResult` and
+   `compareResult`. Lives only inside those two sections, so existing
+   .panel/.table-shell styles still serve other panels (Auth, Test Bench,
+   Strategy Compare, Empty Results state).
+   ========================================================================= */
+
+/* Scoreboard hero */
+.scoreboard {
+  margin-top: var(--space-3);
+  padding: var(--space-7);
+  border-radius: var(--r-2xl);
+  background: linear-gradient(135deg, var(--teal-deep), var(--teal));
+  color: var(--cream-on-teal);
+  box-shadow: var(--elev-3);
+  position: relative;
+  overflow: hidden;
+}
+.scoreboard::before,
+.scoreboard::after {
+  content: ""; position: absolute; border-radius: 50%; filter: blur(20px);
+}
+.scoreboard::before {
+  width: 320px; height: 320px;
+  right: -80px; top: -120px;
+  background: rgba(209, 143, 44, 0.32);
+}
+.scoreboard::after {
+  width: 240px; height: 240px;
+  left: -40px; bottom: -120px;
+  background: rgba(164, 70, 33, 0.20);
+}
+.scoreboard-header {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: var(--space-4); flex-wrap: wrap;
+  position: relative; z-index: 1;
+}
+.scoreboard-flag {
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  letter-spacing: var(--tracking-loose);
+  text-transform: uppercase;
+  color: rgba(248, 244, 235, 0.72);
+}
+.scoreboard-strategy {
+  font-family: var(--font-display);
+  font-size: var(--fs-md);
+  font-style: italic;
+  color: var(--gold);
+}
+.scoreboard-grid {
+  position: relative; z-index: 1;
+  margin-top: var(--space-7);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: var(--space-7);
+  align-items: end;
+}
+.scoreboard-rate-label {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--tracking-loose);
+  text-transform: uppercase;
+  color: rgba(248, 244, 235, 0.72);
+  margin-bottom: var(--space-3);
+}
+.scoreboard-rate {
+  font-family: var(--font-mono);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-size: var(--fs-display);
+  letter-spacing: var(--tracking-snug);
+  line-height: 0.95;
+  color: var(--cream-on-teal);
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+}
+.scoreboard-rate sup {
+  font-size: 0.4em; color: var(--gold);
+  vertical-align: super; margin-left: 6px;
+}
+.counter-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.counter {
+  padding: var(--space-4);
+  border: 1px solid rgba(248, 244, 235, 0.18);
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: var(--r-md);
+  text-align: center;
+}
+.counter-k {
+  font-size: var(--fs-xs);
+  letter-spacing: var(--tracking-loose);
+  text-transform: uppercase;
+  color: rgba(248, 244, 235, 0.66);
+}
+.counter-v {
+  font-family: var(--font-mono);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-size: var(--fs-2xl);
+  color: var(--cream-on-teal);
+  margin-top: 4px;
+  font-weight: 700;
+}
+.counter.is-correct .counter-v   { color: var(--gold); }
+.counter.is-incorrect .counter-v { color: #f3c4a6; }
+
+.scoreboard-tags {
+  position: relative; z-index: 1;
+  margin-top: var(--space-5);
+}
+.scoreboard-tags .param-tag {
+  background: rgba(248, 244, 235, 0.12);
+  color: var(--cream-on-teal);
+  border: 1px solid rgba(248, 244, 235, 0.18);
+}
+
+/* Live ticker */
+.ticker {
+  margin-top: var(--space-5);
+  padding: var(--space-6);
+  border-radius: var(--r-xl);
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  box-shadow: var(--elev-1);
+}
+.ticker h2 {
+  margin: 0 0 var(--space-4);
+  display: flex; align-items: center; gap: var(--space-3);
+  font-family: var(--font-display); font-weight: 400; font-size: var(--fs-xl);
+}
+.ticker h2 .dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 0 4px rgba(209, 143, 44, 0.18);
+}
+.week-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 90px 90px 90px 110px;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-3);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-size: var(--fs-sm);
+}
+.week-row + .week-row { margin-top: var(--space-2); }
+.week-row:hover { border-color: var(--line); background: rgba(15, 103, 118, 0.04); }
+.week-id {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--fs-xs);
+  letter-spacing: var(--tracking-loose);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.week-bar {
+  height: 12px; border-radius: var(--r-pill);
+  background: rgba(15, 103, 118, 0.10);
+  position: relative; overflow: hidden;
+}
+.week-bar > span {
+  position: absolute; inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--teal), var(--gold));
+  transition: width var(--duration-slow) var(--ease-out);
+}
+.week-bar.is-low > span { background: linear-gradient(90deg, var(--rust), var(--danger)); }
+.week-correct   { color: var(--success); font-weight: 700; }
+.week-incorrect { color: var(--rust);    font-weight: 700; }
+.week-rate {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--teal-deep);
+  text-align: right;
+}
+.week-rate.is-low { color: var(--rust); }
+
+/* Compare leaderboard cards */
+.compare-block {
+  margin-top: var(--space-5);
+  padding: var(--space-6);
+  border-radius: var(--r-xl);
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  box-shadow: var(--elev-1);
+}
+.compare-block h2 {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-xl);
+}
+.compare-block .compare-deck {
+  margin: 0 0 var(--space-4);
+  color: var(--muted);
+  line-height: var(--lh-base);
+}
+.compare-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-4);
+}
+.compare-card {
+  padding: var(--space-5);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--surface-deep), var(--surface));
+  border: 1px solid var(--line);
+  position: relative;
+  overflow: hidden;
+}
+.compare-card.is-leader {
+  background: linear-gradient(135deg, var(--teal-deep), var(--teal));
+  color: var(--cream-on-teal);
+  border-color: var(--teal-deep);
+  box-shadow: var(--elev-2);
+}
+.compare-card.is-leader .ck    { color: rgba(248, 244, 235, 0.72); }
+.compare-card.is-leader .cv    { color: var(--cream-on-teal); }
+.compare-card.is-leader .crate { color: var(--gold); }
+.compare-card .stripe {
+  position: absolute; top: 0; left: 0; right: 0; height: 4px;
+  background: linear-gradient(90deg, var(--teal), var(--gold));
+}
+.compare-card.is-loss .stripe { background: linear-gradient(90deg, var(--rust), var(--danger)); }
+.compare-card-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: var(--space-4);
+}
+.compare-card .name {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  font-weight: 400;
+}
+.compare-card .crate {
+  font-family: var(--font-mono);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  color: var(--teal-deep);
+  letter-spacing: var(--tracking-snug);
+}
+.compare-card.is-loss .crate { color: var(--rust); }
+.compare-row {
+  display: flex; justify-content: space-between;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid rgba(20, 53, 74, 0.08);
+  font-size: var(--fs-sm);
+}
+.compare-row:last-of-type { border-bottom: 0; }
+.ck { color: var(--muted); letter-spacing: var(--tracking-loose); text-transform: uppercase; font-size: var(--fs-xs); }
+.cv {
+  font-family: var(--font-mono);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-weight: 700;
+  color: var(--ink);
+}
+.compare-card .compare-bar { margin-top: var(--space-3); }
+
 @media (max-width: 1024px) {
   .auth-layout,
   .content-grid,
@@ -493,4 +843,9 @@ tbody tr:last-child td {
     padding: 10px 12px;
     font-size: 0.88rem;
   }
+
+  .scoreboard { padding: var(--space-5); }
+  .scoreboard-grid { grid-template-columns: 1fr; align-items: flex-start; gap: var(--space-5); }
+  .week-row { grid-template-columns: 56px 1fr 56px 56px 80px; gap: var(--space-2); padding: var(--space-3) var(--space-2); }
+  .week-row > .hide-on-mobile { display: none; }
 }

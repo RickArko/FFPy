@@ -854,107 +854,73 @@ createApp({
             </div>
           </section>
 
-          <section v-if="singleResult" class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">Single Strategy Results</h2>
-              <p class="panel-subtitle">
-                Weekly grading and aggregate performance for {{ singleResult.summary.strategy }}.
-              </p>
+          <section v-if="singleResult" class="scoreboard">
+            <div class="scoreboard-header">
+              <span class="scoreboard-flag">{{ formatInteger(singleResult.summary.n_games) }} games graded</span>
+              <span class="scoreboard-strategy">strategy: {{ singleResult.summary.strategy }}</span>
             </div>
-            <div class="panel-body">
-              <div class="metric-grid">
-                <div class="metric-card">
-                  <span>Win Rate</span>
-                  <strong>{{ formatPercent(singleResult.summary.win_rate) }}</strong>
-                </div>
-                <div class="metric-card">
-                  <span>Correct Picks</span>
-                  <strong>{{ formatInteger(singleResult.summary.correct) }}</strong>
-                </div>
-                <div class="metric-card">
-                  <span>Games Graded</span>
-                  <strong>{{ formatInteger(singleResult.summary.n_games) }}</strong>
-                </div>
-                <div class="metric-card">
-                  <span>Confidence</span>
-                  <strong>{{ formatPercent(singleResult.summary.confidence_pct) }}</strong>
-                </div>
-              </div>
 
+            <div class="scoreboard-grid">
               <div>
-                <span class="param-tag" v-for="tag in formatParams(singleResult.summary.params)" :key="tag">{{ tag }}</span>
-                <span v-if="singleResult.summary.run_id" class="param-tag">run_id: {{ singleResult.summary.run_id }}</span>
+                <span class="scoreboard-rate-label">Win Rate</span>
+                <div class="scoreboard-rate">{{ ((singleResult.summary.win_rate || 0) * 100).toFixed(1) }}<sup>%</sup></div>
               </div>
+              <div class="counter-row">
+                <div class="counter is-correct">
+                  <div class="counter-k">Correct</div>
+                  <div class="counter-v">{{ formatInteger(singleResult.summary.correct) }}</div>
+                </div>
+                <div class="counter">
+                  <div class="counter-k">Games</div>
+                  <div class="counter-v">{{ formatInteger(singleResult.summary.n_games) }}</div>
+                </div>
+                <div class="counter">
+                  <div class="counter-k">Conf.</div>
+                  <div class="counter-v">{{ formatPercent(singleResult.summary.confidence_pct) }}</div>
+                </div>
+              </div>
+            </div>
 
-              <div class="table-shell" style="margin-top: 18px;">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Season</th>
-                      <th>Week</th>
-                      <th>Games</th>
-                      <th>Picks</th>
-                      <th>Correct</th>
-                      <th>Incorrect</th>
-                      <th>Ties</th>
-                      <th>Win Rate</th>
-                      <th>Coverage</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="row in singleResult.weekly_results" :key="row.season + '-' + row.week">
-                      <td>{{ row.season }}</td>
-                      <td>{{ row.week }}</td>
-                      <td>{{ row.n_games }}</td>
-                      <td>{{ row.picks_made }}</td>
-                      <td>{{ row.correct }}</td>
-                      <td>{{ row.incorrect }}</td>
-                      <td>{{ row.ties }}</td>
-                      <td>{{ formatPercent(row.win_rate) }}</td>
-                      <td>{{ formatPercent(row.coverage_rate) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+            <div class="scoreboard-tags">
+              <span class="param-tag" v-for="tag in formatParams(singleResult.summary.params)" :key="tag">{{ tag }}</span>
+              <span v-if="singleResult.summary.run_id" class="param-tag">run_id: {{ singleResult.summary.run_id }}</span>
             </div>
           </section>
 
-          <section v-if="compareResult" class="panel">
-            <div class="panel-header">
-              <h2 class="panel-title">Comparison Leaderboard</h2>
-              <p class="panel-subtitle">
-                Ranked by win rate, then confidence percentage across {{ compareResult.strategy_count }} strategy runs.
-              </p>
-            </div>
-            <div class="panel-body">
-              <div class="table-shell">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Strategy</th>
-                      <th>Params</th>
-                      <th>Games</th>
-                      <th>Correct</th>
-                      <th>Incorrect</th>
-                      <th>Ties</th>
-                      <th>Win Rate</th>
-                      <th>Confidence</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="row in compareResult.leaderboard" :key="row.strategy + JSON.stringify(row.params)">
-                      <td>{{ row.strategy }}</td>
-                      <td>{{ formatParams(row.params).join(' | ') }}</td>
-                      <td>{{ row.n_games }}</td>
-                      <td>{{ row.correct }}</td>
-                      <td>{{ row.incorrect }}</td>
-                      <td>{{ row.ties }}</td>
-                      <td>{{ formatPercent(row.win_rate) }}</td>
-                      <td>{{ formatPercent(row.confidence_pct) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
+          <section v-if="singleResult" class="ticker">
+            <h2><span class="dot"></span> Week-by-Week</h2>
+            <div class="week-row" v-for="row in singleResult.weekly_results" :key="row.season + '-' + row.week">
+              <span class="week-id">{{ row.season }} · WK {{ String(row.week).padStart(2, '0') }}</span>
+              <div class="week-bar" :class="{ 'is-low': (row.win_rate || 0) < 0.5 }">
+                <span :style="{ width: ((row.win_rate || 0) * 100) + '%' }"></span>
               </div>
+              <span class="week-correct">{{ row.correct }} W</span>
+              <span class="week-incorrect">{{ row.incorrect }} L</span>
+              <span class="hide-on-mobile">{{ row.ties > 0 ? row.ties + ' T' : '— ties' }}</span>
+              <span class="week-rate" :class="{ 'is-low': (row.win_rate || 0) < 0.5 }">{{ formatPercent(row.win_rate) }}</span>
+            </div>
+          </section>
+
+          <section v-if="compareResult" class="compare-block">
+            <h2>Comparison Leaderboard</h2>
+            <p class="compare-deck">
+              Ranked by win rate, then confidence percentage across {{ compareResult.strategy_count }} strategy runs.
+            </p>
+            <div class="compare-cards">
+              <article class="compare-card"
+                       v-for="(row, index) in compareResult.leaderboard"
+                       :key="row.strategy + JSON.stringify(row.params)"
+                       :class="{ 'is-leader': index === 0, 'is-loss': (row.win_rate || 0) < 0.5 }">
+                <div class="stripe"></div>
+                <div class="compare-card-head">
+                  <span class="name">{{ row.strategy }}</span>
+                  <span class="crate">{{ ((row.win_rate || 0) * 100).toFixed(1) }}<small style="font-size:.55em">%</small></span>
+                </div>
+                <div class="compare-row"><span class="ck">Record</span><span class="cv">{{ row.correct }}–{{ row.incorrect }}<span v-if="row.ties">–{{ row.ties }}</span></span></div>
+                <div class="compare-row"><span class="ck">Games</span><span class="cv">{{ row.n_games }}</span></div>
+                <div class="compare-row"><span class="ck">Confidence</span><span class="cv">{{ formatPercent(row.confidence_pct) }}</span></div>
+                <div class="bar-track compare-bar"><div class="bar-fill" :class="{ 'is-loss': (row.win_rate || 0) < 0.5 }" :style="{ width: ((row.win_rate || 0) * 100) + '%' }"></div></div>
+              </article>
             </div>
           </section>
 

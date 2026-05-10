@@ -47,9 +47,7 @@ def build_dev_token(
 def main() -> None:
     """CLI entry point for generating local auth tokens."""
 
-    parser = argparse.ArgumentParser(
-        description="Generate a local bearer token for the pick'em auth flow."
-    )
+    parser = argparse.ArgumentParser(description="Generate a local bearer token for the pick'em auth flow.")
     parser.add_argument(
         "--secret",
         default=Config.SUPABASE_JWT_SECRET,
@@ -95,9 +93,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.secret:
-        raise SystemExit(
-            "Set SUPABASE_JWT_SECRET in .env or pass --secret to mint a local token."
-        )
+        raise SystemExit("Set SUPABASE_JWT_SECRET in .env or pass --secret to mint a local token.")
 
     token = build_dev_token(
         secret=args.secret,

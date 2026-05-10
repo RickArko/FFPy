@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FFPy Pick'em · Compare variants</title>
+  <link rel="stylesheet" href="theme.css" />
+  <style>
+    html, body { height: 100%; }
+    body { margin: 0; display: flex; flex-direction: column; background: var(--paper, #f3ece0); }
+
+    .toolbar {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; flex-wrap: wrap; gap: var(--space-3);
+      align-items: center; padding: var(--space-3) var(--space-4);
+      background: var(--surface-strong);
+      border-bottom: 1px solid var(--line);
+      box-shadow: var(--elev-1);
+    }
+    .toolbar h1 {
+      font-family: var(--font-display); font-weight: 400;
+      font-size: var(--fs-md); margin: 0; letter-spacing: var(--tracking-tight);
+    }
+    .toolbar .sep { width: 1px; height: 22px; background: var(--line); }
+    .toolbar label {
+      font-size: var(--fs-sm); color: var(--muted);
+      display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    }
+    .toolbar select, .toolbar button {
+      font-family: inherit; font-size: var(--fs-sm);
+      padding: 6px 12px; border: 1px solid var(--line);
+      border-radius: 8px; background: var(--bg); color: var(--ink);
+      cursor: pointer;
+    }
+    .toolbar button:hover { background: var(--teal-faint); border-color: var(--teal); }
+    .toolbar input[type="checkbox"] { accent-color: var(--teal); }
+    .toolbar .spacer { flex: 1; }
+    .toolbar .meta {
+      font-size: var(--fs-xs); color: var(--muted);
+    }
+    .toolbar .meta code {
+      background: var(--teal-faint); padding: 1px 6px;
+      border-radius: 6px; font-family: var(--font-mono);
+      color: var(--teal-deep); font-size: 0.92em;
+    }
+
+    .stage {
+      flex: 1;
+      display: flex;
+      gap: var(--space-3);
+      padding: var(--space-3);
+      overflow-x: auto;
+      align-items: stretch;
+    }
+    .pane {
+      display: flex; flex-direction: column;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--elev-1);
+      overflow: hidden;
+      min-height: 0;
+    }
+    .pane.full { flex: 1 1 0; min-width: 0; }
+    .pane.fixed { flex: 0 0 auto; }
+
+    .pane-head {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: var(--space-2);
+      padding: 8px 12px;
+      background: var(--surface-strong);
+      border-bottom: 1px solid var(--line);
+      font-size: var(--fs-xs); color: var(--muted);
+    }
+    .pane-head select {
+      font-family: inherit; font-size: var(--fs-xs);
+      padding: 3px 8px; border: 1px solid var(--line);
+      border-radius: 6px; background: var(--bg); color: var(--ink);
+    }
+    .pane-head .badge {
+      font-family: var(--font-mono); font-size: 0.78rem;
+      color: var(--teal-deep); letter-spacing: var(--tracking-loose);
+      text-transform: uppercase;
+    }
+    .pane iframe { border: 0; flex: 1; background: var(--bg); }
+
+    /* When in a fixed-width pane, center the iframe content area horizontally */
+    .pane.fixed { width: var(--pane-w, 1024px); }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <h1>Compare</h1>
+    <span class="sep"></span>
+
+    <label>Width
+      <select id="widthSel">
+        <option value="full">Full</option>
+        <option value="1280">1280</option>
+        <option value="1024" selected>1024</option>
+        <option value="768">768 · tablet</option>
+        <option value="375">375 · mobile</option>
+      </select>
+    </label>
+
+    <label>Panes
+      <select id="paneCount">
+        <option value="2">2</option>
+        <option value="3" selected>3</option>
+      </select>
+    </label>
+
+    <label><input type="checkbox" id="syncScroll" checked /> Sync scroll</label>
+
+    <button id="reload" type="button">Reload all</button>
+
+    <span class="spacer"></span>
+    <span class="meta">Edit <code>theme.css</code> → reload to A/B token changes across panes</span>
+  </div>
+
+  <div class="stage" id="stage"></div>
+
+  <script>
+    const VARIANTS = {
+      a: { label: "A · Almanac",    url: "variant-a-almanac/index.html",    badge: "ALMANAC" },
+      b: { label: "B · Broadsheet", url: "variant-b-broadsheet/index.html", badge: "BROADSHEET" },
+      c: { label: "C · Stadium",    url: "variant-c-stadium/index.html",    badge: "STADIUM" },
+    };
+
+    // Default 3-pane layout: A | B | C, with C (preferred) on the right
+    const defaultPanes = ["a", "b", "c"];
+
+    const stage = document.getElementById("stage");
+    const widthSel = document.getElementById("widthSel");
+    const paneCountSel = document.getElementById("paneCount");
+    const syncScroll = document.getElementById("syncScroll");
+    const reloadBtn = document.getElementById("reload");
+
+    let panes = [];
+    let isSyncing = false;
+
+    function build(count) {
+      stage.innerHTML = "";
+      panes = [];
+      const keys = defaultPanes.slice(0, count);
+      // For 2-pane mode, default to comparing C against A
+      const initial = count === 2 ? ["a", "c"] : keys;
+      initial.forEach((key, i) => panes.push(mountPane(i, key)));
+      applyWidth(widthSel.value);
+    }
+
+    function mountPane(idx, key) {
+      const wrap = document.createElement("div");
+      wrap.className = "pane";
+
+      const head = document.createElement("div");
+      head.className = "pane-head";
+
+      const select = document.createElement("select");
+      Object.entries(VARIANTS).forEach(([k, v]) => {
+        const opt = document.createElement("option");
+        opt.value = k; opt.textContent = v.label;
+        if (k === key) opt.selected = true;
+        select.appendChild(opt);
+      });
+
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = VARIANTS[key].badge;
+
+      head.appendChild(select);
+      head.appendChild(badge);
+
+      const iframe = document.createElement("iframe");
+      iframe.src = VARIANTS[key].url;
+      iframe.loading = "eager";
+      iframe.title = `Pane ${idx + 1}: ${VARIANTS[key].label}`;
+
+      wrap.appendChild(head);
+      wrap.appendChild(iframe);
+      stage.appendChild(wrap);
+
+      const pane = { wrap, iframe, select, badge };
+      select.addEventListener("change", () => {
+        const k = select.value;
+        iframe.src = VARIANTS[k].url;
+        badge.textContent = VARIANTS[k].badge;
+      });
+      iframe.addEventListener("load", () => attachScroll(pane));
+      return pane;
+    }
+
+    function applyWidth(w) {
+      const isFull = w === "full";
+      panes.forEach(p => {
+        p.wrap.classList.toggle("full", isFull);
+        p.wrap.classList.toggle("fixed", !isFull);
+        if (!isFull) p.wrap.style.setProperty("--pane-w", `${w}px`);
+        else p.wrap.style.removeProperty("--pane-w");
+      });
+    }
+
+    function attachScroll(pane) {
+      const w = pane.iframe.contentWindow;
+      if (!w || !w.document) return;
+      w.addEventListener("scroll", () => {
+        if (!syncScroll.checked || isSyncing) return;
+        isSyncing = true;
+        const docEl = w.document.documentElement;
+        const max = Math.max(1, docEl.scrollHeight - w.innerHeight);
+        const ratio = w.scrollY / max;
+        panes.forEach(other => {
+          if (other === pane) return;
+          const ow = other.iframe.contentWindow;
+          if (!ow || !ow.document) return;
+          const otherMax = Math.max(1, ow.document.documentElement.scrollHeight - ow.innerHeight);
+          ow.scrollTo({ top: ratio * otherMax, behavior: "instant" });
+        });
+        requestAnimationFrame(() => { isSyncing = false; });
+      }, { passive: true });
+    }
+
+    widthSel.addEventListener("change", () => applyWidth(widthSel.value));
+    paneCountSel.addEventListener("change", () => build(parseInt(paneCountSel.value, 10)));
+    reloadBtn.addEventListener("click", () => {
+      panes.forEach(p => {
+        try { p.iframe.contentWindow.location.reload(); }
+        catch { p.iframe.src = p.iframe.src; }
+      });
+    });
+
+    build(parseInt(paneCountSel.value, 10));
+  </script>
+</body>
+</html>
