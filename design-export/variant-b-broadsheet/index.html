@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Variant B — Broadsheet · FFPy Pick'em Results</title>
+  <link rel="stylesheet" href="../theme.css" />
+  <style>
+    /* ========================================================================
+       Variant B — Broadsheet
+       Newspaper / sports section feel. Oversized "masthead" Win Rate. Italic
+       footnotes. Condensed, dense ledger. Primary color discipline: teal-deep
+       for authority, gold reserved for the leader. Sparing use of rust.
+       ====================================================================== */
+
+    body { margin: 0; min-height: 100vh; }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 40px 24px 64px; }
+
+    .variant-tag {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 12px;
+      font-size: var(--fs-xs); font-weight: 700;
+      letter-spacing: var(--tracking-loose); text-transform: uppercase;
+      color: var(--teal-deep);
+      border: 1px solid var(--teal-deep);
+      border-radius: var(--r-pill);
+      background: rgba(15, 103, 118, 0.06);
+    }
+
+    /* ---- Masthead ------------------------------------------------------- */
+    .masthead {
+      margin-top: var(--space-6);
+      padding: var(--space-7);
+      border-radius: var(--r-2xl);
+      background: var(--surface-strong);
+      border: 1px solid var(--line);
+      box-shadow: var(--elev-3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .masthead::before {
+      content: "";
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 6px;
+      background:
+        linear-gradient(90deg, var(--teal-deep) 0%, var(--teal) 50%, var(--gold) 100%);
+    }
+
+    .masthead-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+      gap: var(--space-7);
+      align-items: end;
+    }
+
+    .masthead-flag {
+      font-size: var(--fs-xs);
+      letter-spacing: var(--tracking-loose);
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+      padding-bottom: var(--space-2);
+      margin-bottom: var(--space-4);
+      display: flex; justify-content: space-between; gap: var(--space-3);
+      flex-wrap: wrap;
+    }
+    .masthead-flag strong { color: var(--ink); }
+
+    .masthead-headline {
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: var(--lh-tight);
+      font-weight: 400;
+      color: var(--ink);
+      margin: 0 0 var(--space-3);
+    }
+
+    .masthead-headline em {
+      color: var(--rust);
+      font-style: italic;
+    }
+
+    .masthead-deck {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: var(--fs-md);
+      color: var(--muted);
+      max-width: 56ch;
+      line-height: var(--lh-base);
+      margin: 0;
+    }
+
+    /* ---- Big number, right column -------------------------------------- */
+    .figure-block {
+      text-align: right;
+      border-left: 1px solid var(--line);
+      padding-left: var(--space-6);
+    }
+
+    .figure-block .label {
+      font-size: var(--fs-xs);
+      letter-spacing: var(--tracking-loose);
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 0 0 var(--space-1);
+    }
+
+    .figure-block .number {
+      font-family: var(--font-display);
+      font-variant-numeric: lining-nums tabular-nums;
+      font-size: var(--fs-display);
+      line-height: 1;
+      color: var(--teal-deep);
+      letter-spacing: var(--tracking-snug);
+    }
+
+    .figure-block .number sup {
+      font-size: 0.4em;
+      color: var(--gold);
+      margin-left: 4px;
+      vertical-align: super;
+    }
+
+    .figure-block .gloss {
+      font-family: var(--font-display); font-style: italic;
+      font-size: var(--fs-sm);
+      color: var(--muted);
+      margin-top: var(--space-2);
+    }
+
+    /* ---- Stat strip below masthead ------------------------------------- */
+    .stat-strip {
+      margin-top: var(--space-5);
+      padding-top: var(--space-4);
+      border-top: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--space-5);
+    }
+
+    .stat-strip > div { border-left: 1px solid var(--line); padding-left: var(--space-4); }
+    .stat-strip > div:first-child { border-left: 0; padding-left: 0; }
+
+    .stat-strip .k {
+      font-size: var(--fs-xs);
+      letter-spacing: var(--tracking-loose);
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .stat-strip .v {
+      font-family: var(--font-display);
+      font-size: var(--fs-xl);
+      font-weight: 400;
+      color: var(--ink);
+      margin-top: 2px;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+
+    .stat-strip .delta { font-size: var(--fs-xs); color: var(--muted); margin-top: 2px; font-style: italic; }
+
+    /* ---- Section divider ---------------------------------------------- */
+    .rule {
+      margin: var(--space-7) 0 var(--space-5);
+      border: 0; border-top: 2px solid var(--line);
+      position: relative;
+    }
+    .rule::before {
+      content: "·"; position: absolute; left: 50%; top: -16px;
+      transform: translateX(-50%);
+      background: var(--bg); padding: 0 var(--space-3);
+      color: var(--gold); font-size: var(--fs-xl);
+    }
+
+    /* ---- Dense ledger -------------------------------------------------- */
+    .ledger-section { display: grid; grid-template-columns: 1fr; gap: var(--space-3); }
+    .ledger-section h2 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-size: var(--fs-xl);
+      margin: 0;
+    }
+    .ledger-section .sub { font-style: italic; color: var(--muted); font-size: var(--fs-sm); margin: 0 0 var(--space-3); }
+
+    table.dense {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: var(--fs-sm);
+    }
+    table.dense th {
+      text-align: left;
+      font-weight: 700;
+      font-size: var(--fs-xs);
+      letter-spacing: var(--tracking-loose);
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: var(--space-2) var(--space-3);
+      border-bottom: 2px solid var(--line);
+    }
+    table.dense td {
+      padding: var(--space-3);
+      border-bottom: 1px solid var(--line);
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table.dense tbody tr:hover td { background: rgba(15, 103, 118, 0.04); }
+    table.dense .num { text-align: right; }
+    table.dense .winrate-cell { font-weight: 700; }
+
+    /* Win/loss visual cue: subtle background, not a billboard */
+    table.dense .high { color: var(--success); }
+    table.dense .mid  { color: var(--ink); }
+    table.dense .low  { color: var(--rust);  }
+
+    /* ---- Compare: side-by-side, broadsheet-style "agate" ------------- */
+    .agate {
+      margin-top: var(--space-7);
+      padding: var(--space-6);
+      border: 1px solid var(--line);
+      border-radius: var(--r-xl);
+      background: var(--surface-strong);
+      box-shadow: var(--elev-1);
+    }
+    .agate-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: var(--space-3); flex-wrap: wrap;
+      margin-bottom: var(--space-4);
+    }
+    .agate-head h2 {
+      font-family: var(--font-display); font-weight: 400; font-size: var(--fs-xl); margin: 0;
+    }
+    .agate-head .meta {
+      font-style: italic; color: var(--muted); font-size: var(--fs-sm);
+    }
+
+    .agate-row {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr);
+      gap: var(--space-4);
+      align-items: center;
+      padding: var(--space-3) 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .agate-row:last-child { border-bottom: 0; }
+
+    .agate-strategy {
+      font-family: var(--font-display);
+      font-size: var(--fs-md);
+      color: var(--ink);
+    }
+    .agate-strategy .note {
+      display: block;
+      font-family: var(--font-sans);
+      font-size: var(--fs-xs);
+      color: var(--muted);
+      letter-spacing: var(--tracking-loose);
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+    .agate-record { font-variant-numeric: lining-nums tabular-nums; color: var(--ink-soft); }
+    .agate-rate {
+      font-family: var(--font-display);
+      font-variant-numeric: lining-nums tabular-nums;
+      font-size: var(--fs-xl);
+      color: var(--teal-deep);
+    }
+    .agate-rate.lead   { color: var(--gold); }
+    .agate-rate.weak   { color: var(--rust); }
+
+    @media (max-width: 820px) {
+      .masthead-grid { grid-template-columns: 1fr; }
+      .figure-block { border-left: 0; border-top: 1px solid var(--line); padding: var(--space-4) 0 0; text-align: left; }
+      .stat-strip { grid-template-columns: repeat(2, 1fr); }
+      .stat-strip > div { border-left: 0; padding-left: 0; }
+      .agate-row { grid-template-columns: 1fr 1fr; }
+      .agate-record, .agate-rate { grid-column: span 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">
+      <div>
+        <span class="eyebrow">FFPy Pick'em — design preview</span>
+        <h1 class="display" style="font-size: var(--fs-hero-h1); margin: 6px 0 0;">Results panel</h1>
+      </div>
+      <span class="variant-tag">Variant B · Broadsheet</span>
+    </div>
+
+    <!-- ============== Masthead ============== -->
+    <section class="masthead">
+      <div class="masthead-flag">
+        <span><strong>SINGLE STRATEGY</strong> · run_id demo-001</span>
+        <span>2022 · Weeks 1–4 · REG · 64 games</span>
+      </div>
+
+      <div class="masthead-grid">
+        <div>
+          <h2 class="masthead-headline">
+            Favorites cover at a <em>useful</em> clip in the season's first stretch.
+          </h2>
+          <p class="masthead-deck">
+            41 hits, 21 misses, two pushes. The strategy hands you a positive-EV
+            window — small enough that one bad week erases the edge, large enough
+            to clear noise.
+          </p>
+        </div>
+
+        <div class="figure-block">
+          <p class="label">Win Rate</p>
+          <div class="number">64.1<sup>%</sup></div>
+          <p class="gloss">— AllFavorites</p>
+        </div>
+      </div>
+
+      <div class="stat-strip">
+        <div>
+          <div class="k">Correct</div>
+          <div class="v">41</div>
+          <div class="delta">of 64 graded</div>
+        </div>
+        <div>
+          <div class="k">Incorrect</div>
+          <div class="v">21</div>
+          <div class="delta">2 ties</div>
+        </div>
+        <div>
+          <div class="k">Confidence</div>
+          <div class="v">72%</div>
+          <div class="delta">avg. spread weight</div>
+        </div>
+        <div>
+          <div class="k">Coverage</div>
+          <div class="v">100%</div>
+          <div class="delta">games graded</div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- ============== Dense ledger ============== -->
+    <section class="ledger-section">
+      <h2>Week-by-Week</h2>
+      <p class="sub">All four weeks, every game graded. Low column highlights weeks that dragged the average down.</p>
+
+      <table class="dense">
+        <thead>
+          <tr>
+            <th>Season</th>
+            <th>Week</th>
+            <th class="num">Games</th>
+            <th class="num">Picks</th>
+            <th class="num">Correct</th>
+            <th class="num">Incorrect</th>
+            <th class="num">Ties</th>
+            <th class="num">Win Rate</th>
+            <th class="num">Coverage</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>2022</td><td>1</td>
+            <td class="num">16</td><td class="num">16</td><td class="num">11</td><td class="num">5</td><td class="num">—</td>
+            <td class="num winrate-cell high">68.8%</td>
+            <td class="num">100%</td>
+          </tr>
+          <tr>
+            <td>2022</td><td>2</td>
+            <td class="num">16</td><td class="num">16</td><td class="num">9</td><td class="num">6</td><td class="num">1</td>
+            <td class="num winrate-cell low">56.3%</td>
+            <td class="num">100%</td>
+          </tr>
+          <tr>
+            <td>2022</td><td>3</td>
+            <td class="num">16</td><td class="num">16</td><td class="num">10</td><td class="num">6</td><td class="num">—</td>
+            <td class="num winrate-cell mid">62.5%</td>
+            <td class="num">100%</td>
+          </tr>
+          <tr>
+            <td>2022</td><td>4</td>
+            <td class="num">16</td><td class="num">16</td><td class="num">11</td><td class="num">4</td><td class="num">1</td>
+            <td class="num winrate-cell high">68.8%</td>
+            <td class="num">100%</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ============== Comparison agate ============== -->
+    <section class="agate">
+      <div class="agate-head">
+        <h2>Comparison Leaderboard</h2>
+        <span class="meta">3 strategies · same window · ranked by win rate</span>
+      </div>
+
+      <div class="agate-row">
+        <div class="agate-strategy">
+          Confidence
+          <span class="note">leader</span>
+        </div>
+        <div class="agate-record">44–18–2</div>
+        <div class="agate-rate lead">68.8%</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 68.75%;"></div></div>
+      </div>
+
+      <div class="agate-row">
+        <div class="agate-strategy">
+          AllFavorites
+          <span class="note">middle</span>
+        </div>
+        <div class="agate-record">41–21–2</div>
+        <div class="agate-rate">64.1%</div>
+        <div class="bar-track"><div class="bar-fill" style="width: 64.06%;"></div></div>
+      </div>
+
+      <div class="agate-row">
+        <div class="agate-strategy">
+          AllUnderdogs
+          <span class="note">tail</span>
+        </div>
+        <div class="agate-record">21–41–2</div>
+        <div class="agate-rate weak">32.8%</div>
+        <div class="bar-track"><div class="bar-fill is-loss" style="width: 32.81%;"></div></div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

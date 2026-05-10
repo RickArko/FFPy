@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FFPy Pick'em · Design Variants</title>
+  <link rel="stylesheet" href="theme.css" />
+  <style>
+    body { margin: 0; min-height: 100vh; }
+    .shell { max-width: 980px; margin: 0 auto; padding: 48px 24px 64px; }
+
+    .lede {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-size: clamp(2rem, 4vw, 3rem);
+      line-height: var(--lh-tight);
+      margin: var(--space-3) 0 var(--space-3);
+    }
+    .deck { color: var(--muted); font-size: var(--fs-md); max-width: 60ch; line-height: var(--lh-base); margin: 0; }
+
+    .card-grid {
+      margin-top: var(--space-7);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: var(--space-4);
+    }
+    .card {
+      display: block; text-decoration: none; color: inherit;
+      padding: var(--space-6);
+      border: 1px solid var(--line);
+      border-radius: var(--r-xl);
+      background: var(--surface-strong);
+      box-shadow: var(--elev-1);
+      transition: transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out);
+    }
+    .card:hover { transform: translateY(-2px); box-shadow: var(--elev-2); }
+    .card .tag {
+      display: inline-block;
+      font-size: var(--fs-xs); font-weight: 700;
+      letter-spacing: var(--tracking-loose); text-transform: uppercase;
+      padding: 4px 10px; border-radius: var(--r-pill);
+      border: 1px solid currentColor;
+    }
+    .card.almanac    .tag { color: var(--gold); }
+    .card.broadsheet .tag { color: var(--teal-deep); }
+    .card.stadium    .tag { color: var(--rust); }
+
+    .card h3 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-size: var(--fs-xl);
+      margin: var(--space-3) 0 var(--space-2);
+    }
+    .card p { color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-base); margin: 0; }
+
+    .footnote {
+      margin-top: var(--space-8);
+      padding-top: var(--space-5);
+      border-top: 1px solid var(--line);
+      font-size: var(--fs-sm); color: var(--muted); line-height: var(--lh-base);
+    }
+    .footnote code {
+      background: var(--teal-faint); padding: 1px 6px; border-radius: 6px;
+      font-family: var(--font-mono); font-size: 0.92em; color: var(--teal-deep);
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <span class="eyebrow">FFPy Pick'em · Results panel redesign</span>
+    <h1 class="lede">Three readings of the same data.</h1>
+    <p class="deck">
+      All three variants share <code>theme.css</code>: same palette, same
+      type stack, same scale. They differ in emphasis — what the eye lands
+      on first, how dense the ledger feels, how loudly outcomes shout.
+    </p>
+    <p class="deck" style="margin-top: var(--space-2);">
+      <a href="compare.html" style="color: var(--teal-deep); text-decoration: underline;">→ Open the side-by-side compare view</a> for iteration.
+      Current preferred direction: <strong>Variant C · Stadium</strong>.
+    </p>
+
+    <div class="card-grid">
+      <a class="card almanac" href="variant-a-almanac/index.html">
+        <span class="tag">A · Almanac</span>
+        <h3>Editorial restraint</h3>
+        <p>Engraved metric cards, gold rule lines, old-style numerals in the ledger. Most "vintage almanac." Quiet authority.</p>
+      </a>
+
+      <a class="card broadsheet" href="variant-b-broadsheet/index.html">
+        <span class="tag">B · Broadsheet</span>
+        <h3>Headline + deck</h3>
+        <p>Newspaper masthead. Win rate as a sub-headline figure beside an italic deck. Densest ledger. Most prose-forward.</p>
+      </a>
+
+      <a class="card stadium" href="variant-c-stadium/index.html">
+        <span class="tag">C · Stadium</span>
+        <h3>Scoreboard energy</h3>
+        <p>Deep teal hero with a monospaced win-rate. Per-week bars, scoreboard-card leaderboard. Most live-game.</p>
+      </a>
+    </div>
+
+    <p class="footnote">
+      Theme tokens live in <code>theme.css</code> at this directory's root. Each variant
+      links to it via <code>../theme.css</code>. Mock data follows the real
+      <code>POST /api/backtests/run</code> shape — see <code>_data/sample-response.json</code>.
+      Open any file directly with <code>file://</code>, or serve the folder with
+      <code>python -m http.server -d design-export 8080</code> and visit
+      <code>http://localhost:8080</code>.
+    </p>
+  </div>
+</body>
+</html>

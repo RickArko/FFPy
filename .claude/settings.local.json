@@ -37,7 +37,8 @@
       "Bash(grep -n \"^\\\\.env$\\\\|^\\\\.env\\\\b\" /home/ricka/Git/FFPy/.gitignore)",
       "Bash(gh repo *)",
       "Bash(pnpm --filter @open-design/desktop build)",
-      "Bash(pnpm tools-dev *)"
+      "Bash(pnpm tools-dev *)",
+      "Read(//home/ricka/Git/dad/**)"
     ]
   }
 }

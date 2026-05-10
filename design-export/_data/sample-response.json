@@ -1,0 +1,29 @@
+{
+  "single": {
+    "summary": {
+      "strategy": "AllFavorites",
+      "params": {},
+      "n_games": 64,
+      "correct": 41,
+      "incorrect": 21,
+      "ties": 2,
+      "win_rate": 0.640625,
+      "confidence_pct": 0.72,
+      "run_id": "demo-001"
+    },
+    "weekly_results": [
+      { "season": 2022, "week": 1, "n_games": 16, "picks_made": 16, "correct": 11, "incorrect": 5, "ties": 0, "win_rate": 0.6875, "coverage_rate": 1.0 },
+      { "season": 2022, "week": 2, "n_games": 16, "picks_made": 16, "correct": 9,  "incorrect": 6, "ties": 1, "win_rate": 0.5625, "coverage_rate": 1.0 },
+      { "season": 2022, "week": 3, "n_games": 16, "picks_made": 16, "correct": 10, "incorrect": 6, "ties": 0, "win_rate": 0.625,  "coverage_rate": 1.0 },
+      { "season": 2022, "week": 4, "n_games": 16, "picks_made": 16, "correct": 11, "incorrect": 4, "ties": 1, "win_rate": 0.6875, "coverage_rate": 1.0 }
+    ]
+  },
+  "compare": {
+    "strategy_count": 3,
+    "leaderboard": [
+      { "strategy": "Confidence",   "params": {},                                "n_games": 64, "correct": 44, "incorrect": 18, "ties": 2, "win_rate": 0.6875,   "confidence_pct": 0.74 },
+      { "strategy": "AllFavorites", "params": {},                                "n_games": 64, "correct": 41, "incorrect": 21, "ties": 2, "win_rate": 0.640625, "confidence_pct": 0.72 },
+      { "strategy": "AllUnderdogs", "params": {},                                "n_games": 64, "correct": 21, "incorrect": 41, "ties": 2, "win_rate": 0.328125, "confidence_pct": 0.31 }
+    ]
+  }
+}

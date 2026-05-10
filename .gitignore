@@ -22,3 +22,9 @@ backups/
 
 *.ipynb_checkpoints*
 .claude/*
+
+# Pytest / coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
