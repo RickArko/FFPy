@@ -371,6 +371,7 @@ def create_app(
     )
     app.state.db_path = resolved_db_path
     app.state.auth_enabled = auth_enabled
+    favicon_path = static_dir / "favicon.ico"
 
     def get_repository() -> Iterator[SQLiteHistoricalGamesRepository]:
         db = FFPyDatabase(db_path=resolved_db_path)
@@ -487,6 +488,10 @@ def create_app(
     @app.get("/", include_in_schema=False)
     def frontend() -> FileResponse:
         return FileResponse(static_dir / "index.html")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> FileResponse:
+        return FileResponse(favicon_path)
 
     @app.get("/api/health")
     def health() -> Dict[str, Any]:

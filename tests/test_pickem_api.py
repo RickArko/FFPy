@@ -114,6 +114,15 @@ def test_root_serves_frontend(client: TestClient):
     assert "Pick'em Strategy Tester" in response.text
 
 
+def test_favicon_served(client: TestClient):
+    response = client.get("/favicon.ico")
+    assert response.status_code == 200
+    assert response.headers["content-type"] in {
+        "image/x-icon",
+        "image/vnd.microsoft.icon",
+    }
+
+
 def test_strategies_endpoint_lists_supported_strategies(client: TestClient):
     response = client.get("/api/strategies")
     assert response.status_code == 200

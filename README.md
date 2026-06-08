@@ -1,6 +1,10 @@
-# FFPy — Fantasy Football Python
+# FFPy - Fantasy Football Python
 
 A Streamlit app and Python toolkit for fantasy football projections, lineup optimization, play-by-play analytics, and pick'em backtesting. Pulls data from [nflverse](https://nflverse.github.io/), ESPN, or SportsDataIO and runs everything locally against a SQLite database.
+
+![Project Logo](docs/assets/static/FFPy.png)
+
+---
 
 ## Prerequisites
 
