@@ -3,9 +3,50 @@
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
+
+
+def _sqlite_value(value: Any) -> Any:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if hasattr(value, "item"):
+        return value.item()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
+
+
+def _sqlite_records(df: pd.DataFrame) -> list[tuple[Any, ...]]:
+    return [tuple(_sqlite_value(value) for value in row) for row in df.itertuples(index=False, name=None)]
+
+
+def _insert_or_ignore_dataframe(
+    conn: sqlite3.Connection,
+    table: str,
+    df: pd.DataFrame,
+    columns: list[str],
+) -> int:
+    if df.empty:
+        return 0
+
+    column_sql = ", ".join(columns)
+    placeholders = ", ".join("?" for _ in columns)
+    cursor = conn.cursor()
+    try:
+        cursor.executemany(
+            f"INSERT OR IGNORE INTO {table} ({column_sql}) VALUES ({placeholders})",
+            _sqlite_records(df[columns]),
+        )
+        return max(cursor.rowcount, 0)
+    finally:
+        cursor.close()
 
 
 class FFPyDatabase:
@@ -418,8 +459,18 @@ class FFPyDatabase:
         if "home_score" in games_subset.columns and "away_score" in games_subset.columns:
             games_subset["game_finished"] = games_subset["home_score"].notna().astype(int)
 
-        # Insert or replace games (games are small, no batching needed)
-        games_subset.to_sql("games", self.conn, if_exists="append", index=False)
+        if games_subset.empty:
+            return 0
+
+        # Insert or replace games (games are small, no batching needed).
+        columns = list(games_subset.columns)
+        column_sql = ", ".join(columns)
+        placeholders = ", ".join("?" for _ in columns)
+        cursor = self.conn.cursor()
+        cursor.executemany(
+            f"INSERT OR REPLACE INTO games ({column_sql}) VALUES ({placeholders})",
+            _sqlite_records(games_subset),
+        )
         self.conn.commit()
 
         return len(games_subset)
@@ -455,6 +506,7 @@ class FFPyDatabase:
         # Optimize SQLite for bulk insert
         cursor.execute("PRAGMA synchronous = OFF")
         cursor.execute("PRAGMA journal_mode = MEMORY")
+        cursor.fetchone()
 
         pbar = tqdm(total=total_rows, desc="Storing plays", disable=not show_progress, unit=" plays")
 
@@ -465,24 +517,10 @@ class FFPyDatabase:
                 end_idx = min(start_idx + batch_size, total_rows)
                 batch = plays_subset.iloc[start_idx:end_idx]
 
-                try:
-                    batch.to_sql("plays", self.conn, if_exists="append", index=False, method="multi")
-                    batch_inserted = len(batch)
-                    inserted += batch_inserted
-                    pbar.update(batch_inserted)
-                except Exception:
-                    # If batch fails (likely duplicates), try row by row
-                    batch_skipped = 0
-                    for _, row in batch.iterrows():
-                        try:
-                            row_df = row.to_frame().T
-                            row_df.to_sql("plays", self.conn, if_exists="append", index=False)
-                            inserted += 1
-                        except Exception:
-                            # Skip duplicates (UNIQUE constraint) or other errors
-                            batch_skipped += 1
-                        pbar.update(1)
-                    skipped_duplicates += batch_skipped
+                batch_inserted = _insert_or_ignore_dataframe(self.conn, "plays", batch, available_cols)
+                inserted += batch_inserted
+                skipped_duplicates += len(batch) - batch_inserted
+                pbar.update(len(batch))
 
             self.conn.commit()
 
@@ -493,6 +531,7 @@ class FFPyDatabase:
             # Restore normal settings
             cursor.execute("PRAGMA synchronous = FULL")
             cursor.execute("PRAGMA journal_mode = DELETE")
+            cursor.fetchone()
             pbar.close()
 
         return inserted
@@ -544,20 +583,13 @@ class FFPyDatabase:
                 batch = ftn_subset.iloc[start_idx:end_idx]
 
                 try:
-                    batch.to_sql("ftn_charting", self.conn, if_exists="append", index=False)
-                    batch_inserted = len(batch)
+                    batch_inserted = _insert_or_ignore_dataframe(
+                        self.conn, "ftn_charting", batch, available_cols
+                    )
                     inserted += batch_inserted
-                    pbar.update(batch_inserted)
+                    pbar.update(len(batch))
                 except Exception:
-                    # Skip duplicates
-                    for _, row in batch.iterrows():
-                        try:
-                            row_df = row.to_frame().T
-                            row_df.to_sql("ftn_charting", self.conn, if_exists="append", index=False)
-                            inserted += 1
-                        except Exception:
-                            pass
-                        pbar.update(1)
+                    raise
 
             self.conn.commit()
 
@@ -616,20 +648,13 @@ class FFPyDatabase:
                 batch = snaps_subset.iloc[start_idx:end_idx]
 
                 try:
-                    batch.to_sql("snap_counts", self.conn, if_exists="append", index=False)
-                    batch_inserted = len(batch)
+                    batch_inserted = _insert_or_ignore_dataframe(
+                        self.conn, "snap_counts", batch, available_cols
+                    )
                     inserted += batch_inserted
-                    pbar.update(batch_inserted)
+                    pbar.update(len(batch))
                 except Exception:
-                    # Skip duplicates
-                    for _, row in batch.iterrows():
-                        try:
-                            row_df = row.to_frame().T
-                            row_df.to_sql("snap_counts", self.conn, if_exists="append", index=False)
-                            inserted += 1
-                        except Exception:
-                            pass
-                        pbar.update(1)
+                    raise
 
             self.conn.commit()
 

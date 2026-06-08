@@ -13,6 +13,7 @@ Everything else (`uv`, Python 3.13, the virtualenv, dependencies, DB schema) is 
 
 ```bash
 make bootstrap   # one-time: installs uv, deps, .env, DB schema
+make data        # loads/generates required app data for the default season
 make run         # starts Streamlit on http://localhost:8501
 make pickem-web PORT=8000   # starts the FastAPI + Vue pick'em tester
 make pickem-web-auth-local PORT=8000   # auth-enabled local backend with dev JWTs
@@ -28,6 +29,7 @@ See [QUICKSTART.md](QUICKSTART.md) for the two-minute walkthrough.
 |-----------------------------|--------------------------------------------------|
 | `make bootstrap`            | First-time setup (idempotent)                    |
 | `make install`              | `uv sync` only                                   |
+| `make data`                 | Generate required app data for the default season |
 | `make run` / `make dev`     | Launch Streamlit (dev = auto-reload on save)     |
 | `make pickem-web`           | Launch the FastAPI + Vue pick'em strategy tester |
 | `make pickem-web-auth-local`| Launch the pick'em tester with local auth enabled|
@@ -37,9 +39,10 @@ See [QUICKSTART.md](QUICKSTART.md) for the two-minute walkthrough.
 | `make lint` / `make fmt`    | Ruff lint / format                               |
 | `make check`                | `lint` + `test` (CI entry point)                 |
 | `make db.migrate`           | Create or upgrade the SQLite schema              |
+| `make db.prepare`           | Generate all required app data                   |
 | `make db.load SEASON=Y`     | Load a season of nflverse play-by-play           |
 | `make db.update`            | Incrementally append new games                   |
-| `make db.stats SEASON=Y`    | Collect ESPN actual stats for that season        |
+| `make db.stats SEASON=Y`    | Collect actual stats for that season             |
 | `make db.mock SEASON=Y`     | Populate with realistic mock data                |
 | `make notebook`             | Jupyter Lab with the analysis dep group          |
 | `make clean` / `clean-all`  | Remove caches (+ `.venv`)                        |
@@ -48,9 +51,12 @@ Database commands are thin wrappers over the `ffpy-db` CLI:
 
 ```bash
 uv run ffpy-db --help
+uv run ffpy-db prepare --season 2024
 uv run ffpy-db load --season 2023 --no-ftn --validate
 uv run ffpy-db collect-stats --season 2024 --start-week 1 --end-week 17
 ```
+
+`make data` uses nflverse data by default. Use `make data DATA_MODE=mock` for a fast offline dataset that seeds both player stats and pick'em games. ESPN actuals are still available as an unofficial fallback with `make db.stats STATS_SOURCE=espn`.
 
 ## Features
 

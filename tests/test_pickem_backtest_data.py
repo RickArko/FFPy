@@ -158,6 +158,47 @@ class TestBacktestSchema:
         assert len(picks) == 1 and picks.iloc[0]["selected_team"] == "CAR"
 
 
+class TestPlayStorage:
+    def test_store_plays_ignores_existing_play_ids(self, fresh_db):
+        fresh_db.run_migration("002_play_by_play_schema.sql")
+        fresh_db.store_games(
+            pd.DataFrame(
+                [
+                    {
+                        "game_id": "2024_01_BAL_KC",
+                        "season": 2024,
+                        "season_type": "REG",
+                        "week": 1,
+                        "game_date": "2024-09-05",
+                        "home_team": "KC",
+                        "away_team": "BAL",
+                        "home_score": 27,
+                        "away_score": 20,
+                    }
+                ]
+            )
+        )
+        plays = pd.DataFrame(
+            [
+                {
+                    "play_id": "2024_01_BAL_KC_1",
+                    "game_id": "2024_01_BAL_KC",
+                    "season": 2024,
+                    "season_type": "REG",
+                    "week": 1,
+                    "play_type": "pass",
+                    "yards_gained": 8,
+                }
+            ]
+        )
+
+        assert fresh_db.store_plays(plays, show_progress=False) == 1
+        assert fresh_db.store_plays(plays, show_progress=False) == 0
+
+        count = pd.read_sql("SELECT COUNT(*) AS n FROM plays", fresh_db.conn)["n"].iloc[0]
+        assert count == 1
+
+
 # ---------------------------------------------------------------------------
 # get_historical_games
 # ---------------------------------------------------------------------------

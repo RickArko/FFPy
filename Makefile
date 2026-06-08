@@ -3,9 +3,9 @@
 # See `make help` for all targets.
 
 .DEFAULT_GOAL := help
-.PHONY: help bootstrap install run dev pickem-web pickem-web-auth-local \
+.PHONY: help bootstrap install data run dev pickem-web pickem-web-auth-local \
         pickem-web-auth-supabase pickem-auth-token notebook test cov lint fmt check \
-        db.migrate db.load db.update db.stats db.mock clean clean-all
+        db.prepare db.migrate db.load db.update db.stats db.mock clean clean-all
 
 # Override on the CLI, e.g. `make db.load SEASON=2023`
 SEASON     ?= 2024
@@ -13,16 +13,20 @@ START_WEEK ?= 1
 END_WEEK   ?= 17
 PORT       ?= 8501
 UV         ?= uv
+DATA_MODE  ?= real
+STATS_SOURCE ?= nflverse
+PREPARE_ARGS ?=
 AUTH_JWT_SECRET ?= local-supabase-jwt-secret-change-me-123456
 AUTH_EMAIL      ?= demo@example.com
 TOKEN_ARGS      ?= --confirmed
+DATA_MODE_ARGS = $(if $(filter mock,$(DATA_MODE)),--mock,)
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "; \
 	             printf "\nFFPy — make targets\n\nUsage: make <target> [VAR=value]\n\n"} \
 	     /^[a-zA-Z_.-]+:.*?## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
-	@printf "\nVariables (override on CLI): SEASON=%s PORT=%s START_WEEK=%s END_WEEK=%s\n\n" \
-	        "$(SEASON)" "$(PORT)" "$(START_WEEK)" "$(END_WEEK)"
+	@printf "\nVariables (override on CLI): SEASON=%s PORT=%s START_WEEK=%s END_WEEK=%s DATA_MODE=%s STATS_SOURCE=%s\n\n" \
+	        "$(SEASON)" "$(PORT)" "$(START_WEEK)" "$(END_WEEK)" "$(DATA_MODE)" "$(STATS_SOURCE)"
 
 # ---- Setup --------------------------------------------------------
 
@@ -33,6 +37,8 @@ install: ## Sync dependencies and register the `ffpy` Jupyter kernel
 	$(UV) sync
 	@echo "==> Registering Jupyter kernel 'ffpy'"
 	@$(UV) run python -m ipykernel install --user --name ffpy --display-name "Python (FFPy)"
+
+data: db.prepare ## Generate all required app data (DATA_MODE=real|mock)
 
 # ---- App ----------------------------------------------------------
 
@@ -77,6 +83,9 @@ check: lint test ## Lint + test (CI entry point)
 
 # ---- Database -----------------------------------------------------
 
+db.prepare: ## Generate all required app data (SEASON, START_WEEK, END_WEEK, DATA_MODE)
+	$(UV) run ffpy-db prepare --season $(SEASON) --start-week $(START_WEEK) --end-week $(END_WEEK) --stats-source $(STATS_SOURCE) $(DATA_MODE_ARGS) $(PREPARE_ARGS)
+
 db.migrate: ## Create or upgrade the SQLite schema
 	$(UV) run ffpy-db migrate
 
@@ -86,8 +95,8 @@ db.load: ## Load play-by-play for a season (SEASON=2024)
 db.update: ## Incrementally update the current season
 	$(UV) run ffpy-db update
 
-db.stats: ## Collect actual stats from ESPN (SEASON, START_WEEK, END_WEEK)
-	$(UV) run ffpy-db collect-stats --season $(SEASON) --start-week $(START_WEEK) --end-week $(END_WEEK)
+db.stats: ## Collect actual stats (STATS_SOURCE=nflverse|espn)
+	$(UV) run ffpy-db collect-stats --season $(SEASON) --start-week $(START_WEEK) --end-week $(END_WEEK) --source $(STATS_SOURCE)
 
 db.mock: ## Populate with realistic mock data (SEASON=2024)
 	$(UV) run ffpy-db mock --season $(SEASON)
