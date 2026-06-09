@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -183,6 +184,8 @@ PROJECTION_SOURCE_LABELS = {
     "api": "API Data",
     "sample": "Sample Data",
 }
+
+logger = logging.getLogger(__name__)
 
 
 class StrategySelectionRequest(BaseModel):
@@ -482,12 +485,12 @@ def _estimate_cost_units(
 
 
 def _public_auth_config(auth_enabled: bool) -> Dict[str, Any]:
-    browser_auth_available = bool(auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_ANON_KEY)
+    browser_auth_available = bool(auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_BROWSER_KEY)
     return {
         "auth_required": auth_enabled,
         "browser_auth_available": browser_auth_available,
         "supabase_url": Config.SUPABASE_URL if browser_auth_available else None,
-        "supabase_anon_key": Config.SUPABASE_ANON_KEY if browser_auth_available else None,
+        "supabase_anon_key": Config.SUPABASE_BROWSER_KEY if browser_auth_available else None,
         "public_app_url": Config.PUBLIC_APP_URL,
     }
 
@@ -853,7 +856,15 @@ def main() -> None:
     parser.add_argument("--db-path", default=None, help="Optional SQLite database path override.")
     args = parser.parse_args()
 
-    uvicorn.run(create_app(db_path=args.db_path), host=args.host, port=args.port)
+    app = create_app(db_path=args.db_path)
+    logger.info(
+        "Starting pick'em web app on %s:%s with database=%s auth_enabled=%s",
+        args.host,
+        args.port,
+        app.state.db_path,
+        app.state.auth_enabled,
+    )
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 __all__ = ["create_app", "main"]

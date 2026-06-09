@@ -17,6 +17,20 @@ make fly.app
 make fly.volume
 ```
 
+If `make fly.*` reports `fly: command not found`, install Fly CLI or add the default install location to your shell:
+
+```bash
+curl -L https://fly.io/install.sh | sh
+export PATH="$HOME/.fly/bin:$PATH"
+```
+
+You can also pass an explicit binary path:
+
+```bash
+make fly.secrets FLY=$HOME/.fly/bin/fly
+make fly.deploy FLY=$HOME/.fly/bin/fly
+```
+
 Equivalent raw commands:
 
 ```bash
@@ -47,12 +61,17 @@ cp .env.example .env
 
 Populate these values in `.env` from your Supabase dashboard:
 
-- `SUPABASE_URL`: Project Settings -> API -> Project URL
-- `SUPABASE_ANON_KEY`: Project Settings -> API -> Project API keys -> anon/public key
+- `SUPABASE_URL`: Project Settings -> API -> Project URL. It looks like `https://<project-ref>.supabase.co`.
+- `SUPABASE_PUBLISHABLE_KEY`: Project Settings -> API Keys -> Publishable key. This is preferred for new Supabase projects.
+
+Legacy fallback:
+
+- `SUPABASE_ANON_KEY`: Project Settings -> API Keys -> Legacy API Keys -> anon key. Use this only if your project has not moved to publishable keys yet.
 
 Optional:
 
-- `SUPABASE_JWT_SECRET`: Project Settings -> API/Auth JWT settings -> JWT secret. Set this if your Supabase project uses HS256/legacy JWT verification or if you want to mint local dev tokens. If you leave it empty, the backend verifies Supabase access tokens with the project's JWKS endpoint.
+- `SUPABASE_JWKS_URL`: override for the signing-key discovery endpoint. Usually leave blank; the app defaults to `<SUPABASE_URL>/auth/v1/jwks`.
+- `SUPABASE_JWT_SECRET`: legacy/local HS256 support only. Set this if your Supabase project still uses legacy JWT-secret verification or if you want to mint local dev tokens. If you leave it empty, the backend verifies Supabase access tokens with the project's JWT signing keys through JWKS.
 
 Then push the required runtime secrets to Fly:
 
@@ -60,7 +79,7 @@ Then push the required runtime secrets to Fly:
 make fly.secrets
 ```
 
-The `fly.secrets` target reads values from `.env` or your current shell, sets production-safe defaults for `WEB_AUTH_ENABLED`, `DATABASE_PATH`, `SUPABASE_JWT_AUDIENCE`, and `SUPABASE_FETCH_USER_ON_VERIFY`, includes `SUPABASE_JWT_SECRET` only when you provided it, and generates `ABUSE_HASH_SALT` if it is missing.
+The `fly.secrets` target reads values from `.env` or your current shell, sets production-safe defaults for `WEB_AUTH_ENABLED`, `DATABASE_PATH`, `SUPABASE_JWT_AUDIENCE`, and `SUPABASE_FETCH_USER_ON_VERIFY`, includes JWT/JWKS override values only when you provided them, and generates `ABUSE_HASH_SALT` if it is missing.
 
 If you want a local-only dev token flow instead of Supabase browser sign-in, do not use `make fly.secrets`; set only the local-token secrets intentionally:
 

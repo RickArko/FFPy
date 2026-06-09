@@ -47,7 +47,9 @@ def api_db(tmp_path: Path) -> FFPyDatabase:
 @pytest.fixture
 def client(api_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(Config, "SUPABASE_URL", "")
+    monkeypatch.setattr(Config, "SUPABASE_PUBLISHABLE_KEY", "")
     monkeypatch.setattr(Config, "SUPABASE_ANON_KEY", "")
+    monkeypatch.setattr(Config, "SUPABASE_BROWSER_KEY", "")
     app = create_app(db_path=str(api_db.db_path), require_auth=False)
     with TestClient(app) as test_client:
         yield test_client
@@ -65,6 +67,16 @@ def auth_verifier(auth_secret: str) -> SupabaseTokenVerifier:
         audience="authenticated",
         fetch_user_on_verify=False,
     )
+
+
+def test_supabase_verifier_defaults_to_current_jwks_endpoint():
+    verifier = SupabaseTokenVerifier(
+        supabase_url="https://demo.supabase.co",
+        anon_key="publishable-demo-key",
+    )
+
+    assert verifier._jwks_client is not None
+    assert verifier._jwks_client.uri == "https://demo.supabase.co/auth/v1/jwks"
 
 
 @pytest.fixture
@@ -246,7 +258,9 @@ def test_auth_config_exposes_public_supabase_settings_for_browser_sign_in(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(Config, "SUPABASE_URL", "https://demo.supabase.co")
+    monkeypatch.setattr(Config, "SUPABASE_PUBLISHABLE_KEY", "publishable-demo-key")
     monkeypatch.setattr(Config, "SUPABASE_ANON_KEY", "anon-demo-key")
+    monkeypatch.setattr(Config, "SUPABASE_BROWSER_KEY", "publishable-demo-key")
     monkeypatch.setattr(Config, "PUBLIC_APP_URL", "http://localhost:8000")
 
     app = create_app(
@@ -263,7 +277,7 @@ def test_auth_config_exposes_public_supabase_settings_for_browser_sign_in(
     assert payload["auth_required"] is True
     assert payload["browser_auth_available"] is True
     assert payload["supabase_url"] == "https://demo.supabase.co"
-    assert payload["supabase_anon_key"] == "anon-demo-key"
+    assert payload["supabase_anon_key"] == "publishable-demo-key"
     assert payload["public_app_url"] == "http://localhost:8000"
 
 

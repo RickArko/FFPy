@@ -54,6 +54,7 @@ class SupabaseTokenVerifier:
         supabase_url: str = "",
         anon_key: str = "",
         jwt_secret: str = "",
+        jwks_url: str = "",
         audience: str = "authenticated",
         issuer: Optional[str] = None,
         fetch_user_on_verify: bool = True,
@@ -67,9 +68,10 @@ class SupabaseTokenVerifier:
         self.fetch_user_on_verify = fetch_user_on_verify
         self.timeout_seconds = timeout_seconds
         self.userinfo_url = f"{self.supabase_url}/auth/v1/user" if self.supabase_url else None
+        resolved_jwks_url = jwks_url or (f"{self.supabase_url}/auth/v1/jwks" if self.supabase_url else "")
         self._jwks_client = (
-            jwt.PyJWKClient(f"{self.supabase_url}/auth/v1/.well-known/jwks.json")
-            if self.supabase_url and not self.jwt_secret
+            jwt.PyJWKClient(resolved_jwks_url)
+            if resolved_jwks_url and not self.jwt_secret
             else None
         )
 
@@ -168,8 +170,9 @@ def build_token_verifier_from_config() -> Optional[TokenVerifier]:
 
     return SupabaseTokenVerifier(
         supabase_url=Config.SUPABASE_URL,
-        anon_key=Config.SUPABASE_ANON_KEY,
+        anon_key=Config.SUPABASE_BROWSER_KEY,
         jwt_secret=Config.SUPABASE_JWT_SECRET,
+        jwks_url=Config.SUPABASE_JWKS_URL,
         audience=Config.SUPABASE_JWT_AUDIENCE,
         fetch_user_on_verify=Config.SUPABASE_FETCH_USER_ON_VERIFY,
     )
