@@ -536,6 +536,10 @@ createApp({
   template: `
     <div class="shell">
       <header class="hero">
+        <nav class="top-nav" aria-label="FFPy tools">
+          <a class="nav-link is-active" href="/">Pick'em Tester</a>
+          <a class="nav-link" href="/projections">Projections</a>
+        </nav>
         <h1>Pick'em Strategy Tester</h1>
         <p>
           Stress-test historical pick strategies against your local FFPy database with a FastAPI backend

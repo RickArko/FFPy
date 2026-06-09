@@ -849,3 +849,243 @@ tbody tr:last-child td {
   .week-row { grid-template-columns: 56px 1fr 56px 56px 80px; gap: var(--space-2); padding: var(--space-3) var(--space-2); }
   .week-row > .hide-on-mobile { display: none; }
 }
+
+[v-cloak] {
+  display: none;
+}
+
+.top-nav {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid rgba(248, 244, 235, 0.2);
+  border-radius: 999px;
+  color: rgba(248, 244, 235, 0.82);
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+
+.nav-link.is-active,
+.nav-link:hover {
+  background: rgba(248, 244, 235, 0.14);
+  color: var(--cream-on-teal);
+}
+
+.projections-shell {
+  max-width: 1440px;
+}
+
+.projections-hero h1,
+.projections-hero p,
+.projections-hero .hero-strip {
+  position: relative;
+  z-index: 1;
+}
+
+.projection-toolbar {
+  margin-top: 24px;
+}
+
+.projection-toolbar-body {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) 120px 150px minmax(220px, 1.4fr) minmax(130px, 0.8fr);
+  gap: 14px;
+  align-items: end;
+  padding-top: 24px;
+}
+
+.projection-refresh {
+  margin-top: 0;
+  min-height: 44px;
+}
+
+.projection-position-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.position-button {
+  min-width: 78px;
+}
+
+.projection-message {
+  margin-bottom: 18px;
+}
+
+.projection-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 24px;
+  align-items: start;
+}
+
+.projection-main,
+.projection-side {
+  display: grid;
+  gap: 24px;
+}
+
+.projection-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.projection-table-panel {
+  overflow: hidden;
+}
+
+.projection-table-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.projection-table-shell {
+  overflow-x: auto;
+}
+
+.sort-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.number-cell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.projection-points {
+  color: var(--teal-deep);
+  font-weight: 800;
+}
+
+.position-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  min-height: 28px;
+  border-radius: 999px;
+  background: rgba(15, 103, 118, 0.1);
+  color: var(--teal-deep);
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.position-stack,
+.leaderboard-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.position-card,
+.leaderboard-card {
+  border: 1px solid rgba(15, 103, 118, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 14px;
+}
+
+.position-card-head,
+.position-card-meta,
+.leaderboard-card li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.position-card-head {
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.position-card-head span,
+.position-card-meta {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.position-card-meta {
+  margin-top: 9px;
+}
+
+.leaderboard-card h3 {
+  margin: 0 0 10px;
+  color: var(--teal-deep);
+  font-size: 1rem;
+}
+
+.leaderboard-card ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.leaderboard-card li {
+  align-items: baseline;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.leaderboard-card li span {
+  color: var(--ink);
+}
+
+.leaderboard-card li strong {
+  color: var(--teal-deep);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1120px) {
+  .projection-toolbar-body,
+  .projection-grid,
+  .projection-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .projection-side {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .projection-side {
+    grid-template-columns: 1fr;
+  }
+
+  .projection-toolbar-body {
+    padding-top: 18px;
+  }
+
+  .projection-position-strip {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .position-button {
+    min-width: 0;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .hide-on-mobile {
+    display: none;
+  }
+}

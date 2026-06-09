@@ -114,6 +114,12 @@ def test_root_serves_frontend(client: TestClient):
     assert "Pick'em Strategy Tester" in response.text
 
 
+def test_projections_frontend_served(client: TestClient):
+    response = client.get("/projections")
+    assert response.status_code == 200
+    assert "Projections Lab" in response.text
+
+
 def test_favicon_served(client: TestClient):
     response = client.get("/favicon.ico")
     assert response.status_code == 200
@@ -141,6 +147,20 @@ def test_coverage_endpoint_reports_default_window(client: TestClient):
     assert payload["default_window"]["season_start"] == 2022
     assert payload["default_window"]["week_end"] == 2
     assert payload["season_summaries"][0]["fully_usable_weeks"] == [1, 2]
+
+
+def test_projections_endpoint_returns_filtered_sample_data(client: TestClient):
+    response = client.get("/api/projections?source=sample&week=1&position=QB&top_n=3")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["source"] == "sample"
+    assert payload["week"] == 1
+    assert payload["position"] == "QB"
+    assert payload["summary"]["total_players"] == 3
+    assert len(payload["players"]) == 3
+    assert {player["position"] for player in payload["players"]} == {"QB"}
+    assert payload["players"][0]["projected_points"] >= payload["players"][1]["projected_points"]
 
 
 def test_run_backtest_returns_summary_and_weekly_results(client: TestClient):

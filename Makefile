@@ -5,7 +5,8 @@
 .DEFAULT_GOAL := help
 .PHONY: help bootstrap install data run dev pickem-web pickem-web-auth-local \
         pickem-web-auth-supabase pickem-auth-token notebook test cov lint fmt check \
-        db.prepare db.migrate db.load db.update db.stats db.mock clean clean-all
+        db.prepare db.migrate db.load db.update db.stats db.mock \
+        fly.app fly.volume fly.secrets fly.deploy fly.status fly.logs fly.token clean clean-all
 
 # Override on the CLI, e.g. `make db.load SEASON=2023`
 SEASON     ?= 2024
@@ -15,6 +16,9 @@ PORT       ?= 8501
 UV         ?= uv
 DATA_MODE  ?= real
 STATS_SOURCE ?= nflverse
+FLY_APP    ?= ffpy-pickem
+FLY_REGION ?= iad
+FLY_VOLUME_SIZE ?= 1
 PREPARE_ARGS ?=
 AUTH_JWT_SECRET ?= local-supabase-jwt-secret-change-me-123456
 AUTH_EMAIL      ?= demo@example.com
@@ -100,6 +104,29 @@ db.stats: ## Collect actual stats (STATS_SOURCE=nflverse|espn)
 
 db.mock: ## Populate with realistic mock data (SEASON=2024)
 	$(UV) run ffpy-db mock --season $(SEASON)
+
+# ---- Fly.io -------------------------------------------------------
+
+fly.app: ## Create the Fly app if needed (FLY_APP=ffpy-pickem)
+	fly apps create $(FLY_APP)
+
+fly.volume: ## Create the persistent SQLite volume (FLY_APP, FLY_REGION, FLY_VOLUME_SIZE)
+	fly volumes create ffpy_data --app $(FLY_APP) --region $(FLY_REGION) --size $(FLY_VOLUME_SIZE)
+
+fly.secrets: ## Set Fly runtime secrets from .env or shell exports (FLY_APP=ffpy-pickem)
+	FLY_APP="$(FLY_APP)" bash scripts/fly_set_secrets.sh
+
+fly.deploy: ## Deploy to Fly.io using fly.toml (FLY_APP=ffpy-pickem)
+	fly deploy --app $(FLY_APP)
+
+fly.status: ## Show Fly app status (FLY_APP=ffpy-pickem)
+	fly status --app $(FLY_APP)
+
+fly.logs: ## Tail Fly app logs (FLY_APP=ffpy-pickem)
+	fly logs --app $(FLY_APP)
+
+fly.token: ## Create a GitHub Actions deploy token for this Fly app
+	fly tokens create deploy -a $(FLY_APP)
 
 # ---- Cleanup ------------------------------------------------------
 

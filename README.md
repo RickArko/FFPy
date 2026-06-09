@@ -159,6 +159,16 @@ make pickem-web-auth-supabase PORT=8000
 
 That enables auth using `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and related settings from `.env`. The Vue frontend will render a minimal Supabase email/password sign-in panel automatically when that public config is present.
 
+## Fly.io deployment
+
+The app now includes a production Dockerfile, `fly.toml`, and a GitHub Actions workflow for Fly deploys. The secure path is:
+
+1. Create the Fly app and a SQLite volume.
+2. Set `DATABASE_PATH=/data/ffpy.db` and the `SUPABASE_*` / `ABUSE_HASH_SALT` secrets in Fly.
+3. Push to `main`; CI runs tests and a Docker build, then deploys to Fly.
+
+See [docs/deployment/fly.md](docs/deployment/fly.md) for the exact commands.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Test guidance lives in [TESTING.md](TESTING.md). Deeper documentation (database schema, optimizer internals, Streamlit pages, and the Supabase deployment/auth plan) lives in [`docs/`](docs/), including [docs/security/SUPABASE_HARDENED_IMPLEMENTATION_PLAN.md](docs/security/SUPABASE_HARDENED_IMPLEMENTATION_PLAN.md).
