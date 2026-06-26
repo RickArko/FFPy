@@ -68,8 +68,8 @@ class FFPyDatabase:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Connect to database
-        self.conn = sqlite3.connect(str(self.db_path))
+        # Connect to database (check_same_thread=False for FastAPI/uvicorn thread safety)
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Access columns by name
 
         # Initialize schema
@@ -84,7 +84,17 @@ class FFPyDatabase:
         not every workflow needs it.
         """
         migrations_dir = Path(__file__).parent / "migrations"
-        for name in ("001_initial_schema.sql", "003_backtest_schema.sql"):
+        for name in (
+            "001_initial_schema.sql",
+            "003_backtest_schema.sql",
+            "004_advanced_stats.sql",
+            "005_ngs.sql",
+            "006_injuries.sql",
+            "007_dfs.sql",
+            "008_adp.sql",
+            "009_depth_charts.sql",
+            "010_quality_views.sql",
+        ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
         self.conn.commit()
@@ -357,7 +367,18 @@ class FFPyDatabase:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # Export each table
-        tables = ["players", "actual_stats", "projections", "api_requests"]
+        tables = [
+            "players",
+            "actual_stats",
+            "projections",
+            "api_requests",
+            "player_advanced_stats",
+            "nextgen_stats",
+            "player_injuries",
+            "dfs_salaries",
+            "adp",
+            "depth_charts",
+        ]
 
         for table in tables:
             df = pd.read_sql(f"SELECT * FROM {table}", self.conn)
@@ -1094,3 +1115,487 @@ class FFPyDatabase:
             (df["with_spread"] == df["n_games"]) & (df["with_scores"] == df["n_games"])
         ).astype(int)
         return df
+
+    # ==================== ADVANCED PLAYER STATS (Phase 1) ====================
+
+    def store_player_advanced_stats(self, df: pd.DataFrame, season: int) -> int:
+        """
+        Store or replace derived advanced player stats.
+
+        Args:
+            df: DataFrame with columns matching player_advanced_stats schema
+            season: Season year (for data_load tracking)
+
+        Returns:
+            Number of rows stored
+        """
+        from tqdm import tqdm
+
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(player_advanced_stats)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("stat_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        batch_size = 500
+        total_rows = len(df)
+        inserted = 0
+        pbar = tqdm(total=total_rows, desc="Storing advanced stats", unit=" rows")
+
+        try:
+            for start_idx in range(0, total_rows, batch_size):
+                end_idx = min(start_idx + batch_size, total_rows)
+                batch = df.iloc[start_idx:end_idx]
+                column_sql = ", ".join(available_cols)
+                placeholders = ", ".join("?" for _ in available_cols)
+                cursor.executemany(
+                    f"INSERT OR REPLACE INTO player_advanced_stats ({column_sql}) VALUES ({placeholders})",
+                    _sqlite_records(batch[available_cols]),
+                )
+                inserted += max(cursor.rowcount, 0)
+                pbar.update(len(batch))
+
+            self.conn.commit()
+        finally:
+            pbar.close()
+
+        return inserted
+
+    def get_player_advanced_stats(
+        self,
+        player_name: str,
+        season: int,
+        week: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """
+        Retrieve advanced stats for a player.
+
+        Args:
+            player_name: Player name
+            season: Season year
+            week: Optional week filter
+
+        Returns:
+            DataFrame with advanced stats
+        """
+        query = "SELECT * FROM player_advanced_stats WHERE player_name = ? AND season = ?"
+        params: List = [player_name, season]
+        if week is not None:
+            query += " AND week = ?"
+            params.append(week)
+        query += " ORDER BY week"
+        return pd.read_sql(query, self.conn, params=params)
+
+    # ==================== NEXT GEN STATS (Phase 2A) ====================
+
+    def store_nextgen_stats(self, df: pd.DataFrame, season: int) -> int:
+        """
+        Store or replace Next Gen Stats data.
+
+        Args:
+            df: DataFrame with normalized NGS columns
+            season: Season year
+
+        Returns:
+            Number of rows stored
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(nextgen_stats)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("ngs_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        column_sql = ", ".join(available_cols)
+        placeholders = ", ".join("?" for _ in available_cols)
+        cursor.executemany(
+            f"INSERT OR REPLACE INTO nextgen_stats ({column_sql}) VALUES ({placeholders})",
+            _sqlite_records(df[available_cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_nextgen_stats(
+        self,
+        player_name: Optional[str] = None,
+        season: Optional[int] = None,
+        week: Optional[int] = None,
+        position: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Retrieve Next Gen Stats.
+
+        Args:
+            player_name: Optional player filter
+            season: Optional season filter
+            week: Optional week filter
+            position: Optional position filter
+
+        Returns:
+            DataFrame with NGS data
+        """
+        conditions: List[str] = []
+        params: List = []
+        if player_name is not None:
+            conditions.append("player_name = ?")
+            params.append(player_name)
+        if season is not None:
+            conditions.append("season = ?")
+            params.append(season)
+        if week is not None:
+            conditions.append("week = ?")
+            params.append(week)
+        if position is not None:
+            conditions.append("position = ?")
+            params.append(position)
+
+        where_sql = " AND ".join(conditions) if conditions else "1"
+        query = f"SELECT * FROM nextgen_stats WHERE {where_sql} ORDER BY season, week"
+        return pd.read_sql(query, self.conn, params=params)
+
+    # ==================== INJURIES (Phase 2B) ====================
+
+    def store_player_injuries(self, df: pd.DataFrame, season: int) -> int:
+        """
+        Store or replace player injury data.
+
+        Args:
+            df: DataFrame with normalized injury columns
+            season: Season year
+
+        Returns:
+            Number of rows stored
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(player_injuries)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("injury_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        column_sql = ", ".join(available_cols)
+        placeholders = ", ".join("?" for _ in available_cols)
+        cursor.executemany(
+            f"INSERT OR REPLACE INTO player_injuries ({column_sql}) VALUES ({placeholders})",
+            _sqlite_records(df[available_cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_player_injuries(
+        self,
+        player_name: Optional[str] = None,
+        season: Optional[int] = None,
+        week: Optional[int] = None,
+        game_status: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Retrieve player injury data.
+
+        Args:
+            player_name: Optional player filter
+            season: Optional season filter
+            week: Optional week filter
+            game_status: Optional game status filter (Active, Questionable, Out, etc.)
+
+        Returns:
+            DataFrame with injury data
+        """
+        conditions: List[str] = []
+        params: List = []
+        if player_name is not None:
+            conditions.append("player_name = ?")
+            params.append(player_name)
+        if season is not None:
+            conditions.append("season = ?")
+            params.append(season)
+        if week is not None:
+            conditions.append("week = ?")
+            params.append(week)
+        if game_status is not None:
+            conditions.append("game_status = ?")
+            params.append(game_status)
+
+        where_sql = " AND ".join(conditions) if conditions else "1"
+        query = f"SELECT * FROM player_injuries WHERE {where_sql} ORDER BY season, week"
+        return pd.read_sql(query, self.conn, params=params)
+
+    # ==================== DFS SALARIES (Phase 3A) ====================
+
+    def store_dfs_salaries(self, df: pd.DataFrame, season: int, week: int, platform: str) -> int:
+        """
+        Store DFS salary data.
+
+        Args:
+            df: DataFrame with columns: player_name, salary, position, team, opponent
+            season: Season year
+            week: Week number
+            platform: Platform name (draftkings, fanduel)
+
+        Returns:
+            Number of rows stored
+        """
+        df = df.copy()
+        df["season"] = season
+        df["week"] = week
+        df["platform"] = platform
+
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(dfs_salaries)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("dfs_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        column_sql = ", ".join(available_cols)
+        placeholders = ", ".join("?" for _ in available_cols)
+        cursor.executemany(
+            f"INSERT OR REPLACE INTO dfs_salaries ({column_sql}) VALUES ({placeholders})",
+            _sqlite_records(df[available_cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_dfs_salaries(
+        self,
+        season: int,
+        week: int,
+        platform: Optional[str] = None,
+        position: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Retrieve DFS salaries.
+
+        Args:
+            season: Season year
+            week: Week number
+            platform: Optional platform filter
+            position: Optional position filter
+
+        Returns:
+            DataFrame with DFS salary data
+        """
+        query = "SELECT * FROM dfs_salaries WHERE season = ? AND week = ?"
+        params: List = [season, week]
+        if platform:
+            query += " AND platform = ?"
+            params.append(platform)
+        if position:
+            query += " AND position = ?"
+            params.append(position)
+        query += " ORDER BY salary DESC"
+        return pd.read_sql(query, self.conn, params=params)
+
+    # ==================== ADP (Phase 3B) ====================
+
+    def store_adp(self, df: pd.DataFrame, season: int) -> int:
+        """
+        Store ADP data.
+
+        Args:
+            df: DataFrame with columns: player_name, position, platform, adp, adp_high, adp_low, draft_date
+            season: Season year
+
+        Returns:
+            Number of rows stored
+        """
+        df = df.copy()
+        df["season"] = season
+
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(adp)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("adp_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        column_sql = ", ".join(available_cols)
+        placeholders = ", ".join("?" for _ in available_cols)
+        cursor.executemany(
+            f"INSERT OR REPLACE INTO adp ({column_sql}) VALUES ({placeholders})",
+            _sqlite_records(df[available_cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_adp(
+        self,
+        position: Optional[str] = None,
+        platform: Optional[str] = None,
+        season: Optional[int] = None,
+        top_n: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """
+        Retrieve ADP data.
+
+        Args:
+            position: Optional position filter
+            platform: Optional platform filter
+            season: Optional season filter
+            top_n: Optional limit to top N players by ADP
+
+        Returns:
+            DataFrame with ADP data
+        """
+        conditions: List[str] = []
+        params: List = []
+        if position is not None:
+            conditions.append("position = ?")
+            params.append(position)
+        if platform is not None:
+            conditions.append("platform = ?")
+            params.append(platform)
+        if season is not None:
+            conditions.append("season = ?")
+            params.append(season)
+
+        where_sql = " AND ".join(conditions) if conditions else "1"
+        query = f"SELECT * FROM adp WHERE {where_sql} ORDER BY adp ASC"
+        if top_n:
+            query += f" LIMIT {top_n}"
+        return pd.read_sql(query, self.conn, params=params)
+
+    # ==================== DEPTH CHARTS (Phase 3C) ====================
+
+    def store_depth_charts(self, df: pd.DataFrame, season: int) -> int:
+        """
+        Store depth chart data.
+
+        Args:
+            df: DataFrame with columns: team, season, week, position, player_name, depth_spot
+            season: Season year
+
+        Returns:
+            Number of rows stored
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(depth_charts)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("dc_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        column_sql = ", ".join(available_cols)
+        placeholders = ", ".join("?" for _ in available_cols)
+        cursor.executemany(
+            f"INSERT OR REPLACE INTO depth_charts ({column_sql}) VALUES ({placeholders})",
+            _sqlite_records(df[available_cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_depth_charts(
+        self,
+        team: Optional[str] = None,
+        season: Optional[int] = None,
+        week: Optional[int] = None,
+        position: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Retrieve depth chart data.
+
+        Args:
+            team: Optional team filter
+            season: Optional season filter
+            week: Optional week filter
+            position: Optional position filter
+
+        Returns:
+            DataFrame with depth chart data
+        """
+        conditions: List[str] = []
+        params: List = []
+        if team is not None:
+            conditions.append("team = ?")
+            params.append(team)
+        if season is not None:
+            conditions.append("season = ?")
+            params.append(season)
+        if week is not None:
+            conditions.append("week = ?")
+            params.append(week)
+        if position is not None:
+            conditions.append("position = ?")
+            params.append(position)
+
+        where_sql = " AND ".join(conditions) if conditions else "1"
+        query = f"SELECT * FROM depth_charts WHERE {where_sql} ORDER BY team, position, depth_spot"
+        return pd.read_sql(query, self.conn, params=params)
+
+    # ==================== DATA QUALITY (Phase 4) ====================
+
+    def audit_data_quality(self) -> Dict[str, Any]:
+        """
+        Run all data quality checks against the database.
+
+        Returns:
+            Dictionary with audit results per check
+        """
+        results: Dict[str, Any] = {}
+        cursor = self.conn.cursor()
+
+        # Check: views exist
+        for view in ("vw_player_weeks", "vw_missing_games", "vw_duplicate_stats"):
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='view' AND name=?",
+                (view,),
+            )
+            results[f"view_{view}"] = cursor.fetchone() is not None
+
+        # Check: missing games
+        try:
+            missing = pd.read_sql("SELECT COUNT(*) AS cnt FROM vw_missing_games", self.conn)
+            results["missing_games_count"] = int(missing["cnt"].iloc[0])
+        except Exception:
+            results["missing_games_count"] = -1
+
+        # Check: duplicate stats
+        try:
+            dups = pd.read_sql("SELECT COUNT(*) AS cnt FROM vw_duplicate_stats", self.conn)
+            results["duplicate_stat_weeks"] = int(dups["cnt"].iloc[0])
+        except Exception:
+            results["duplicate_stat_weeks"] = -1
+
+        # Check: table row counts
+        tables = [
+            "players",
+            "actual_stats",
+            "projections",
+            "games",
+            "plays",
+            "snap_counts",
+            "ftn_charting",
+            "player_advanced_stats",
+            "nextgen_stats",
+            "player_injuries",
+            "dfs_salaries",
+            "adp",
+            "depth_charts",
+        ]
+        for table in tables:
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                results[f"table_{table}_rows"] = int(cursor.fetchone()[0])
+            except Exception:
+                results[f"table_{table}_rows"] = -1
+
+        return results

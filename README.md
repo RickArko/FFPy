@@ -9,30 +9,65 @@ A Streamlit app and Python toolkit for fantasy football projections, lineup opti
 ## Quick start
 
 ```bash
-make bootstrap   # one-time: installs uv, deps, .env, DB schema
-make data        # loads app data for the default season (or `DATA_MODE=mock` for offline)
-make run         # starts Streamlit on http://localhost:8501
+make bootstrap           # one-time: uv, deps, .env, DB schema
+make full-data SEASON=2024  # loads everything: PBP → stats → advanced stats → NGS → injuries → depth charts → audit
+make run                 # starts Streamlit on http://localhost:8501
 ```
 
 See [QUICKSTART.md](QUICKSTART.md) for the two-minute walkthrough.
+
+### Step-by-step happy path
+
+If you prefer to run each stage individually:
+
+```bash
+make bootstrap              # one-time setup
+make db.load SEASON=2024    # 1. nflverse play-by-play + games + FTN + snaps
+make db.compute-stats       # 2. derived analytics (target share, routes, red zone)
+make db.ngs                 # 3. Next Gen Stats (QB passing / WR separation / RB efficiency)
+make db.injuries            # 4. injury reports (practice status, game status)
+uv run ffpy-db load-depth-charts --season 2024  # 5. weekly depth charts
+make db.stats               # 6. per-player fantasy scoring
+make db.audit               # 7. health check — row counts, missing games, duplicates
+make run                    # 8. launch Streamlit at http://localhost:8501
+```
+
+**Note on audit output**: `make db.audit` exits with code 1 when issues like missing games or
+duplicates are found as a CI hygiene signal. The `full-data` target treats it as informational
+and continues. Missing games (e.g., `vw_missing_games`) are expected when you've only loaded
+partial season data — they fill in as more weeks get loaded.
 
 ## Make targets
 
 `make help` lists everything. Key targets:
 
-| Target                      | What it does                                     |
-|-----------------------------|--------------------------------------------------|
-| `make bootstrap`            | First-time setup (idempotent)                    |
-| `make data`                 | Generate required app data for the default season |
-| `make run` / `make dev`     | Launch Streamlit (dev = auto-reload on save)     |
-| `make pickem-web PORT=8000` | Launch the FastAPI + Vue pick'em strategy tester |
-| `make test` / `make cov`    | Pytest, optionally with coverage                 |
-| `make lint` / `make fmt`    | Ruff lint / format                               |
-| `make check`                | `lint` + `test` (CI entry point)                 |
-| `make db.load SEASON=Y`     | Load nflverse play-by-play for a season          |
-| `make notebook`             | Jupyter Lab with analysis deps                   |
+| Target                        | What it does                                         |
+|-------------------------------|------------------------------------------------------|
+| `make bootstrap`              | First-time setup (idempotent)                        |
+| `make data`                   | PBP + stats (legacy; prefer `full-data` or stepwise) |
+| `make full-data SEASON=2024`  | **Full pipeline**: PBP → stats → advanced stats → NGS → injuries → depth charts → audit |
+| `make run` / `make dev`       | Launch Streamlit (dev = auto-reload on save)         |
+| `make pickem-web PORT=8000`   | Launch the FastAPI + Vue pick'em strategy tester     |
+| `make test` / `make cov`      | Pytest, optionally with coverage                     |
+| `make lint` / `make fmt`      | Ruff lint / format                                   |
+| `make check`                  | `lint` + `test` (CI entry point)                     |
+| `make notebook`               | Jupyter Lab with analysis deps                       |
 
-Database targets wrap the `ffpy-db` CLI — `uv run ffpy-db --help` for the full surface.
+### Database pipeline (run in order)
+
+| Target                        | What it does                                         |
+|-------------------------------|------------------------------------------------------|
+| `make db.load SEASON=2024`    | Load nflverse play-by-play + games + FTN + snaps     |
+| `make db.compute-stats`       | Derived analytics: targets, routes, red-zone usage   |
+| `make db.ngs`                 | Next Gen Stats (passing / receiving / rushing)       |
+| `make db.injuries`            | Injury reports (practice/game status per week)       |
+| `make db.depth-chart`         | Weekly team depth charts (via nflreadpy)             |
+| `make db.stats`               | Collect actual fantasy scoring per player-week       |
+| `make db.audit`               | Health check — missing games, duplicates, row counts |
+
+Phase 3 stubs (require API integration): `db.dfs`, `db.adp`.
+
+All database targets wrap the `ffpy-db` CLI — `uv run ffpy-db --help` for the full surface.
 
 ## Configuration
 
@@ -52,6 +87,12 @@ Key settings: `API_PROVIDER` (espn/sportsdata), `NFL_SEASON`, `DATABASE_PATH`.
 - Historical projection model (weighted recent performance)
 - ESPN + SportsDataIO integrations with automatic fallback
 - Local SQLite with nflverse play-by-play, FTN charting, and snap counts
+- **Derived advanced stats**: target share, air yards share, deep / red-zone / end-zone targets, routes, snap %, first-read targets
+- **Next Gen Stats**: QB time-to-throw / CPOE, WR separation / cushion / YAC over expected, RB efficiency / rush yards over expected
+- **Injury tracking**: weekly practice status, injury type, game status across all players
+- **Depth charts**: weekly team depth charts via nflreadpy
+- **Data quality views**: `vw_player_weeks`, `vw_missing_games`, `vw_duplicate_stats`
+- **Audit CLI**: `ffpy-db audit` — row counts, missing games, duplicates, view health
 
 ## Deployment
 

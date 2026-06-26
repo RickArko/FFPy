@@ -3,9 +3,10 @@
 # See `make help` for all targets.
 
 .DEFAULT_GOAL := help
-.PHONY: help bootstrap install data run dev pickem-web pickem-web-auth-local \
+.PHONY: help bootstrap install data full-data run dev pickem-web pickem-web-auth-local \
         pickem-web-auth-supabase pickem-auth-token notebook test cov lint fmt check \
         db.prepare db.migrate db.load db.update db.stats db.mock \
+        db.compute-stats db.ngs db.injuries db.audit db.dfs db.adp db.depth-chart \
         supabase.check fly.app fly.volume fly.secrets fly.secrets-list \
         fly.deploy fly.status fly.logs fly.token clean clean-all
 
@@ -46,6 +47,12 @@ install: ## Sync dependencies and register the `ffpy` Jupyter kernel
 	@$(UV) run python -m ipykernel install --user --name ffpy --display-name "Python (FFPy)"
 
 data: db.prepare ## Generate all required app data (DATA_MODE=real|mock)
+
+full-data: db.prepare db.compute-stats db.ngs db.injuries  ## Full pipeline: PBP → stats → advanced stats → NGS → injuries → depth charts → audit
+	$(UV) run ffpy-db load-depth-charts --season $(SEASON)
+	-$(UV) run ffpy-db audit
+	@echo ""
+	@echo "Full data pipeline complete. Run \`make run\` to launch the app."
 
 # ---- App ----------------------------------------------------------
 
@@ -119,6 +126,27 @@ db.stats: ## Collect actual stats (STATS_SOURCE=nflverse|espn)
 
 db.mock: ## Populate with realistic mock data (SEASON=2024)
 	$(UV) run ffpy-db mock --season $(SEASON)
+
+db.compute-stats: ## Compute derived advanced player stats (SEASON=2024)
+	$(UV) run ffpy-db compute-stats --season $(SEASON)
+
+db.ngs: ## Load Next Gen Stats for a season (SEASON=2024)
+	$(UV) run ffpy-db load-ngs --season $(SEASON)
+
+db.injuries: ## Load injury data for a season (SEASON=2024)
+	$(UV) run ffpy-db load-injuries --season $(SEASON)
+
+db.audit: ## Run data quality audit
+	$(UV) run ffpy-db audit
+
+db.dfs: ## Load DFS salaries (placeholder, SEASON=2024)
+	$(UV) run ffpy-db load-dfs --season $(SEASON)
+
+db.adp: ## Load ADP data (placeholder, SEASON=2024)
+	$(UV) run ffpy-db load-adp --season $(SEASON)
+
+db.depth-chart: ## Load depth charts (SEASON=2024)
+	$(UV) run ffpy-db load-depth-charts --season $(SEASON)
 
 # ---- Fly.io -------------------------------------------------------
 

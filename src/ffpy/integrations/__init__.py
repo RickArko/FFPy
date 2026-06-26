@@ -3,4 +3,7 @@
 from .espn import ESPNIntegration
 from .sportsdata import SportsDataIntegration
 
-__all__ = ["ESPNIntegration", "SportsDataIntegration"]
+__all__ = [
+    "ESPNIntegration",
+    "SportsDataIntegration",
+]
