@@ -50,5 +50,5 @@ uv run ffpy-db migrate
 echo
 info "Bootstrap complete."
 echo "  Start the app:           make run"
-echo "  Load a season of data:   make db.load SEASON=2024"
+echo "  Generate app data:       make data"
 echo "  See all make targets:    make help"

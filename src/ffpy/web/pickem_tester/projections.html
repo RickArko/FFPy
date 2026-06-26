@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FFPy Projections</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script defer src="/assets/projections.js"></script>
+  </head>
+  <body>
+    <div id="projections-app" v-cloak>
+      <div class="shell projections-shell">
+        <header class="hero projections-hero">
+          <nav class="top-nav" aria-label="FFPy tools">
+            <a class="nav-link is-active" href="/projections">Projections</a>
+            <a class="nav-link" href="/">Pick'em Tester</a>
+          </nav>
+          <h1>Projections Lab</h1>
+          <p>
+            Weekly fantasy projections from the historical model, configured API provider,
+            or deterministic sample set.
+          </p>
+          <div class="hero-strip">
+            <span class="pill">{{ payload.source_label || sourceLabel }}</span>
+            <span class="pill">Season {{ payload.season || '--' }}</span>
+            <span class="pill">Week {{ form.week }}</span>
+            <span class="pill">{{ visiblePlayers.length }} visible</span>
+          </div>
+        </header>
+
+        <section class="projection-toolbar panel">
+          <div class="panel-body projection-toolbar-body">
+            <div class="field">
+              <label for="projection-source">Source</label>
+              <select id="projection-source" v-model="form.source" @change="loadProjections">
+                <option value="historical">Historical Model</option>
+                <option value="api">API Data</option>
+                <option value="sample">Sample Data</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="projection-week">Week</label>
+              <input
+                id="projection-week"
+                v-model.number="form.week"
+                type="number"
+                min="1"
+                max="18"
+                @change="loadProjections"
+              />
+            </div>
+
+            <div class="field">
+              <label for="projection-top">Player Limit</label>
+              <input
+                id="projection-top"
+                v-model.number="form.top_n"
+                type="number"
+                min="1"
+                max="200"
+                @change="loadProjections"
+              />
+            </div>
+
+            <div class="field field-search">
+              <label for="projection-search">Search</label>
+              <input id="projection-search" v-model.trim="search" type="search" placeholder="Player, team, opponent" />
+            </div>
+
+            <button class="action-button projection-refresh" type="button" :disabled="loading" @click="loadProjections">
+              {{ loading ? 'Loading...' : 'Refresh' }}
+            </button>
+          </div>
+        </section>
+
+        <section class="projection-position-strip" aria-label="Position filters">
+          <button
+            v-for="option in positionOptions"
+            :key="option.value"
+            class="mode-button position-button"
+            :class="{ 'is-active': form.position === option.value }"
+            type="button"
+            @click="setPosition(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </section>
+
+        <div v-if="error" class="error-banner projection-message">{{ error }}</div>
+        <div v-else-if="payload.fallback_used && payload.message" class="status-banner projection-message">
+          {{ payload.message }}
+        </div>
+
+        <main class="projection-grid">
+          <section class="projection-main">
+            <div class="metric-grid projection-metrics">
+              <article class="metric-card">
+                <span>Players</span>
+                <strong>{{ formatInteger(payload.summary.total_players) }}</strong>
+              </article>
+              <article class="metric-card">
+                <span>Average</span>
+                <strong>{{ formatPoints(payload.summary.average_projected_points) }}</strong>
+              </article>
+              <article class="metric-card">
+                <span>Median</span>
+                <strong>{{ formatPoints(payload.summary.median_projected_points) }}</strong>
+              </article>
+              <article class="metric-card">
+                <span>Top Projection</span>
+                <strong>{{ formatPoints(payload.summary.top_projection) }}</strong>
+              </article>
+            </div>
+
+            <section class="panel projection-table-panel">
+              <div class="panel-header projection-table-head">
+                <div>
+                  <h2 class="panel-title">Player Board</h2>
+                  <p class="panel-subtitle">{{ topPlayerLine }}</p>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div v-if="loading" class="empty-state">Loading projections...</div>
+                <div v-else-if="!visiblePlayers.length" class="empty-state">No players match the current filters.</div>
+                <div v-else class="table-shell projection-table-shell">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th><button class="sort-button" type="button" @click="sortBy('player')">Player {{ sortMark('player') }}</button></th>
+                        <th><button class="sort-button" type="button" @click="sortBy('position')">Pos {{ sortMark('position') }}</button></th>
+                        <th><button class="sort-button" type="button" @click="sortBy('team')">Team {{ sortMark('team') }}</button></th>
+                        <th>Opp</th>
+                        <th class="number-cell"><button class="sort-button" type="button" @click="sortBy('projected_points')">Proj {{ sortMark('projected_points') }}</button></th>
+                        <th class="number-cell hide-on-mobile">Pass</th>
+                        <th class="number-cell hide-on-mobile">Rush</th>
+                        <th class="number-cell hide-on-mobile">Rec</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="player in visiblePlayers" :key="player.player + player.team + player.position">
+                        <td>
+                          <strong>{{ player.player }}</strong>
+                        </td>
+                        <td><span class="position-chip">{{ player.position }}</span></td>
+                        <td>{{ player.team || '--' }}</td>
+                        <td>{{ player.opponent || 'TBD' }}</td>
+                        <td class="number-cell projection-points">{{ formatPoints(player.projected_points) }}</td>
+                        <td class="number-cell hide-on-mobile">{{ formatStat(player.passing_yards) }}</td>
+                        <td class="number-cell hide-on-mobile">{{ formatStat(player.rushing_yards) }}</td>
+                        <td class="number-cell hide-on-mobile">{{ formatStat(player.receiving_yards) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <aside class="projection-side">
+            <section class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title">Position Shape</h2>
+                <p class="panel-subtitle">Depth and scoring concentration by position.</p>
+              </div>
+              <div class="panel-body position-stack">
+                <article v-for="position in payload.position_totals" :key="position.position" class="position-card">
+                  <div class="position-card-head">
+                    <strong>{{ position.position }}</strong>
+                    <span>{{ position.players }} players</span>
+                  </div>
+                  <div class="bar-track">
+                    <span class="bar-fill" :style="{ width: barWidth(position.top_projection) + '%' }"></span>
+                  </div>
+                  <div class="position-card-meta">
+                    <span>Avg {{ formatPoints(position.average_projected_points) }}</span>
+                    <span>Top {{ formatPoints(position.top_projection) }}</span>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title">Leaders</h2>
+                <p class="panel-subtitle">Top five at each fantasy position.</p>
+              </div>
+              <div class="panel-body leaderboard-stack">
+                <article v-for="position in payload.positions" :key="position" class="leaderboard-card">
+                  <h3>{{ position }}</h3>
+                  <ol>
+                    <li v-for="player in payload.position_breakdown[position]" :key="position + player.player">
+                      <span>{{ player.player }}</span>
+                      <strong>{{ formatPoints(player.projected_points) }}</strong>
+                    </li>
+                  </ol>
+                </article>
+              </div>
+            </section>
+          </aside>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

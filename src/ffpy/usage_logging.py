@@ -6,6 +6,7 @@ import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Protocol
 
 from ffpy.config import Config
@@ -90,6 +91,8 @@ class SQLiteUsageEventLogger:
             conn.close()
 
     def _ensure_table(self) -> None:
+        parent_dir = Path(self.db_path).expanduser().parent
+        parent_dir.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         try:
             conn.execute(

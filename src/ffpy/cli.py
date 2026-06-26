@@ -4,7 +4,8 @@ Subcommands:
     migrate         Set up database schema.
     load            Load nflverse play-by-play data.
     update          Incrementally update the current season.
-    collect-stats   Collect historical actual stats from ESPN.
+    collect-stats   Collect historical actual stats.
+    prepare         Generate all app data required by the main UIs.
     mock            Generate realistic mock season data for development.
 
 Run ``ffpy-db <subcommand> --help`` for per-command flags.
@@ -17,6 +18,8 @@ import logging
 import sys
 import time
 
+import pandas as pd
+
 from ffpy.config import Config
 
 
@@ -28,10 +31,24 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
-def cmd_migrate(args: argparse.Namespace) -> int:
-    from ffpy.nflverse_loader import setup_database
+def _setup_app_database(db_path: str | None = None):
+    from ffpy.database import FFPyDatabase
 
-    db = setup_database(args.db_path)
+    db = FFPyDatabase(db_path)
+    print("Running play-by-play migration...")
+    db.run_migration("002_play_by_play_schema.sql")
+    print("[OK] Migration complete")
+    return db
+
+
+def _season_row_count(db, table: str, season: int) -> int:
+    cursor = db.conn.cursor()
+    cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE season = ?", (season,))
+    return int(cursor.fetchone()[0])
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    db = _setup_app_database(args.db_path)
     try:
         print(f"Database ready: {db.db_path}")
     finally:
@@ -40,7 +57,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
 
 def cmd_load(args: argparse.Namespace) -> int:
-    from ffpy.nflverse_loader import NFLVerseLoader, setup_database
+    from ffpy.nflverse import NFLVerseLoader, setup_database
 
     _setup_logging(not args.quiet)
 
@@ -85,7 +102,7 @@ def cmd_load(args: argparse.Namespace) -> int:
 
 
 def cmd_update(args: argparse.Namespace) -> int:
-    from ffpy.nflverse_loader import NFLVerseLoader, setup_database
+    from ffpy.nflverse import NFLVerseLoader, setup_database
 
     _setup_logging(not args.quiet)
     db = setup_database(args.db_path)
@@ -101,50 +118,288 @@ def cmd_update(args: argparse.Namespace) -> int:
         db.close()
 
 
-def cmd_collect_stats(args: argparse.Namespace) -> int:
+def _normalise_nflverse_actual_stats(
+    stats_df: pd.DataFrame,
+    *,
+    season: int,
+    start_week: int,
+    end_week: int,
+) -> pd.DataFrame:
+    if stats_df.empty:
+        return pd.DataFrame()
+
+    df = stats_df.copy()
+    df = df[
+        (df["season"] == season)
+        & (df["week"].between(start_week, end_week))
+        & (df["season_type"] == "REG")
+        & (df["position"].isin(["QB", "RB", "WR", "TE"]))
+    ].copy()
+    if df.empty:
+        return pd.DataFrame()
+
+    points_col = "fantasy_points_ppr" if "fantasy_points_ppr" in df.columns else "fantasy_points"
+    player_col = "player_display_name" if "player_display_name" in df.columns else "player_name"
+
+    out = pd.DataFrame(
+        {
+            "player": df[player_col],
+            "team": df["team"],
+            "position": df["position"],
+            "opponent": df.get("opponent_team", ""),
+            "actual_points": df[points_col],
+            "passing_yards": df.get("passing_yards", 0),
+            "passing_tds": df.get("passing_tds", 0),
+            "interceptions": df.get("passing_interceptions", 0),
+            "rushing_yards": df.get("rushing_yards", 0),
+            "rushing_tds": df.get("rushing_tds", 0),
+            "receiving_yards": df.get("receiving_yards", 0),
+            "receiving_tds": df.get("receiving_tds", 0),
+            "receptions": df.get("receptions", 0),
+            "week": df["week"],
+            "nfl_id": df.get("player_id"),
+        }
+    )
+
+    numeric_cols = [
+        "actual_points",
+        "passing_yards",
+        "passing_tds",
+        "interceptions",
+        "rushing_yards",
+        "rushing_tds",
+        "receiving_yards",
+        "receiving_tds",
+        "receptions",
+    ]
+    out[numeric_cols] = out[numeric_cols].fillna(0)
+    return out.sort_values(["week", "position", "player"]).reset_index(drop=True)
+
+
+def _load_nflverse_actual_stats(season: int, start_week: int, end_week: int) -> pd.DataFrame:
+    import nflreadpy as nfl
+
+    stats = nfl.load_player_stats(seasons=[season], summary_level="week")
+    return _normalise_nflverse_actual_stats(
+        stats.to_pandas(),
+        season=season,
+        start_week=start_week,
+        end_week=end_week,
+    )
+
+
+def _collect_nflverse_actual_stats(
+    *,
+    season: int,
+    start_week: int,
+    end_week: int,
+    db_path: str | None = None,
+) -> int:
+    from ffpy.database import FFPyDatabase
+
+    if start_week > end_week:
+        raise ValueError("start_week must be <= end_week")
+
+    stats = _load_nflverse_actual_stats(season, start_week, end_week)
+    db = FFPyDatabase(db_path=db_path)
+    total = 0
+    try:
+        print(f"Collecting actual stats from nflverse for {season}, weeks {start_week}-{end_week}")
+        for week in range(start_week, end_week + 1):
+            print(f"[Week {week}/{end_week}] ", end="", flush=True)
+            if db.check_api_request("nflverse", season, week, "actuals"):
+                print("already collected, skipping")
+                continue
+
+            week_df = stats[stats["week"] == week].copy()
+            if week_df.empty:
+                print("no data")
+                db.log_api_request("nflverse", season, week, "actuals", False, "No data returned")
+                continue
+
+            db.store_actual_stats(week_df, season=season, week=week, source="nflverse")
+            db.log_api_request("nflverse", season, week, "actuals", True)
+            total += len(week_df)
+            print(f"stored {len(week_df)} players")
+
+        print(f"\nDone. Stored {total} player-week records at {db.db_path}")
+        return total
+    finally:
+        db.close()
+
+
+def _collect_espn_actual_stats(
+    *,
+    season: int,
+    start_week: int,
+    end_week: int,
+    db_path: str | None = None,
+    request_pause_seconds: float = 1.0,
+) -> int:
     from ffpy.database import FFPyDatabase
     from ffpy.integrations import ESPNIntegration
 
-    db = FFPyDatabase()
+    if start_week > end_week:
+        raise ValueError("start_week must be <= end_week")
+
+    db = FFPyDatabase(db_path=db_path)
     espn = ESPNIntegration()
     total = 0
     try:
-        print(f"Collecting actual stats for {args.season}, weeks {args.start_week}-{args.end_week}")
-        for week in range(args.start_week, args.end_week + 1):
-            print(f"[Week {week}/{args.end_week}] ", end="", flush=True)
-            if db.check_api_request("espn", args.season, week, "actuals"):
+        print(f"Collecting actual stats for {season}, weeks {start_week}-{end_week}")
+        for week in range(start_week, end_week + 1):
+            print(f"[Week {week}/{end_week}] ", end="", flush=True)
+            if db.check_api_request("espn", season, week, "actuals"):
                 print("already collected, skipping")
                 continue
             try:
-                df = espn.get_actual_stats(week=week, season=args.season)
+                df = espn.get_actual_stats(week=week, season=season)
             except Exception as exc:
                 print(f"ERROR: {exc}")
-                db.log_api_request("espn", args.season, week, "actuals", False, str(exc))
+                db.log_api_request("espn", season, week, "actuals", False, str(exc))
                 continue
 
             if df.empty:
                 print("no data")
-                db.log_api_request("espn", args.season, week, "actuals", False, "No data returned")
+                db.log_api_request("espn", season, week, "actuals", False, "No data returned")
                 continue
 
-            db.store_actual_stats(df, season=args.season, week=week, source="espn")
-            db.log_api_request("espn", args.season, week, "actuals", True)
+            db.store_actual_stats(df, season=season, week=week, source="espn")
+            db.log_api_request("espn", season, week, "actuals", True)
             total += len(df)
             print(f"stored {len(df)} players")
 
-            if week < args.end_week:
-                time.sleep(1)  # be polite to ESPN
+            if request_pause_seconds > 0 and week < end_week:
+                time.sleep(request_pause_seconds)
 
         print(f"\nDone. Stored {total} player-week records at {db.db_path}")
-        return 0
+        return total
     finally:
         db.close()
+
+
+def _collect_actual_stats(
+    *,
+    source: str,
+    season: int,
+    start_week: int,
+    end_week: int,
+    db_path: str | None = None,
+) -> int:
+    if source == "nflverse":
+        return _collect_nflverse_actual_stats(
+            season=season,
+            start_week=start_week,
+            end_week=end_week,
+            db_path=db_path,
+        )
+    if source == "espn":
+        return _collect_espn_actual_stats(
+            season=season,
+            start_week=start_week,
+            end_week=end_week,
+            db_path=db_path,
+        )
+    raise ValueError(f"Unsupported stats source: {source}")
+
+
+def cmd_collect_stats(args: argparse.Namespace) -> int:
+    _collect_actual_stats(
+        source=args.source,
+        season=args.season,
+        start_week=args.start_week,
+        end_week=args.end_week,
+        db_path=args.db_path,
+    )
+    return 0
+
+
+def cmd_prepare(args: argparse.Namespace) -> int:
+    if args.start_week > args.end_week:
+        raise ValueError("START_WEEK must be <= END_WEEK")
+    if args.skip_pbp and args.skip_stats:
+        print("Nothing to do: both --skip-pbp and --skip-stats were provided.")
+        return 0
+
+    _setup_logging(not args.quiet)
+
+    mode = "mock" if args.mock else "real"
+    print(f"Preparing FFPy app data for {args.season} ({mode})")
+
+    db = _setup_app_database(args.db_path)
+    resolved_db_path = str(db.db_path)
+    try:
+        if args.mock:
+            from ffpy.mock import generate_pickem_game_data, generate_season_data
+
+            db.close()
+            db = None
+
+            if not args.skip_pbp:
+                generate_pickem_game_data(
+                    season=args.season,
+                    start_week=args.start_week,
+                    weeks=args.end_week,
+                    db_path=resolved_db_path,
+                )
+            if not args.skip_stats:
+                generate_season_data(
+                    season=args.season,
+                    start_week=args.start_week,
+                    weeks=args.end_week,
+                    db_path=resolved_db_path,
+                )
+        else:
+            from ffpy.nflverse import NFLVerseLoader
+
+            if not args.skip_pbp:
+                existing_plays = _season_row_count(db, "plays", args.season)
+                if existing_plays > 0 and not args.refresh_pbp:
+                    print(
+                        f"Play-by-play already loaded for {args.season} "
+                        f"({existing_plays:,} plays); skipping. Use --refresh-pbp to reload."
+                    )
+                else:
+                    with NFLVerseLoader(db) as loader:
+                        loader.load_season(
+                            season=args.season,
+                            include_ftn=not args.no_ftn,
+                            include_snaps=not args.no_snaps,
+                            verbose=not args.quiet,
+                        )
+                        if args.validate:
+                            v = loader.validate_data_quality(args.season)
+                            print(f"\nQuality Score: {v['quality_score']:.1f}%")
+                            print(f"  Total Plays:  {v['total_plays']:,}")
+                            print(f"  Total Games:  {v['total_games']:,}")
+                            if v.get("missing_player_ids"):
+                                print(f"  Missing Player IDs: {v['missing_player_ids']}")
+                            if v.get("missing_epa"):
+                                print(f"  Missing EPA: {v['missing_epa']}")
+
+            db.close()
+            db = None
+
+            if not args.skip_stats:
+                _collect_actual_stats(
+                    source=args.stats_source,
+                    season=args.season,
+                    start_week=args.start_week,
+                    end_week=args.end_week,
+                    db_path=resolved_db_path,
+                )
+
+        print(f"\nApp data ready. Database: {resolved_db_path}")
+        return 0
+    finally:
+        if db is not None:
+            db.close()
 
 
 def cmd_mock(args: argparse.Namespace) -> int:
     from ffpy.mock import generate_season_data
 
-    generate_season_data(season=args.season, weeks=args.weeks)
+    generate_season_data(season=args.season, weeks=args.weeks, db_path=args.db_path)
     return 0
 
 
@@ -179,15 +434,49 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", action="store_true")
     p.set_defaults(func=cmd_update)
 
-    p = sub.add_parser("collect-stats", help="Collect historical actual stats from ESPN")
+    p = sub.add_parser("collect-stats", help="Collect historical actual stats")
     p.add_argument("--season", type=int, default=Config.NFL_SEASON)
     p.add_argument("--start-week", type=int, default=1)
     p.add_argument("--end-week", type=int, default=17)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument(
+        "--source",
+        choices=["nflverse", "espn"],
+        default="nflverse",
+        help="Stats source (default: nflverse; ESPN is unofficial and may be blocked)",
+    )
     p.set_defaults(func=cmd_collect_stats)
+
+    p = sub.add_parser(
+        "prepare",
+        help="Generate all app data needed for projections, play analysis, and pick'em",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--start-week", type=int, default=1)
+    p.add_argument("--end-week", type=int, default=17)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--mock", action="store_true", help="Generate mock data instead of pulling nflverse/ESPN")
+    p.add_argument("--skip-pbp", action="store_true", help="Skip games/play-by-play data")
+    p.add_argument("--skip-stats", action="store_true", help="Skip player actual stats")
+    p.add_argument(
+        "--stats-source",
+        choices=["nflverse", "espn"],
+        default="nflverse",
+        help="Actual-stats source in real mode (default: nflverse)",
+    )
+    p.add_argument("--no-ftn", action="store_true", help="Skip FTN charting in real mode")
+    p.add_argument("--no-snaps", action="store_true", help="Skip snap counts in real mode")
+    p.add_argument("--refresh-pbp", action="store_true", help="Reload play-by-play even if the season exists")
+    p.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    p.add_argument(
+        "--validate", action="store_true", help="Validate play-by-play data quality after real load"
+    )
+    p.set_defaults(func=cmd_prepare)
 
     p = sub.add_parser("mock", help="Generate realistic mock season data (for development)")
     p.add_argument("--season", type=int, default=2024)
     p.add_argument("--weeks", type=int, default=17)
+    p.add_argument("--db-path", help="Custom database path")
     p.set_defaults(func=cmd_mock)
 
     return parser

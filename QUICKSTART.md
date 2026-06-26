@@ -1,6 +1,6 @@
 # Quick Start
 
-Two commands get you running. Works on Linux, macOS, and Windows (via WSL).
+Three commands get you running with database-backed app data. Works on Linux, macOS, and Windows (via WSL).
 
 ## First-time setup
 
@@ -9,6 +9,14 @@ make bootstrap
 ```
 
 This installs `uv`, syncs Python dependencies, seeds `.env` from the template, and creates the SQLite database. Safe to re-run any time.
+
+## Generate app data
+
+```bash
+make data
+```
+
+This prepares the SQLite schema, loads nflverse play-by-play/game data, and collects nflverse player actual stats for the default season. For a fast offline demo dataset, run `make data DATA_MODE=mock`.
 
 ## Run the app
 
@@ -22,10 +30,12 @@ The Streamlit app opens at `http://localhost:8501`. Stop with `Ctrl+C`.
 
 | You want to…                        | Run                                   |
 |-------------------------------------|---------------------------------------|
+| Generate all required app data      | `make data`                           |
+| Generate offline demo app data      | `make data DATA_MODE=mock`            |
 | Load a real NFL season              | `make db.load SEASON=2024`            |
 | Top up the current season weekly    | `make db.update`                      |
 | Populate a realistic mock season    | `make db.mock SEASON=2024`            |
-| Pull actual stats from ESPN         | `make db.stats SEASON=2024`           |
+| Pull actual player stats            | `make db.stats SEASON=2024`           |
 | Dev mode (auto-reload on save)      | `make dev`                            |
 | Run the test suite                  | `make test`                           |
 | Launch Jupyter for EDA              | `make notebook`                       |

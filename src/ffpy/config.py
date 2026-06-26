@@ -10,6 +10,16 @@ env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 
+def _normalize_supabase_url(raw_url: str) -> str:
+    """Return the Supabase project base URL from dashboard/API endpoint variants."""
+
+    url = raw_url.strip().rstrip("/")
+    for suffix in ("/rest/v1", "/auth/v1"):
+        if url.endswith(suffix):
+            return url[: -len(suffix)]
+    return url
+
+
 class Config:
     """Application configuration loaded from environment variables."""
 
@@ -35,10 +45,13 @@ class Config:
     WEB_AUTH_ENABLED = os.getenv("WEB_AUTH_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 
     # Supabase auth configuration
-    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    SUPABASE_URL = _normalize_supabase_url(os.getenv("SUPABASE_URL", ""))
+    SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
     SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+    SUPABASE_BROWSER_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
     SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+    SUPABASE_JWKS_URL = os.getenv("SUPABASE_JWKS_URL", "")
     SUPABASE_JWT_AUDIENCE = os.getenv("SUPABASE_JWT_AUDIENCE", "authenticated")
     SUPABASE_FETCH_USER_ON_VERIFY = os.getenv("SUPABASE_FETCH_USER_ON_VERIFY", "true").lower() in {
         "1",

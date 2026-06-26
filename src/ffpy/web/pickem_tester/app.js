@@ -86,7 +86,7 @@ createApp({
         return "Checking your current auth session.";
       }
       if (!this.browserAuthAvailable) {
-        return "Browser sign-in is unavailable until SUPABASE_URL and SUPABASE_ANON_KEY are configured.";
+        return "Browser sign-in is unavailable until SUPABASE_URL and a Supabase publishable key are configured.";
       }
       if (!this.isAuthenticated) {
         return "Sign in with a verified email to unlock protected backtests.";
@@ -536,6 +536,10 @@ createApp({
   template: `
     <div class="shell">
       <header class="hero">
+        <nav class="top-nav" aria-label="FFPy tools">
+          <a class="nav-link is-active" href="/">Pick'em Tester</a>
+          <a class="nav-link" href="/projections">Projections</a>
+        </nav>
         <h1>Pick'em Strategy Tester</h1>
         <p>
           Stress-test historical pick strategies against your local FFPy database with a FastAPI backend
@@ -638,7 +642,7 @@ createApp({
               </template>
 
               <div v-else-if="authRequired" class="empty-state">
-                Browser sign-in is unavailable in this environment. Add SUPABASE_URL and SUPABASE_ANON_KEY for a real Supabase project, or use the local bearer-token workflow.
+                Browser sign-in is unavailable in this environment. Add SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY for a real Supabase project, or use the local bearer-token workflow.
               </div>
 
               <div v-else class="empty-state">

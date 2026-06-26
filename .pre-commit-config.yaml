@@ -1,0 +1,14 @@
+# Pre-commit hooks — must match CI (`uv run ruff check .`).
+# Install: uv run pre-commit install
+# Manual run: uv run pre-commit run --all-files
+
+default_language_version:
+  python: python3.13
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format

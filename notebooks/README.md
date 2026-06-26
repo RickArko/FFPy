@@ -18,6 +18,43 @@ This installs:
 
 ## Available Notebooks
 
+### Optimization Notebook Series
+
+A progression of notebooks exploring lineup optimisation concepts, from scoring
+system fundamentals through to Monte Carlo robustness analysis.
+
+**Prerequisite:** `make install` (FFPy dependencies). No database required —
+all three notebooks construct in-memory player pools.
+
+Recommended order:
+
+1. **`01_scoring_systems_impact.ipynb` — Scoring & Valuation**
+   - How PPR, Half-PPR, Standard, and custom scoring rules change player value
+   - Positional value shifts (which positions gain/lose from reception points)
+   - Optimising the same player pool under different scoring systems
+   - Defining a "Big Play Bonus" custom rule
+
+2. **`02_optimizer_constraints.ipynb` — Constraint Deep Dive**
+   - Standard vs Superflex vs No-Kicker/DST roster formats
+   - Player locks (forced starts/sits) — measuring the cost in projected points
+   - Injury status handling (INJURED, OUT, QUESTIONABLE, BYE)
+   - Team stack limits (max N players per NFL team)
+   - Salary cap knapsack (DFS-style), sweeping cap vs efficiency
+   - Combining multiple constraints for league-specific rules
+
+3. **`03_projection_uncertainty.ipynb` — Robust Lineups**
+   - Why a single "optimal" lineup is fragile — projections have variance
+   - Monte Carlo simulation framework (1,000+ simulated outcome worlds)
+   - Player selection frequency — who are the "core" starters?
+   - Lineup score distribution (ceiling vs floor analysis)
+   - Comparing point-maximising vs floor-maximising strategies
+   - Sensitivity analysis: how projection changes ripple through the lineup
+
+4. **`xpress_vs_pulp_ff_lineup.ipynb` (existing) — Solver Comparison**
+   - PuLP/CBC vs FICO Xpress on three problem tiers (single, DFS, multi-lineup)
+   - Model formulation side-by-side (API comparison table)
+   - Benchmark: solve time vs problem size
+
 ### `eda/Players.ipynb` - Player Performance Analysis
 
 Comprehensive exploratory data analysis of the FFPy database:
@@ -58,7 +95,8 @@ Comprehensive exploratory data analysis of the FFPy database:
 make notebook
 ```
 
-Equivalent to `uv run --group analysis jupyter lab`. Navigate to `notebooks/eda/Players.ipynb` in the browser.
+Equivalent to `uv run --group analysis jupyter lab`. Navigate to any notebook under
+`notebooks/` in the browser.
 
 ### Option 2: Jupyter Notebook
 
@@ -69,7 +107,7 @@ uv run --group analysis jupyter notebook
 ### Option 3: VS Code
 
 1. Install the Jupyter extension in VS Code
-2. Open `notebooks/eda/Players.ipynb`
+2. Open any notebook under `notebooks/`
 3. Select the Python kernel from your uv environment
 
 ## Notebook Output
@@ -185,5 +223,18 @@ To add a new notebook:
 3. Ensure it's reproducible with the existing database
 
 ---
+
+## Regenerating Optimization Notebooks
+
+The three optimisation notebooks (`01_*`, `02_*`, `03_*`) are generated from a single
+Python script at `scripts/generate_optimization_notebooks.py`. To regenerate:
+
+```bash
+uv run python scripts/generate_optimization_notebooks.py
+```
+
+This is useful if you modify the generator to add new sections or change shared
+sample data. The `xpress_vs_pulp_ff_lineup.ipynb` and `eda/*.ipynb` notebooks are
+hand-written and not affected.
 
 **Quick Start**: `make notebook`

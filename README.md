@@ -1,157 +1,75 @@
-# FFPy — Fantasy Football Python
+# FFPy - Fantasy Football Python
 
 A Streamlit app and Python toolkit for fantasy football projections, lineup optimization, play-by-play analytics, and pick'em backtesting. Pulls data from [nflverse](https://nflverse.github.io/), ESPN, or SportsDataIO and runs everything locally against a SQLite database.
 
-## Prerequisites
+![Project Logo](docs/assets/static/FFPy.png)
 
-- A POSIX shell with `make` — Linux, macOS, or **Windows via WSL**
-- Internet access for the first-time dependency install
-
-Everything else (`uv`, Python 3.13, the virtualenv, dependencies, DB schema) is installed by `make bootstrap`.
+---
 
 ## Quick start
 
 ```bash
 make bootstrap   # one-time: installs uv, deps, .env, DB schema
+make data        # loads app data for the default season (or `DATA_MODE=mock` for offline)
 make run         # starts Streamlit on http://localhost:8501
-make pickem-web PORT=8000   # starts the FastAPI + Vue pick'em tester
-make pickem-web-auth-local PORT=8000   # auth-enabled local backend with dev JWTs
 ```
 
 See [QUICKSTART.md](QUICKSTART.md) for the two-minute walkthrough.
 
 ## Make targets
 
-`make help` lists everything. Highlights:
+`make help` lists everything. Key targets:
 
 | Target                      | What it does                                     |
 |-----------------------------|--------------------------------------------------|
 | `make bootstrap`            | First-time setup (idempotent)                    |
-| `make install`              | `uv sync` only                                   |
+| `make data`                 | Generate required app data for the default season |
 | `make run` / `make dev`     | Launch Streamlit (dev = auto-reload on save)     |
-| `make pickem-web`           | Launch the FastAPI + Vue pick'em strategy tester |
-| `make pickem-web-auth-local`| Launch the pick'em tester with local auth enabled|
-| `make pickem-web-auth-supabase` | Launch the pick'em tester against Supabase auth |
-| `make pickem-auth-token`    | Mint a local bearer token for auth testing       |
+| `make pickem-web PORT=8000` | Launch the FastAPI + Vue pick'em strategy tester |
 | `make test` / `make cov`    | Pytest, optionally with coverage                 |
 | `make lint` / `make fmt`    | Ruff lint / format                               |
 | `make check`                | `lint` + `test` (CI entry point)                 |
-| `make db.migrate`           | Create or upgrade the SQLite schema              |
-| `make db.load SEASON=Y`     | Load a season of nflverse play-by-play           |
-| `make db.update`            | Incrementally append new games                   |
-| `make db.stats SEASON=Y`    | Collect ESPN actual stats for that season        |
-| `make db.mock SEASON=Y`     | Populate with realistic mock data                |
-| `make notebook`             | Jupyter Lab with the analysis dep group          |
-| `make clean` / `clean-all`  | Remove caches (+ `.venv`)                        |
+| `make db.load SEASON=Y`     | Load nflverse play-by-play for a season          |
+| `make notebook`             | Jupyter Lab with analysis deps                   |
 
-Database commands are thin wrappers over the `ffpy-db` CLI:
-
-```bash
-uv run ffpy-db --help
-uv run ffpy-db load --season 2023 --no-ftn --validate
-uv run ffpy-db collect-stats --season 2024 --start-week 1 --end-week 17
-```
-
-## Features
-
-- Streamlit app: projections, player comparison, pick'em analyzer
-- FastAPI + Vue pick'em strategy tester for historical backtests and strategy comparison
-- Lineup optimizer (PuLP) for PPR / Half-PPR / Standard, superflex, custom rosters
-- Historical projection model (weighted recent performance)
-- ESPN + SportsDataIO integrations with automatic fallback
-- Local SQLite with nflverse play-by-play, FTN charting, and snap counts
-
-## Project structure
-
-```
-FFPy/
-├── Makefile               # All dev/ops commands
-├── pyproject.toml         # uv-managed deps, console scripts
-├── scripts/
-│   └── bootstrap.sh       # First-time setup
-├── src/ffpy/
-│   ├── app.py             # Streamlit entry       → `ffpy`
-│   ├── pickem_web.py      # FastAPI web app       → `ffpy-pickem-web`
-│   ├── cli.py             # Database CLI          → `ffpy-db`
-│   ├── mock.py            # Mock data generator
-│   ├── database.py        # SQLite wrapper
-│   ├── nflverse_loader.py # nflverse → DB
-│   ├── projections.py     # Historical projection model
-│   ├── optimizer.py       # Lineup optimization
-│   ├── scoring.py         # Scoring systems
-│   ├── integrations/      # ESPN, SportsDataIO
-│   ├── migrations/        # SQL schema migrations
-│   ├── pages/             # Streamlit pages
-│   └── web/               # Static assets for the pick'em tester UI
-├── config/                # Scoring + roster presets (JSON)
-├── tests/                 # pytest suite
-├── notebooks/             # EDA notebooks
-├── examples/              # Scripted demos
-└── docs/                  # Extended guides
-```
+Database targets wrap the `ffpy-db` CLI — `uv run ffpy-db --help` for the full surface.
 
 ## Configuration
 
-Copy the template and edit:
+Copy and edit `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
-Key settings:
+Key settings: `API_PROVIDER` (espn/sportsdata), `NFL_SEASON`, `DATABASE_PATH`.
 
-```
-API_PROVIDER=espn          # "espn" (free) or "sportsdata" (paid)
-NFL_SEASON=2024
-DATABASE_PATH=~/.ffpy/ffpy.db
-ESPN_LEAGUE_ID=            # Optional: ESPN league integration
-```
+## Features
 
-## Local auth testing
+- Streamlit app: projections, player comparison, pick'em analyzer
+- FastAPI + Vue pick'em strategy tester with Supabase auth
+- Lineup optimizer (PuLP/CBC) for PPR / Half-PPR / Standard, superflex, custom rosters
+- Historical projection model (weighted recent performance)
+- ESPN + SportsDataIO integrations with automatic fallback
+- Local SQLite with nflverse play-by-play, FTN charting, and snap counts
 
-The Vue app now renders a minimal Supabase email/password sign-in shell when a real Supabase project is configured. For the purely local auth target, there is still no browser sign-in because that mode only uses an HS256 dev secret, so the easiest way to test it remains API-first:
+## Deployment
 
-```bash
-make pickem-web-auth-local PORT=8000
-make pickem-auth-token
-```
+Production Dockerfile + `fly.toml` in repo. CI builds and deploys to Fly.io on `main` push. See [docs/deployment/fly.md](docs/deployment/fly.md).
 
-That prints a verified bearer token you can use with `curl`, Postman, or the FastAPI docs. Example:
+## Further reading
 
-```bash
-TOKEN="$(make -s pickem-auth-token)"
-curl -X POST http://127.0.0.1:8000/api/backtests/run \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "strategy": {"name": "AllFavorites", "params": {}},
-    "season_start": 2022,
-    "season_end": 2022,
-    "week_start": 1,
-    "week_end": 2,
-    "season_type": "REG",
-    "require_full_coverage": true,
-    "persist": false
-  }'
-```
-
-To test the rejection path, mint an unverified token:
-
-```bash
-make pickem-auth-token TOKEN_ARGS=--unconfirmed
-```
-
-When you have a real Supabase project configured in `.env`, run:
-
-```bash
-make pickem-web-auth-supabase PORT=8000
-```
-
-That enables auth using `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and related settings from `.env`. The Vue frontend will render a minimal Supabase email/password sign-in panel automatically when that public config is present.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Test guidance lives in [TESTING.md](TESTING.md). Deeper documentation (database schema, optimizer internals, Streamlit pages, and the Supabase deployment/auth plan) lives in [`docs/`](docs/), including [docs/security/SUPABASE_HARDENED_IMPLEMENTATION_PLAN.md](docs/security/SUPABASE_HARDENED_IMPLEMENTATION_PLAN.md).
+- [docs/testing.md](docs/testing.md) — test suite and manual smoke test
+- [docs/db/database.md](docs/db/database.md) — database schema and CLI
+- [docs/optimization.md](docs/optimization.md) — optimizer internals
+- [docs/streamlit/player-comparison.md](docs/streamlit/player-comparison.md) — Streamlit UI details
+- [docs/integration/espn.md](docs/integration/espn.md) — ESPN API integration
+- [docs/integration/pickem.md](docs/integration/pickem.md) — Pick'em platform integration
+- [docs/deployment/fly.md](docs/deployment/fly.md) — Fly.io deployment guide
+- [QUICKSTART.md](QUICKSTART.md) — two-minute walkthrough
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contributing guide
+- `examples/` — runnable scripts (optimize, pick'em, ESPN league, play analysis)
+- `notebooks/` — EDA and solver comparison notebooks
 
 ## License
 

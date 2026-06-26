@@ -41,6 +41,7 @@ build-backend = "uv_build"
 dev = [
     "coverage>=7.13.0",
     "httpx>=0.28.1",
+    "pre-commit>=4.0.0",
     "pytest>=9.0.2",
     "ruff>=0.14.10",
 ]
@@ -58,6 +59,9 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*.ipynb" = ["E402"]     # sys.path.insert before imports is idiomatic in notebooks
 
 [tool.ruff.format]
 quote-style = "double"

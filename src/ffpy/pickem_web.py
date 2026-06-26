@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Literal, Optional
 
+import pandas as pd
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -22,7 +25,9 @@ from ffpy.auth import (
     build_token_verifier_from_config,
 )
 from ffpy.config import Config
+from ffpy.data import get_positions, get_sample_projections
 from ffpy.database import FFPyDatabase
+from ffpy.integrations import ESPNIntegration, SportsDataIntegration
 from ffpy.pickem_backtest import (
     AllFavorites,
     Backtester,
@@ -33,6 +38,7 @@ from ffpy.pickem_backtest import (
     WeekResult,
     WinProbBlend,
 )
+from ffpy.projections import HistoricalProjectionModel
 from ffpy.repositories.base import HistoricalGamesRepository
 from ffpy.repositories.sqlite_games import SQLiteHistoricalGamesRepository
 from ffpy.usage_logging import (
@@ -173,6 +179,14 @@ STRATEGY_SPECS: Dict[str, StrategySpec] = {
     ),
 }
 
+PROJECTION_SOURCE_LABELS = {
+    "historical": "Historical Model",
+    "api": "API Data",
+    "sample": "Sample Data",
+}
+
+logger = logging.getLogger(__name__)
+
 
 class StrategySelectionRequest(BaseModel):
     """Strategy selection plus any scalar params."""
@@ -273,6 +287,153 @@ def _frame_records(frame) -> List[Dict[str, Any]]:
     return json.loads(frame.to_json(orient="records"))
 
 
+def _normalize_projection_frame(frame: pd.DataFrame, week: int) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame(
+            columns=[
+                "player",
+                "team",
+                "position",
+                "opponent",
+                "projected_points",
+                "week",
+            ]
+        )
+
+    normalized = frame.copy()
+    for column, default in {
+        "player": "",
+        "team": "",
+        "position": "",
+        "opponent": "TBD",
+        "projected_points": 0.0,
+        "week": week,
+    }.items():
+        if column not in normalized.columns:
+            normalized[column] = default
+
+    normalized["projected_points"] = pd.to_numeric(normalized["projected_points"], errors="coerce").fillna(
+        0.0
+    )
+    normalized["week"] = pd.to_numeric(normalized["week"], errors="coerce").fillna(week).astype(int)
+    normalized["position"] = normalized["position"].astype(str).str.upper()
+    return normalized.sort_values(["projected_points", "player"], ascending=[False, True])
+
+
+def _load_historical_projection_frame(week: int, db_path: str) -> pd.DataFrame:
+    db = FFPyDatabase(db_path=db_path)
+    try:
+        model = HistoricalProjectionModel(db=db)
+        return model.generate_projections(
+            season=Config.NFL_SEASON,
+            week=week,
+            lookback_weeks=4,
+            recent_weight=0.6,
+        )
+    finally:
+        db.close()
+
+
+def _load_api_projection_frame(week: int) -> pd.DataFrame:
+    api_provider = Config.get_api_provider()
+
+    if api_provider == "sportsdata" and Config.is_sportsdata_configured():
+        sportsdata = SportsDataIntegration(api_key=Config.SPORTSDATA_API_KEY)
+        if sportsdata.is_available():
+            frame = sportsdata.get_projections(week=week, season=Config.NFL_SEASON)
+            if not frame.empty:
+                return frame
+
+    return ESPNIntegration().get_projections(week=week, season=Config.NFL_SEASON)
+
+
+def _projection_source_frame(
+    source: str, week: int, db_path: str
+) -> tuple[pd.DataFrame, str, bool, Optional[str]]:
+    fallback_used = False
+    message = None
+
+    if source == "sample":
+        frame = get_sample_projections(week)
+    elif source == "historical":
+        try:
+            frame = _load_historical_projection_frame(week, db_path)
+        except Exception:
+            frame = pd.DataFrame()
+            message = "Historical model could not read projection inputs; sample projections are shown."
+        if frame.empty:
+            fallback_used = True
+            message = (
+                message or "Historical projections are empty for this week; sample projections are shown."
+            )
+            frame = get_sample_projections(week)
+    elif source == "api":
+        try:
+            frame = _load_api_projection_frame(week)
+        except Exception:
+            frame = pd.DataFrame()
+            message = "Projection API could not return usable data; sample projections are shown."
+        if frame.empty:
+            fallback_used = True
+            message = message or "Projection API returned no data; sample projections are shown."
+            frame = get_sample_projections(week)
+    else:
+        valid_sources = ", ".join(sorted(PROJECTION_SOURCE_LABELS))
+        raise HTTPException(status_code=400, detail=f"source must be one of: {valid_sources}")
+
+    return _normalize_projection_frame(frame, week), source, fallback_used, message
+
+
+def _projection_summary(frame: pd.DataFrame) -> Dict[str, Any]:
+    if frame.empty:
+        return {
+            "total_players": 0,
+            "average_projected_points": 0.0,
+            "median_projected_points": 0.0,
+            "top_player": None,
+            "top_projection": 0.0,
+        }
+
+    top_row = frame.iloc[0]
+    return {
+        "total_players": int(len(frame)),
+        "average_projected_points": round(float(frame["projected_points"].mean()), 2),
+        "median_projected_points": round(float(frame["projected_points"].median()), 2),
+        "top_player": top_row["player"],
+        "top_projection": round(float(top_row["projected_points"]), 2),
+    }
+
+
+def _projection_position_totals(frame: pd.DataFrame) -> List[Dict[str, Any]]:
+    rows = []
+    for position in get_positions():
+        position_frame = frame[frame["position"] == position]
+        rows.append(
+            {
+                "position": position,
+                "players": int(len(position_frame)),
+                "average_projected_points": (
+                    round(float(position_frame["projected_points"].mean()), 2)
+                    if not position_frame.empty
+                    else 0.0
+                ),
+                "top_projection": (
+                    round(float(position_frame["projected_points"].max()), 2)
+                    if not position_frame.empty
+                    else 0.0
+                ),
+            }
+        )
+    return rows
+
+
+def _projection_breakdown(frame: pd.DataFrame, limit: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+    return {
+        position: _frame_records(frame[frame["position"] == position].head(limit))
+        for position in get_positions()
+    }
+
+
 def _coverage_payload(repository: HistoricalGamesRepository, season_type: str) -> Dict[str, Any]:
     coverage = repository.get_data_coverage(season_type=season_type)
     records = _frame_records(coverage)
@@ -334,12 +495,12 @@ def _estimate_cost_units(
 
 
 def _public_auth_config(auth_enabled: bool) -> Dict[str, Any]:
-    browser_auth_available = bool(auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_ANON_KEY)
+    browser_auth_available = bool(auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_BROWSER_KEY)
     return {
         "auth_required": auth_enabled,
         "browser_auth_available": browser_auth_available,
         "supabase_url": Config.SUPABASE_URL if browser_auth_available else None,
-        "supabase_anon_key": Config.SUPABASE_ANON_KEY if browser_auth_available else None,
+        "supabase_anon_key": Config.SUPABASE_BROWSER_KEY if browser_auth_available else None,
         "public_app_url": Config.PUBLIC_APP_URL,
     }
 
@@ -371,6 +532,7 @@ def create_app(
     )
     app.state.db_path = resolved_db_path
     app.state.auth_enabled = auth_enabled
+    favicon_path = static_dir / "favicon.ico"
 
     def get_repository() -> Iterator[SQLiteHistoricalGamesRepository]:
         db = FFPyDatabase(db_path=resolved_db_path)
@@ -488,6 +650,14 @@ def create_app(
     def frontend() -> FileResponse:
         return FileResponse(static_dir / "index.html")
 
+    @app.get("/projections", include_in_schema=False)
+    def projections_frontend() -> FileResponse:
+        return FileResponse(static_dir / "projections.html")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> FileResponse:
+        return FileResponse(favicon_path)
+
     @app.get("/api/health")
     def health() -> Dict[str, Any]:
         return {
@@ -530,6 +700,40 @@ def create_app(
         payload = _coverage_payload(repository, normalized)
         payload["season_type"] = normalized
         return payload
+
+    @app.get("/api/projections")
+    def projections(
+        week: int = Query(default=1, ge=1, le=18),
+        source: Literal["historical", "api", "sample"] = "historical",
+        position: str = "ALL",
+        top_n: int = Query(default=25, ge=1, le=200),
+    ) -> Dict[str, Any]:
+        normalized_position = position.upper()
+        valid_positions = get_positions()
+        if normalized_position not in {"ALL", *valid_positions}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"position must be ALL or one of: {', '.join(valid_positions)}",
+            )
+
+        frame, source_used, fallback_used, message = _projection_source_frame(source, week, resolved_db_path)
+        filtered = frame if normalized_position == "ALL" else frame[frame["position"] == normalized_position]
+        filtered = filtered.head(top_n)
+
+        return {
+            "season": Config.NFL_SEASON,
+            "week": week,
+            "source": source_used,
+            "source_label": PROJECTION_SOURCE_LABELS[source_used],
+            "fallback_used": fallback_used,
+            "message": message,
+            "position": normalized_position,
+            "positions": valid_positions,
+            "summary": _projection_summary(filtered),
+            "position_totals": _projection_position_totals(frame),
+            "position_breakdown": _projection_breakdown(frame),
+            "players": _frame_records(filtered),
+        }
 
     @app.post("/api/backtests/run")
     def run_backtest(
@@ -657,12 +861,20 @@ def main() -> None:
     """CLI entry point for the pick'em tester web app."""
 
     parser = argparse.ArgumentParser(description="Run the FFPy pick'em tester web app.")
-    parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind.")
-    parser.add_argument("--port", type=int, default=8000, help="Port to listen on.")
+    parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"), help="Host interface to bind.")
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")), help="Port to listen on.")
     parser.add_argument("--db-path", default=None, help="Optional SQLite database path override.")
     args = parser.parse_args()
 
-    uvicorn.run(create_app(db_path=args.db_path), host=args.host, port=args.port)
+    app = create_app(db_path=args.db_path)
+    logger.info(
+        "Starting pick'em web app on %s:%s with database=%s auth_enabled=%s",
+        args.host,
+        args.port,
+        app.state.db_path,
+        app.state.auth_enabled,
+    )
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 __all__ = ["create_app", "main"]

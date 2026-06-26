@@ -3,9 +3,11 @@
 # See `make help` for all targets.
 
 .DEFAULT_GOAL := help
-.PHONY: help bootstrap install run dev pickem-web pickem-web-auth-local \
+.PHONY: help bootstrap install data run dev pickem-web pickem-web-auth-local \
         pickem-web-auth-supabase pickem-auth-token notebook test cov lint fmt check \
-        db.migrate db.load db.update db.stats db.mock clean clean-all
+        db.prepare db.migrate db.load db.update db.stats db.mock \
+        supabase.check fly.app fly.volume fly.secrets fly.secrets-list \
+        fly.deploy fly.status fly.logs fly.token clean clean-all
 
 # Override on the CLI, e.g. `make db.load SEASON=2023`
 SEASON     ?= 2024
@@ -13,16 +15,25 @@ START_WEEK ?= 1
 END_WEEK   ?= 17
 PORT       ?= 8501
 UV         ?= uv
+DATA_MODE  ?= real
+STATS_SOURCE ?= nflverse
+FLY_APP    ?= ffpy-pickem
+FLY_REGION ?= iad
+FLY_VOLUME_SIZE ?= 1
+FLY        ?= $(or $(shell command -v fly 2>/dev/null),$(shell command -v flyctl 2>/dev/null),$(wildcard $(HOME)/.fly/bin/fly),fly)
+PICKEM_DB_PATH ?= $(HOME)/.ffpy/ffpy.db
+PREPARE_ARGS ?=
 AUTH_JWT_SECRET ?= local-supabase-jwt-secret-change-me-123456
 AUTH_EMAIL      ?= demo@example.com
 TOKEN_ARGS      ?= --confirmed
+DATA_MODE_ARGS = $(if $(filter mock,$(DATA_MODE)),--mock,)
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "; \
 	             printf "\nFFPy — make targets\n\nUsage: make <target> [VAR=value]\n\n"} \
 	     /^[a-zA-Z_.-]+:.*?## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
-	@printf "\nVariables (override on CLI): SEASON=%s PORT=%s START_WEEK=%s END_WEEK=%s\n\n" \
-	        "$(SEASON)" "$(PORT)" "$(START_WEEK)" "$(END_WEEK)"
+	@printf "\nVariables (override on CLI): SEASON=%s PORT=%s START_WEEK=%s END_WEEK=%s DATA_MODE=%s STATS_SOURCE=%s\n\n" \
+	        "$(SEASON)" "$(PORT)" "$(START_WEEK)" "$(END_WEEK)" "$(DATA_MODE)" "$(STATS_SOURCE)"
 
 # ---- Setup --------------------------------------------------------
 
@@ -34,6 +45,8 @@ install: ## Sync dependencies and register the `ffpy` Jupyter kernel
 	@echo "==> Registering Jupyter kernel 'ffpy'"
 	@$(UV) run python -m ipykernel install --user --name ffpy --display-name "Python (FFPy)"
 
+data: db.prepare ## Generate all required app data (DATA_MODE=real|mock)
+
 # ---- App ----------------------------------------------------------
 
 run: ## Start the Streamlit app (PORT=8501)
@@ -42,20 +55,23 @@ run: ## Start the Streamlit app (PORT=8501)
 dev: ## Start the app with auto-reload
 	$(UV) run streamlit run src/ffpy/app.py --server.port $(PORT) --server.runOnSave=true
 
-pickem-web: ## Start the FastAPI + Vue pick'em tester (PORT=8000 recommended)
-	.venv/bin/python -m ffpy.pickem_web --port $(PORT)
+pickem-web: ## Start the FastAPI + Vue pick'em tester (PORT=8000 recommended, PICKEM_DB_PATH)
+	DATABASE_PATH="$(PICKEM_DB_PATH)" .venv/bin/python -m ffpy.pickem_web --port $(PORT)
 
 pickem-web-auth-local: ## Start the pick'em tester with local auth enabled (HS256 dev tokens)
-	WEB_AUTH_ENABLED=true SUPABASE_JWT_SECRET="$(AUTH_JWT_SECRET)" SUPABASE_FETCH_USER_ON_VERIFY=false .venv/bin/python -m ffpy.pickem_web --port $(PORT)
+	DATABASE_PATH="$(PICKEM_DB_PATH)" WEB_AUTH_ENABLED=true SUPABASE_JWT_SECRET="$(AUTH_JWT_SECRET)" SUPABASE_FETCH_USER_ON_VERIFY=false .venv/bin/python -m ffpy.pickem_web --port $(PORT)
 
 pickem-web-auth-supabase: ## Start the pick'em tester with auth enabled using Supabase settings from .env
-	WEB_AUTH_ENABLED=true .venv/bin/python -m ffpy.pickem_web --port $(PORT)
+	DATABASE_PATH="$(PICKEM_DB_PATH)" WEB_AUTH_ENABLED=true .venv/bin/python -m ffpy.pickem_web --port $(PORT)
 
 pickem-auth-token: ## Mint a local bearer token for pickem-web-auth-local
 	.venv/bin/python -m ffpy.dev_auth_token --secret "$(AUTH_JWT_SECRET)" --email "$(AUTH_EMAIL)" $(TOKEN_ARGS)
 
 notebook: ## Launch Jupyter Lab (analysis dep group)
 	$(UV) run --group analysis jupyter lab
+
+supabase.check: ## Validate local Supabase URL/key from .env before setting Fly secrets
+	$(UV) run python scripts/check_supabase.py
 
 # ---- Quality ------------------------------------------------------
 
@@ -73,9 +89,21 @@ lint: ## Lint with ruff
 fmt: ## Format with ruff
 	$(UV) run ruff format .
 
+precommit: ## Run pre-commit hooks on all files (install via `make precommit-install`)
+	$(UV) run pre-commit run --all-files
+
+precommit-install: ## Install pre-commit hooks into .git/hooks/
+	$(UV) run pre-commit install
+
+precommit-update: ## Update pre-commit hook versions to latest
+	$(UV) run pre-commit autoupdate
+
 check: lint test ## Lint + test (CI entry point)
 
 # ---- Database -----------------------------------------------------
+
+db.prepare: ## Generate all required app data (SEASON, START_WEEK, END_WEEK, DATA_MODE)
+	$(UV) run ffpy-db prepare --season $(SEASON) --start-week $(START_WEEK) --end-week $(END_WEEK) --stats-source $(STATS_SOURCE) $(DATA_MODE_ARGS) $(PREPARE_ARGS)
 
 db.migrate: ## Create or upgrade the SQLite schema
 	$(UV) run ffpy-db migrate
@@ -86,11 +114,37 @@ db.load: ## Load play-by-play for a season (SEASON=2024)
 db.update: ## Incrementally update the current season
 	$(UV) run ffpy-db update
 
-db.stats: ## Collect actual stats from ESPN (SEASON, START_WEEK, END_WEEK)
-	$(UV) run ffpy-db collect-stats --season $(SEASON) --start-week $(START_WEEK) --end-week $(END_WEEK)
+db.stats: ## Collect actual stats (STATS_SOURCE=nflverse|espn)
+	$(UV) run ffpy-db collect-stats --season $(SEASON) --start-week $(START_WEEK) --end-week $(END_WEEK) --source $(STATS_SOURCE)
 
 db.mock: ## Populate with realistic mock data (SEASON=2024)
 	$(UV) run ffpy-db mock --season $(SEASON)
+
+# ---- Fly.io -------------------------------------------------------
+
+fly.app: ## Create the Fly app if needed (FLY_APP=ffpy-pickem)
+	$(FLY) apps create $(FLY_APP)
+
+fly.volume: ## Create the persistent SQLite volume (FLY_APP, FLY_REGION, FLY_VOLUME_SIZE)
+	$(FLY) volumes create ffpy_data --app $(FLY_APP) --region $(FLY_REGION) --size $(FLY_VOLUME_SIZE)
+
+fly.secrets: ## Set Fly runtime secrets from .env or shell exports (FLY_APP=ffpy-pickem)
+	FLY_APP="$(FLY_APP)" FLY_BIN="$(FLY)" bash scripts/fly_set_secrets.sh
+
+fly.secrets-list: ## List Fly secret names without values (FLY_APP=ffpy-pickem)
+	$(FLY) secrets list --app $(FLY_APP)
+
+fly.deploy: ## Deploy to Fly.io using fly.toml (FLY_APP=ffpy-pickem)
+	$(FLY) deploy --app $(FLY_APP)
+
+fly.status: ## Show Fly app status (FLY_APP=ffpy-pickem)
+	$(FLY) status --app $(FLY_APP)
+
+fly.logs: ## Tail Fly app logs (FLY_APP=ffpy-pickem)
+	$(FLY) logs --app $(FLY_APP)
+
+fly.token: ## Create a GitHub Actions deploy token for this Fly app
+	$(FLY) tokens create deploy -a $(FLY_APP)
 
 # ---- Cleanup ------------------------------------------------------
 

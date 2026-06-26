@@ -47,7 +47,9 @@ def api_db(tmp_path: Path) -> FFPyDatabase:
 @pytest.fixture
 def client(api_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(Config, "SUPABASE_URL", "")
+    monkeypatch.setattr(Config, "SUPABASE_PUBLISHABLE_KEY", "")
     monkeypatch.setattr(Config, "SUPABASE_ANON_KEY", "")
+    monkeypatch.setattr(Config, "SUPABASE_BROWSER_KEY", "")
     app = create_app(db_path=str(api_db.db_path), require_auth=False)
     with TestClient(app) as test_client:
         yield test_client
@@ -65,6 +67,16 @@ def auth_verifier(auth_secret: str) -> SupabaseTokenVerifier:
         audience="authenticated",
         fetch_user_on_verify=False,
     )
+
+
+def test_supabase_verifier_defaults_to_current_jwks_endpoint():
+    verifier = SupabaseTokenVerifier(
+        supabase_url="https://demo.supabase.co",
+        anon_key="publishable-demo-key",
+    )
+
+    assert verifier._jwks_client is not None
+    assert verifier._jwks_client.uri == "https://demo.supabase.co/auth/v1/jwks"
 
 
 @pytest.fixture
@@ -114,6 +126,21 @@ def test_root_serves_frontend(client: TestClient):
     assert "Pick'em Strategy Tester" in response.text
 
 
+def test_projections_frontend_served(client: TestClient):
+    response = client.get("/projections")
+    assert response.status_code == 200
+    assert "Projections Lab" in response.text
+
+
+def test_favicon_served(client: TestClient):
+    response = client.get("/favicon.ico")
+    assert response.status_code == 200
+    assert response.headers["content-type"] in {
+        "image/x-icon",
+        "image/vnd.microsoft.icon",
+    }
+
+
 def test_strategies_endpoint_lists_supported_strategies(client: TestClient):
     response = client.get("/api/strategies")
     assert response.status_code == 200
@@ -132,6 +159,20 @@ def test_coverage_endpoint_reports_default_window(client: TestClient):
     assert payload["default_window"]["season_start"] == 2022
     assert payload["default_window"]["week_end"] == 2
     assert payload["season_summaries"][0]["fully_usable_weeks"] == [1, 2]
+
+
+def test_projections_endpoint_returns_filtered_sample_data(client: TestClient):
+    response = client.get("/api/projections?source=sample&week=1&position=QB&top_n=3")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["source"] == "sample"
+    assert payload["week"] == 1
+    assert payload["position"] == "QB"
+    assert payload["summary"]["total_players"] == 3
+    assert len(payload["players"]) == 3
+    assert {player["position"] for player in payload["players"]} == {"QB"}
+    assert payload["players"][0]["projected_points"] >= payload["players"][1]["projected_points"]
 
 
 def test_run_backtest_returns_summary_and_weekly_results(client: TestClient):
@@ -217,7 +258,9 @@ def test_auth_config_exposes_public_supabase_settings_for_browser_sign_in(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(Config, "SUPABASE_URL", "https://demo.supabase.co")
+    monkeypatch.setattr(Config, "SUPABASE_PUBLISHABLE_KEY", "publishable-demo-key")
     monkeypatch.setattr(Config, "SUPABASE_ANON_KEY", "anon-demo-key")
+    monkeypatch.setattr(Config, "SUPABASE_BROWSER_KEY", "publishable-demo-key")
     monkeypatch.setattr(Config, "PUBLIC_APP_URL", "http://localhost:8000")
 
     app = create_app(
@@ -234,7 +277,7 @@ def test_auth_config_exposes_public_supabase_settings_for_browser_sign_in(
     assert payload["auth_required"] is True
     assert payload["browser_auth_available"] is True
     assert payload["supabase_url"] == "https://demo.supabase.co"
-    assert payload["supabase_anon_key"] == "anon-demo-key"
+    assert payload["supabase_anon_key"] == "publishable-demo-key"
     assert payload["public_app_url"] == "http://localhost:8000"
 
 
