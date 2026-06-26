@@ -23,6 +23,9 @@ backups/
 *.ipynb_checkpoints*
 .claude/*
 
+# Generated data exports
+data/exports/
+
 # Pytest / coverage artifacts
 .coverage
 .coverage.*

@@ -2,8 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/settings-schema.json",
   "contextFiles": [
     "GEMINI.md",
-    "AGENTS.md",
-    ".claude/wiki/AGENTS.md"
+    "AGENTS.md"
   ],
   "telemetry": {
     "enabled": false
