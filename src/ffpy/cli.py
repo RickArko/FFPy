@@ -57,7 +57,7 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
 
 def cmd_load(args: argparse.Namespace) -> int:
-    from ffpy.nflverse_loader import NFLVerseLoader, setup_database
+    from ffpy.nflverse import NFLVerseLoader, setup_database
 
     _setup_logging(not args.quiet)
 
@@ -102,7 +102,7 @@ def cmd_load(args: argparse.Namespace) -> int:
 
 
 def cmd_update(args: argparse.Namespace) -> int:
-    from ffpy.nflverse_loader import NFLVerseLoader, setup_database
+    from ffpy.nflverse import NFLVerseLoader, setup_database
 
     _setup_logging(not args.quiet)
     db = setup_database(args.db_path)
@@ -350,7 +350,7 @@ def cmd_prepare(args: argparse.Namespace) -> int:
                     db_path=resolved_db_path,
                 )
         else:
-            from ffpy.nflverse_loader import NFLVerseLoader
+            from ffpy.nflverse import NFLVerseLoader
 
             if not args.skip_pbp:
                 existing_plays = _season_row_count(db, "plays", args.season)
