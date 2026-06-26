@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "3.13"
           enable-cache: true
@@ -45,12 +45,28 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - name: Check Fly API token
+        id: check-token
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN is not set. Skipping deploy."
+            echo "Run: make fly.token  (or: flyctl tokens create deploy)"
+            echo "Then add it as a GitHub Actions secret named FLY_API_TOKEN"
+            echo "  in Settings > Environments > production."
+            echo "deploy_skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy_skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
       - name: Deploy to Fly.io
+        if: steps.check-token.outputs.deploy_skip != 'true'
         run: flyctl deploy --remote-only --config fly.toml
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
