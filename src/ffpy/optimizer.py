@@ -42,6 +42,9 @@ class Player:
     is_home: Optional[bool] = None
     consistency: Optional[float] = None  # Standard deviation of recent scores
 
+    # DFS salary (optional)
+    salary: Optional[int] = None
+
     # Detailed projections (for display)
     passing_yards: Optional[float] = None
     passing_tds: Optional[float] = None
@@ -50,6 +53,27 @@ class Player:
     receiving_yards: Optional[float] = None
     receiving_tds: Optional[float] = None
     receptions: Optional[float] = None
+
+    @property
+    def floor(self) -> float:
+        """Lower-bound projection (projected - consistency)."""
+        if self.consistency is not None and self.consistency > 0:
+            return max(0.0, self.projected_points - self.consistency)
+        return self.projected_points * 0.7
+
+    @property
+    def ceiling(self) -> float:
+        """Upper-bound projection (projected + consistency)."""
+        if self.consistency is not None and self.consistency > 0:
+            return self.projected_points + self.consistency
+        return self.projected_points * 1.3
+
+    @property
+    def value_score(self) -> Optional[float]:
+        """Projected points per $1000 salary (DFS value)."""
+        if self.salary is not None and self.salary > 0:
+            return self.projected_points / self.salary * 1000
+        return None
 
     def is_available(self) -> bool:
         """Check if player is available to be started."""
@@ -79,6 +103,9 @@ class RosterConstraints:
     # Roster limits
     max_players_per_team: Optional[int] = None  # Stack limits (optional)
     total_starters: Optional[int] = None  # Auto-calculated if None
+
+    # Salary cap (DFS mode)
+    max_salary: Optional[int] = None  # Salary cap in $ (e.g., 50000 for DraftKings)
 
     # Player locks (force specific players in/out)
     locked_in: Set[str] = field(default_factory=set)  # Player names to force start
@@ -287,6 +314,8 @@ class LineupOptimizer:
         players: List[Player],
         current_lineup: Optional[List[Player]] = None,
         verbose: bool = False,
+        optimize_for: str = "projected",
+        stack_bonus: float = 0.0,
     ) -> LineupResult:
         """
         Optimize lineup to maximize projected points.
@@ -295,6 +324,13 @@ class LineupOptimizer:
             players: List of available players
             current_lineup: Optional current lineup for comparison
             verbose: Print solver output
+            optimize_for: Objective strategy:
+                - ``"projected"``: maximize projected points (default)
+                - ``"floor"``: maximize floor (projected - consistency)
+                - ``"ceiling"``: maximize ceiling (projected + consistency)
+                - ``"value"``: maximize projected points per $1000 salary
+            stack_bonus: Extra points added when a QB and WR/TE from the
+                same team are both selected (0 = disabled).
 
         Returns:
             LineupResult with optimal lineup
@@ -310,7 +346,6 @@ class LineupOptimizer:
                 LpStatus,
                 LpVariable,
                 lpSum,
-                value,
             )
         except ImportError:
             raise ImportError("PuLP is required for lineup optimization. Install with: uv add pulp")
@@ -331,8 +366,27 @@ class LineupOptimizer:
         # Decision variables: binary (1 = start, 0 = sit)
         x = {player.name: LpVariable(f"start_{player.name}", cat="Binary") for player in available_players}
 
-        # Objective: Maximize total projected points
-        prob += lpSum([player.projected_points * x[player.name] for player in available_players])
+        # Objective: Choose the optimization target
+        if optimize_for == "floor":
+            objective = lpSum([player.floor * x[player.name] for player in available_players])
+        elif optimize_for == "ceiling":
+            objective = lpSum([player.ceiling * x[player.name] for player in available_players])
+        elif optimize_for == "value":
+            # Use projected_points / salary * 1000; fall back to projected if no salary
+            objective = lpSum([
+                (player.value_score if player.value_score is not None else player.projected_points)
+                * x[player.name]
+                for player in available_players
+            ])
+        else:
+            objective = lpSum([player.projected_points * x[player.name] for player in available_players])
+
+        # Add stack preference bonus
+        if stack_bonus > 0:
+            objective += self._add_stack_preference(prob, available_players, x, stack_bonus)
+
+        # Set objective
+        prob += objective
 
         # Add constraints
         self._add_position_constraints(prob, available_players, x)
@@ -340,6 +394,7 @@ class LineupOptimizer:
         self._add_total_starters_constraint(prob, available_players, x)
         self._add_player_locks(prob, available_players, x)
         self._add_team_limits(prob, available_players, x)
+        self._add_salary_cap(prob, available_players, x)
 
         # Solve
         solver = PULP_CBC_CMD(msg=verbose)
@@ -371,8 +426,8 @@ class LineupOptimizer:
                 points_by_position[player.position] = 0.0
             points_by_position[player.position] += player.projected_points
 
-        # Calculate total points
-        total_points = value(prob.objective)
+        # Calculate total projected points (always from projected_points, not objective)
+        total_points = sum(p.projected_points for p in starters)
 
         # Calculate improvement if current lineup provided
         improvement = None
@@ -529,6 +584,71 @@ class LineupOptimizer:
                 lpSum([x[p.name] for p in team_players]) <= self.constraints.max_players_per_team,
                 f"team_limit_{team}",
             )
+
+    def _add_salary_cap(self, prob, players: List[Player], x: Dict[str, "LpVariable"]):
+        """Add salary cap constraint for DFS optimization."""
+        from pulp import lpSum
+
+        if self.constraints.max_salary is None:
+            return
+
+        players_with_salary = [p for p in players if p.salary is not None]
+        if not players_with_salary:
+            return  # Silently skip if no salary data
+
+        prob += (
+            lpSum([p.salary * x[p.name] for p in players_with_salary]) <= self.constraints.max_salary,
+            "salary_cap",
+        )
+
+    def _add_stack_preference(
+        self,
+        prob,
+        players: List[Player],
+        x: Dict[str, "LpVariable"],
+        bonus: float,
+    ):
+        """Add a small objective bonus when a QB and a skill player from the
+        same team are both selected.
+
+        This is modelled with auxiliary binary variables per team that indicate
+        whether a QB-WR/TE stack exists on that team.
+
+        Returns the bonus expression to add to the objective.
+        """
+        from pulp import LpAffineExpression, lpSum
+
+        bonus_expr = LpAffineExpression()
+        teams = set(p.team for p in players if p.team)
+
+        for team in teams:
+            qbs = [p for p in players if p.team == team and p.position == "QB"]
+            skill = [p for p in players if p.team == team and p.position in ("WR", "TE")]
+
+            if not qbs or not skill:
+                continue
+
+            # Auxiliary: stack_exists = 1 if at least one QB and one WR/TE selected
+            has_qb = LpVariable(f"stack_qb_{team}", cat="Binary")
+            has_skill = LpVariable(f"stack_skill_{team}", cat="Binary")
+            stack_exists = LpVariable(f"stack_{team}", cat="Binary")
+
+            # has_qb <= sum(x[qb])  (if any QB on this team is started)
+            prob += has_qb <= lpSum([x[qb.name] for qb in qbs]), f"stack_qb_def_{team}"
+            # has_qb >= (1/len(qbs)) * sum(x[qb]) -- if any QB started, has_qb = 1
+            prob += has_qb >= (1.0 / len(qbs)) * lpSum([x[qb.name] for qb in qbs]), f"stack_qb_trigger_{team}"
+
+            prob += has_skill <= lpSum([x[s.name] for s in skill]), f"stack_skill_def_{team}"
+            prob += has_skill >= (1.0 / len(skill)) * lpSum([x[s.name] for s in skill]), f"stack_skill_trigger_{team}"
+
+            # stack_exists = has_qb AND has_skill
+            prob += stack_exists <= has_qb, f"stack_and1_{team}"
+            prob += stack_exists <= has_skill, f"stack_and2_{team}"
+            prob += stack_exists >= has_qb + has_skill - 1, f"stack_and3_{team}"
+
+            bonus_expr += bonus * stack_exists
+
+        return bonus_expr
 
     def analyze_lineup(self, result: LineupResult) -> str:
         """

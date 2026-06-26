@@ -1,13 +1,14 @@
 """Data module for fantasy football projections."""
 
-from typing import List
+from typing import List, Optional
 
 import pandas as pd
 import streamlit as st
 
 from ffpy.config import Config
 from ffpy.integrations import ESPNIntegration, SportsDataIntegration
-from ffpy.projections import HistoricalProjectionModel
+from ffpy.projections import EnhancedProjectionModel, HistoricalProjectionModel
+from ffpy.scoring import ScoringConfig
 
 
 def get_sample_projections(week: int = 1) -> pd.DataFrame:
@@ -239,23 +240,37 @@ def get_sample_projections(week: int = 1) -> pd.DataFrame:
     return df
 
 
-def get_historical_projections(week: int = 1, lookback_weeks: int = 4) -> pd.DataFrame:
+def get_historical_projections(
+    week: int = 1,
+    lookback_weeks: int = 4,
+    use_enhanced: bool = False,
+    scoring: Optional[ScoringConfig] = None,
+) -> pd.DataFrame:
     """
     Get projections based on historical player performance.
 
-    Uses the HistoricalProjectionModel to generate projections by analyzing
-    each player's recent actual performance from the database.
+    Uses the HistoricalProjectionModel (or EnhancedProjectionModel) to generate
+    projections by analyzing each player's recent actual performance from the
+    database.
 
     Args:
         week: NFL week number to project (1-18)
         lookback_weeks: Number of past weeks to analyze (default: 4)
+        use_enhanced: If True, use the EnhancedProjectionModel with advanced
+            features (target share, NGS, injuries, etc.)
+        scoring: Scoring configuration for point calculation. Only used with
+            the enhanced model. Defaults to PPR.
 
     Returns:
         DataFrame with player projections based on historical averages
     """
     try:
-        model = HistoricalProjectionModel()
         season = Config.NFL_SEASON
+
+        if use_enhanced:
+            model = EnhancedProjectionModel(scoring=scoring or ScoringConfig.ppr())
+        else:
+            model = HistoricalProjectionModel()
 
         projections = model.generate_projections(
             season=season,
@@ -280,7 +295,11 @@ def get_historical_projections(week: int = 1, lookback_weeks: int = 4) -> pd.Dat
 
 @st.cache_data(ttl=Config.CACHE_TTL)
 def get_projections(
-    week: int = 1, use_real_data: bool = True, use_historical_model: bool = False
+    week: int = 1,
+    use_real_data: bool = True,
+    use_historical_model: bool = False,
+    use_enhanced: bool = False,
+    scoring: Optional[ScoringConfig] = None,
 ) -> pd.DataFrame:
     """
     Get fantasy football projections from configured source.
@@ -292,10 +311,17 @@ def get_projections(
         week: NFL week number (1-18)
         use_real_data: If True, fetch from API. If False, use sample data.
         use_historical_model: If True, use historical performance-based projections.
+        use_enhanced: If True, use the EnhancedProjectionModel (implies
+            use_historical_model).
+        scoring: Scoring configuration for enhanced model calculations.
 
     Returns:
         DataFrame with player projections
     """
+    # Priority 0: Enhanced model (implies historical)
+    if use_enhanced:
+        return get_historical_projections(week=week, use_enhanced=True, scoring=scoring)
+
     # Priority 1: Historical model (if enabled)
     if use_historical_model:
         return get_historical_projections(week=week)

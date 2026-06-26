@@ -17,6 +17,7 @@ from ffpy.optimizer import (
     PlayerStatus,
     RosterConstraints,
 )
+from ffpy.scoring import ScoringConfig
 
 ROSTER_PRESETS = {
     "Skill Positions Only (QB/RB/WR/TE/FLEX)": RosterConstraints.no_kicker_dst,
@@ -53,12 +54,32 @@ def main():
 
         data_source = st.radio(
             "Data Source",
-            options=["Historical Model", "Sample Data", "API Data"],
+            options=["Enhanced Model", "Historical Model", "Sample Data", "API Data"],
             index=0,
             help=(
-                "Historical Model: database-driven projections (recommended)\n\n"
+                "Enhanced Model: database + advanced stats, NGS, injuries (recommended)\n\n"
+                "Historical Model: plain weighted-average projections\n\n"
                 "Sample Data: hardcoded demo players\n\n"
                 "API Data: ESPN/SportsDataIO projections"
+            ),
+        )
+
+        scoring_system = st.selectbox(
+            "Scoring System",
+            options=["PPR", "Half-PPR", "Standard"],
+            index=0,
+            help="Only applies to Enhanced Model projections",
+        )
+
+        optimize_strategy = st.radio(
+            "Optimization Strategy",
+            options=["Maximize Projected", "Maximize Floor", "Maximize Ceiling", "Maximize Value"],
+            index=0,
+            help=(
+                "Projected: standard max of projected points\n\n"
+                "Floor: maximize safe floor (projected - consistency)\n\n"
+                "Ceiling: maximize upside (projected + consistency)\n\n"
+                "Value: maximize points per $1000 salary (DFS)"
             ),
         )
 
@@ -80,15 +101,31 @@ def main():
             help="0 = no limit. Use to avoid over-stacking one team.",
         )
 
+        stack_bonus = st.slider(
+            "QB-WR/TE Stack Bonus",
+            min_value=0.0,
+            max_value=5.0,
+            value=0.0,
+            step=0.5,
+            help="Extra points added when a QB and WR/TE from the same team start together. "
+                 "0 = disabled, 2-3 = moderate, 5 = aggressive stacking.",
+        )
+
     # === LOAD PROJECTIONS ===
+    use_enhanced = data_source == "Enhanced Model"
     use_historical = data_source == "Historical Model"
     use_real = data_source == "API Data"
+
+    scoring_map = {"PPR": ScoringConfig.ppr, "Half-PPR": ScoringConfig.half_ppr, "Standard": ScoringConfig.standard}
+    scoring = scoring_map[scoring_system]()
 
     with st.spinner(f"Loading Week {week} projections..."):
         projections = get_projections(
             week=week,
             use_real_data=use_real,
             use_historical_model=use_historical,
+            use_enhanced=use_enhanced,
+            scoring=scoring,
         )
 
     if projections.empty:
@@ -170,8 +207,21 @@ def main():
 
     try:
         optimizer = LineupOptimizer(constraints)
+
+        optimize_for_map = {
+            "Maximize Projected": "projected",
+            "Maximize Floor": "floor",
+            "Maximize Ceiling": "ceiling",
+            "Maximize Value": "value",
+        }
+
         with st.spinner("Solving optimization..."):
-            result = optimizer.optimize(players, current_lineup=current_lineup)
+            result = optimizer.optimize(
+                players,
+                current_lineup=current_lineup,
+                optimize_for=optimize_for_map[optimize_strategy],
+                stack_bonus=stack_bonus,
+            )
     except ValueError as e:
         st.error(f"❌ Cannot optimize: {e}")
         st.info(
@@ -218,15 +268,25 @@ def main():
 
 def _projections_to_players(df: pd.DataFrame) -> list:
     """Convert projection DataFrame rows to Player objects."""
+    status_map = {
+        "Out": PlayerStatus.OUT,
+        "Doubtful": PlayerStatus.OUT,
+        "Questionable": PlayerStatus.QUESTIONABLE,
+        "Active": PlayerStatus.AVAILABLE,
+    }
+
     players = []
     for _, row in df.iterrows():
+        injury_status_str = _safe_str(row.get("injury_status"))
+        status = status_map.get(injury_status_str, PlayerStatus.AVAILABLE)
+
         players.append(
             Player(
                 name=row["player"],
                 position=row["position"],
                 team=row.get("team", "FA") if pd.notna(row.get("team")) else "FA",
                 projected_points=float(row["projected_points"]),
-                status=PlayerStatus.AVAILABLE,
+                status=status,
                 opponent=_safe_str(row.get("opponent")),
                 consistency=_safe_float(row.get("consistency")),
                 passing_yards=_safe_float(row.get("passing_yards")),
@@ -236,9 +296,16 @@ def _projections_to_players(df: pd.DataFrame) -> list:
                 receiving_yards=_safe_float(row.get("receiving_yards")),
                 receiving_tds=_safe_float(row.get("receiving_tds")),
                 receptions=_safe_float(row.get("receptions")),
+                salary=_safe_int(row.get("salary")),
             )
         )
     return players
+
+
+def _safe_int(val):
+    if val is None or pd.isna(val):
+        return None
+    return int(val)
 
 
 def _safe_float(val):

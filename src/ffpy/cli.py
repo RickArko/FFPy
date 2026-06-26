@@ -7,6 +7,10 @@ Subcommands:
     collect-stats   Collect historical actual stats.
     prepare         Generate all app data required by the main UIs.
     mock            Generate realistic mock season data for development.
+    compute-stats   Compute derived advanced player stats (Phase 1).
+    load-ngs        Load Next Gen Stats from nflverse (Phase 2A).
+    load-injuries   Load injury data from nflverse (Phase 2B).
+    audit           Run data quality checks.
 
 Run ``ffpy-db <subcommand> --help`` for per-command flags.
 """
@@ -403,6 +407,155 @@ def cmd_mock(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_compute_stats(args: argparse.Namespace) -> int:
+    from ffpy.nflverse import NFLVerseLoader, setup_database
+
+    db = setup_database(args.db_path)
+    try:
+        with NFLVerseLoader(db) as loader:
+            stats = loader.compute_advanced_stats(season=args.season, verbose=True)
+        print(f"\nStored {stats.get('stored', 0)} advanced stat rows for {args.season}.")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_ngs(args: argparse.Namespace) -> int:
+    from ffpy.nflverse import NFLVerseLoader, setup_database
+
+    db = setup_database(args.db_path)
+    try:
+        with NFLVerseLoader(db) as loader:
+            stats = loader.load_nextgen(season=args.season, verbose=True)
+        print(f"\nStored {stats.get('stored', 0)} NGS rows for {args.season}.")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_injuries(args: argparse.Namespace) -> int:
+    from ffpy.nflverse import NFLVerseLoader, setup_database
+
+    db = setup_database(args.db_path)
+    try:
+        with NFLVerseLoader(db) as loader:
+            stats = loader.load_injuries(season=args.season, verbose=True)
+        print(f"\nStored {stats.get('stored', 0)} injury rows for {args.season}.")
+        return 0
+    finally:
+        db.close()
+
+
+def _stub_phase3_warning(cmd: str) -> None:
+    print(f"[INFO] '{cmd}' is a Phase 3 feature (external platform data).")
+    print("  The integration stubs are in place but return empty data.")
+    print("  Implement the fetcher in src/ffpy/integrations/ to enable.")
+
+
+def cmd_load_dfs(args: argparse.Namespace) -> int:
+    from ffpy.database import FFPyDatabase
+
+    _stub_phase3_warning("load-dfs")
+    from ffpy.integrations.dfs import fetch_all_platforms
+
+    platforms = args.platforms.split(",") if args.platforms else None
+    data = fetch_all_platforms(args.season, args.week, platforms)
+    total = 0
+    db = FFPyDatabase(args.db_path)
+    try:
+        for platform, df in data.items():
+            if df.empty:
+                print(f"  {platform}: no data")
+                continue
+            count = db.store_dfs_salaries(df, args.season, args.week, platform)
+            total += count
+            print(f"  {platform}: stored {count} rows")
+        print(f"\nTotal: {total} DFS salary rows")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_adp(args: argparse.Namespace) -> int:
+    from ffpy.database import FFPyDatabase
+
+    _stub_phase3_warning("load-adp")
+    from ffpy.integrations.adp import fetch_all_platforms
+
+    platforms = args.platforms.split(",") if args.platforms else None
+    data = fetch_all_platforms(args.season, platforms)
+    total = 0
+    db = FFPyDatabase(args.db_path)
+    try:
+        for platform, df in data.items():
+            if df.empty:
+                print(f"  {platform}: no data")
+                continue
+            count = db.store_adp(df, args.season)
+            total += count
+            print(f"  {platform}: stored {count} rows")
+        print(f"\nTotal: {total} ADP rows")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_depth_charts(args: argparse.Namespace) -> int:
+    from ffpy.integrations.depth_chart import fetch_nflverse_depth_charts
+    from ffpy.nflverse import setup_database
+
+    db = setup_database(args.db_path)
+    try:
+        df = fetch_nflverse_depth_charts(args.season, args.week if args.week else None)
+        if df.empty:
+            print("  [WARN] No depth chart data returned from nflreadpy.")
+            return 0
+        count = db.store_depth_charts(df, args.season)
+        print(f"  [OK] Stored {count} depth chart rows")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        results = db.audit_data_quality()
+
+        print(f"\n{'=' * 50}")
+        print("Data Quality Audit")
+        print(f"{'=' * 50}")
+
+        # Views
+        for key, value in results.items():
+            if key.startswith("view_"):
+                status = "OK" if value else "MISSING"
+                print(f"  {key:30s} {status}")
+
+        # Row counts
+        print("\n  --- Table Row Counts ---")
+        for key, value in sorted(results.items()):
+            if key.startswith("table_"):
+                name = key.replace("table_", "").replace("_rows", "")
+                print(f"  {name:25s} {value:>8,}")
+
+        # Issues
+        missing = results.get("missing_games_count", -1)
+        dups = results.get("duplicate_stat_weeks", -1)
+        print("\n  --- Issues ---")
+        print(f"  Missing games:            {missing:>8,}")
+        print(f"  Duplicate stat weeks:     {dups:>8,}")
+
+        if args.fix:
+            print("\n  Auto-fix not yet implemented (coming in a future release).")
+
+        return 1 if (missing > 0 or dups > 0) else 0
+    finally:
+        db.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ffpy-db",
@@ -472,6 +625,70 @@ def build_parser() -> argparse.ArgumentParser:
         "--validate", action="store_true", help="Validate play-by-play data quality after real load"
     )
     p.set_defaults(func=cmd_prepare)
+
+    p = sub.add_parser(
+        "compute-stats",
+        help="Compute derived advanced player stats from existing plays + snaps + FTN",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--db-path", help="Custom database path")
+    p.set_defaults(func=cmd_compute_stats)
+
+    p = sub.add_parser(
+        "load-ngs",
+        help="Load Next Gen Stats from nflverse (passing / receiving / rushing)",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--db-path", help="Custom database path")
+    p.set_defaults(func=cmd_load_ngs)
+
+    p = sub.add_parser(
+        "load-injuries",
+        help="Load player injury data from nflverse",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--db-path", help="Custom database path")
+    p.set_defaults(func=cmd_load_injuries)
+
+    p = sub.add_parser(
+        "audit",
+        help="Run data quality checks against all tables and views",
+    )
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument(
+        "--fix",
+        action="store_true",
+        help="Auto-fix issues where possible (limited support)",
+    )
+    p.set_defaults(func=cmd_audit)
+
+    p = sub.add_parser(
+        "load-dfs",
+        help="Load DFS salaries (Phase 3 — stub, requires API integration)",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--week", type=int, default=1)
+    p.add_argument("--platforms", default="", help="Comma-separated list (draftkings,fanduel)")
+    p.add_argument("--db-path", help="Custom database path")
+    p.set_defaults(func=cmd_load_dfs)
+
+    p = sub.add_parser(
+        "load-adp",
+        help="Load ADP data (Phase 3 — stub, requires API integration)",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--platforms", default="", help="Comma-separated list (fantasypros,underdog)")
+    p.add_argument("--db-path", help="Custom database path")
+    p.set_defaults(func=cmd_load_adp)
+
+    p = sub.add_parser(
+        "load-depth-charts",
+        help="Load depth charts from nflreadpy",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--week", type=int, default=None, help="Optional week filter")
+    p.add_argument("--db-path", help="Custom database path")
+    p.set_defaults(func=cmd_load_depth_charts)
 
     p = sub.add_parser("mock", help="Generate realistic mock season data (for development)")
     p.add_argument("--season", type=int, default=2024)
