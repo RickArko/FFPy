@@ -94,6 +94,7 @@ class FFPyDatabase:
             "008_adp.sql",
             "009_depth_charts.sql",
             "010_quality_views.sql",
+            "011_game_weather.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
@@ -1611,6 +1612,85 @@ class FFPyDatabase:
             "fp_allowed_per_game": round(fp_raw / est_games, 1),
             "n_plays": n_plays_val,
         }
+
+    # ==================== GAME WEATHER ====================
+
+    def store_game_weather(self, df: pd.DataFrame) -> int:
+        """Store or update game weather data.
+
+        Args:
+            df: DataFrame with columns matching game_weather schema.
+
+        Returns:
+            Number of rows inserted or updated.
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(game_weather)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("weather_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        column_sql = ", ".join(available_cols)
+        placeholders = ", ".join("?" for _ in available_cols)
+        update_sql = ", ".join(f"{col}=excluded.{col}" for col in available_cols if col not in ("game_id", "season", "week"))
+
+        cursor.executemany(
+            f"""INSERT INTO game_weather ({column_sql})
+                VALUES ({placeholders})
+                ON CONFLICT(game_id) DO UPDATE SET {update_sql}""",
+            _sqlite_records(df[available_cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_game_weather(
+        self,
+        season: Optional[int] = None,
+        week: Optional[int] = None,
+        team: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Retrieve game weather data.
+
+        Args:
+            season: Optional season filter.
+            week: Optional week filter.
+            team: Optional team filter (home or away).
+
+        Returns:
+            DataFrame with game weather.
+        """
+        conditions: List[str] = []
+        params: List = []
+
+        if season is not None:
+            conditions.append("gw.season = ?")
+            params.append(season)
+        if week is not None:
+            conditions.append("gw.week = ?")
+            params.append(week)
+        if team is not None:
+            conditions.append("(g.home_team = ? OR g.away_team = ?)")
+            params.extend([team, team])
+
+        where_sql = " AND ".join(conditions) if conditions else "1"
+
+        query = f"""
+            SELECT
+                gw.*,
+                g.home_team,
+                g.away_team,
+                g.game_date,
+                g.stadium
+            FROM game_weather gw
+            JOIN games g ON gw.game_id = g.game_id
+            WHERE {where_sql}
+            ORDER BY gw.season, gw.week, g.game_date
+        """
+        return pd.read_sql(query, self.conn, params=params)
 
     # ==================== DATA QUALITY (Phase 4) ====================
 
