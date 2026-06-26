@@ -70,9 +70,7 @@ class SupabaseTokenVerifier:
         self.userinfo_url = f"{self.supabase_url}/auth/v1/user" if self.supabase_url else None
         resolved_jwks_url = jwks_url or (f"{self.supabase_url}/auth/v1/jwks" if self.supabase_url else "")
         self._jwks_client = (
-            jwt.PyJWKClient(resolved_jwks_url)
-            if resolved_jwks_url and not self.jwt_secret
-            else None
+            jwt.PyJWKClient(resolved_jwks_url) if resolved_jwks_url and not self.jwt_secret else None
         )
 
     def verify_access_token(self, token: str) -> AuthenticatedUser:

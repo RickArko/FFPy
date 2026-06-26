@@ -89,6 +89,15 @@ lint: ## Lint with ruff
 fmt: ## Format with ruff
 	$(UV) run ruff format .
 
+precommit: ## Run pre-commit hooks on all files (install via `make precommit-install`)
+	$(UV) run pre-commit run --all-files
+
+precommit-install: ## Install pre-commit hooks into .git/hooks/
+	$(UV) run pre-commit install
+
+precommit-update: ## Update pre-commit hook versions to latest
+	$(UV) run pre-commit autoupdate
+
 check: lint test ## Lint + test (CI entry point)
 
 # ---- Database -----------------------------------------------------

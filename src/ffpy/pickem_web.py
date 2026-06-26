@@ -312,7 +312,9 @@ def _normalize_projection_frame(frame: pd.DataFrame, week: int) -> pd.DataFrame:
         if column not in normalized.columns:
             normalized[column] = default
 
-    normalized["projected_points"] = pd.to_numeric(normalized["projected_points"], errors="coerce").fillna(0.0)
+    normalized["projected_points"] = pd.to_numeric(normalized["projected_points"], errors="coerce").fillna(
+        0.0
+    )
     normalized["week"] = pd.to_numeric(normalized["week"], errors="coerce").fillna(week).astype(int)
     normalized["position"] = normalized["position"].astype(str).str.upper()
     return normalized.sort_values(["projected_points", "player"], ascending=[False, True])
@@ -345,7 +347,9 @@ def _load_api_projection_frame(week: int) -> pd.DataFrame:
     return ESPNIntegration().get_projections(week=week, season=Config.NFL_SEASON)
 
 
-def _projection_source_frame(source: str, week: int, db_path: str) -> tuple[pd.DataFrame, str, bool, Optional[str]]:
+def _projection_source_frame(
+    source: str, week: int, db_path: str
+) -> tuple[pd.DataFrame, str, bool, Optional[str]]:
     fallback_used = False
     message = None
 
@@ -359,7 +363,9 @@ def _projection_source_frame(source: str, week: int, db_path: str) -> tuple[pd.D
             message = "Historical model could not read projection inputs; sample projections are shown."
         if frame.empty:
             fallback_used = True
-            message = message or "Historical projections are empty for this week; sample projections are shown."
+            message = (
+                message or "Historical projections are empty for this week; sample projections are shown."
+            )
             frame = get_sample_projections(week)
     elif source == "api":
         try:
@@ -407,10 +413,14 @@ def _projection_position_totals(frame: pd.DataFrame) -> List[Dict[str, Any]]:
                 "position": position,
                 "players": int(len(position_frame)),
                 "average_projected_points": (
-                    round(float(position_frame["projected_points"].mean()), 2) if not position_frame.empty else 0.0
+                    round(float(position_frame["projected_points"].mean()), 2)
+                    if not position_frame.empty
+                    else 0.0
                 ),
                 "top_projection": (
-                    round(float(position_frame["projected_points"].max()), 2) if not position_frame.empty else 0.0
+                    round(float(position_frame["projected_points"].max()), 2)
+                    if not position_frame.empty
+                    else 0.0
                 ),
             }
         )
