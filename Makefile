@@ -6,7 +6,7 @@
 .PHONY: help bootstrap install data full-data run dev pickem-web pickem-web-auth-local \
         pickem-web-auth-supabase pickem-auth-token notebook test cov lint fmt check \
         db.prepare db.migrate db.load db.update db.stats db.mock \
-        db.compute-stats db.ngs db.injuries db.audit db.dfs db.adp db.depth-chart \
+        db.compute-stats db.ngs db.injuries db.audit db.dfs db.adp db.depth-chart db.weather \
         supabase.check fly.app fly.volume fly.secrets fly.secrets-list \
         fly.deploy fly.status fly.logs fly.token clean clean-all
 
@@ -48,9 +48,10 @@ install: ## Sync dependencies and register the `ffpy` Jupyter kernel
 
 data: db.prepare ## Generate all required app data (DATA_MODE=real|mock)
 
-full-data: db.prepare db.compute-stats db.ngs db.injuries  ## Full pipeline: PBP → stats → advanced stats → NGS → injuries → depth charts → audit
+full-data: db.prepare db.compute-stats db.ngs db.injuries  ## Full pipeline: PBP → stats → advanced stats → NGS → injuries → depth charts → weather → audit
 	$(UV) run ffpy-db load-depth-charts --season $(SEASON)
-	-$(UV) run ffpy-db audit
+	$(UV) run ffpy-db add-weather --season $(SEASON)
+	-$(UV) run ffpy-db audit --exit-zero
 	@echo ""
 	@echo "Full data pipeline complete. Run \`make run\` to launch the app."
 
@@ -147,6 +148,9 @@ db.adp: ## Load ADP data (placeholder, SEASON=2024)
 
 db.depth-chart: ## Load depth charts (SEASON=2024)
 	$(UV) run ffpy-db load-depth-charts --season $(SEASON)
+
+db.weather: ## Add historical weather data (SEASON=2024)
+	$(UV) run ffpy-db add-weather --season $(SEASON)
 
 # ---- Fly.io -------------------------------------------------------
 

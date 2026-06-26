@@ -517,6 +517,66 @@ def cmd_load_depth_charts(args: argparse.Namespace) -> int:
         db.close()
 
 
+def cmd_add_weather(args: argparse.Namespace) -> int:
+    """Add historical weather data for a season from nflverse PBP."""
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+
+    print(f"Loading play-by-play data for {args.season} to extract weather...")
+    try:
+        import nflreadpy as nfl
+
+        pbp = nfl.load_pbp(seasons=[args.season])
+    except Exception as e:
+        print(f"  [ERR] Failed to load PBP: {e}")
+        return 1
+
+    if pbp is None or len(pbp) == 0:
+        print("  [WARN] No PBP data available.")
+        return 0
+
+    import polars as pl
+
+    weather_cols = ["game_id", "season", "week", "roof", "surface", "temp", "wind", "weather"]
+    available = [c for c in weather_cols if c in pbp.columns]
+    weather_df = pbp.select(available).unique(subset=["game_id"])
+
+    # Parse the weather text field into structured columns
+    if "weather" in weather_df.columns:
+        weather_df = weather_df.with_columns([
+            pl.when(pl.col("weather").str.contains("(?i)clear|sunny"))
+            .then(pl.lit("Clear"))
+            .when(pl.col("weather").str.contains("(?i)cloudy|mostly cloudy|partly cloudy"))
+            .then(pl.lit("Cloudy"))
+            .when(pl.col("weather").str.contains("(?i)rain|showers|drizzle"))
+            .then(pl.lit("Rain"))
+            .when(pl.col("weather").str.contains("(?i)snow|sleet|wintry"))
+            .then(pl.lit("Snow"))
+            .when(pl.col("weather").str.contains("(?i)fog|mist"))
+            .then(pl.lit("Fog"))
+            .when(pl.col("weather").str.contains("(?i)dome|indoors"))
+            .then(pl.lit("Dome"))
+            .otherwise(pl.lit("Unknown"))
+            .alias("weather_condition"),
+            pl.col("weather").str.extract(r"Humidity:\s*(\d+)", 1).cast(pl.Int64).alias("humidity"),
+            pl.col("weather").alias("weather_description"),
+        ])
+
+    pandas_df = weather_df.to_pandas()
+
+    if pandas_df.empty:
+        print("  [WARN] No weather data extracted.")
+        return 0
+
+    count = db.store_game_weather(pandas_df)
+    print(f"  [OK] Stored weather data for {count} games in {args.season}.")
+
+    games_with_weather = len(pandas_df[pandas_df["temp"].notna()])
+    print(f"       {games_with_weather}/{len(pandas_df)} games have temperature data.")
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from ffpy.database import FFPyDatabase
 
@@ -551,6 +611,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
         if args.fix:
             print("\n  Auto-fix not yet implemented (coming in a future release).")
 
+        if args.exit_zero:
+            return 0
         return 1 if (missing > 0 or dups > 0) else 0
     finally:
         db.close()
@@ -660,6 +722,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Auto-fix issues where possible (limited support)",
     )
+    p.add_argument(
+        "--exit-zero",
+        action="store_true",
+        help="Exit with code 0 even if issues found (warnings only)",
+    )
     p.set_defaults(func=cmd_audit)
 
     p = sub.add_parser(
@@ -689,6 +756,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--week", type=int, default=None, help="Optional week filter")
     p.add_argument("--db-path", help="Custom database path")
     p.set_defaults(func=cmd_load_depth_charts)
+
+    p = sub.add_parser(
+        "add-weather",
+        help="Add historical weather data for a season from nflverse PBP",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--db-path", help="Custom database path")
+    p.set_defaults(func=cmd_add_weather)
 
     p = sub.add_parser("mock", help="Generate realistic mock season data (for development)")
     p.add_argument("--season", type=int, default=2024)
