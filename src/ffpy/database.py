@@ -1541,6 +1541,77 @@ class FFPyDatabase:
         query = f"SELECT * FROM depth_charts WHERE {where_sql} ORDER BY team, position, depth_spot"
         return pd.read_sql(query, self.conn, params=params)
 
+    # ==================== DEFENSIVE MATCHUP STATS ====================
+
+    def get_defensive_matchup_stats(
+        self,
+        team: str,
+        position: str,
+        season: int,
+        weeks: int = 4,
+    ) -> Optional[Dict[str, float]]:
+        """Compute rolling defensive matchup stats for a defence.
+
+        Uses the ``plays`` table to calculate, over the last *weeks* games,
+        the average EPA allowed per play and fantasy points allowed per game
+        by a defence against a given position.
+
+        Args:
+            team: Opponent defence team abbreviation (e.g. ``"BUF"``).
+            position: Position to filter against (QB, RB, WR, TE).
+            season: Season year.
+            weeks: Number of weeks to look back (default 4).
+
+        Returns:
+            Dict with ``epa_allowed_per_play`` and ``fp_allowed_per_game``,
+            or ``None`` if insufficient data.
+        """
+        # Map position to EPA columns
+        if position == "QB":
+            epa_condition = "play_type = 'pass'"
+        elif position in ("WR", "TE"):
+            epa_condition = "play_type = 'pass' AND receiver_player_name IS NOT NULL"
+        elif position == "RB":
+            epa_condition = "play_type = 'run'"
+        else:
+            epa_condition = "1"
+
+        query = f"""
+            SELECT
+                COUNT(*) AS n_plays,
+                AVG(epa) AS avg_epa,
+                SUM(CASE WHEN touchdown = 1 THEN 6
+                         WHEN play_type = 'pass' AND complete_pass = 1 THEN 0.5
+                         ELSE 0 END) AS fantasy_points_raw
+            FROM plays
+            WHERE defteam = ?
+              AND season = ?
+              AND week >= (SELECT MAX(week) - ? + 1 FROM plays WHERE defteam = ? AND season = ?)
+              AND week <= (SELECT MAX(week) FROM plays WHERE defteam = ? AND season = ?)
+              AND {epa_condition}
+        """
+        params = [team, season, weeks, team, season, team, season]
+
+        df = pd.read_sql(query, self.conn, params=params)
+
+        if df.empty or df["n_plays"].iloc[0] is None or df["n_plays"].iloc[0] < 10:
+            return None
+
+        row = df.iloc[0]
+        # Rough fantasy-point proxy (TD = 6, reception = 0.5 in PPR)
+        n_plays_val = int(row["n_plays"])
+        avg_epa_val = float(row["avg_epa"]) if row["avg_epa"] is not None else 0.0
+        fp_raw = float(row["fantasy_points_raw"]) if row["fantasy_points_raw"] is not None else 0.0
+
+        # Estimate games from plays (rough: ~60 plays/game)
+        est_games = max(1, n_plays_val / 60)
+
+        return {
+            "epa_allowed_per_play": round(avg_epa_val, 4),
+            "fp_allowed_per_game": round(fp_raw / est_games, 1),
+            "n_plays": n_plays_val,
+        }
+
     # ==================== DATA QUALITY (Phase 4) ====================
 
     def audit_data_quality(self) -> Dict[str, Any]:
