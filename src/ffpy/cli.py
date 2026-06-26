@@ -544,6 +544,10 @@ def cmd_add_weather(args: argparse.Namespace) -> int:
 
     # Parse the weather text field into structured columns
     if "weather" in weather_df.columns:
+        # Extract temp and wind from weather text as fallback for missing numeric columns
+        temp_from_text = pl.col("weather").str.extract(r"Temp:\s*(\d+)", 1).cast(pl.Int64)
+        wind_from_text = pl.col("weather").str.extract(r"Wind:.*?(\d+)", 1).cast(pl.Int64)
+
         weather_df = weather_df.with_columns([
             pl.when(pl.col("weather").str.contains("(?i)clear|sunny"))
             .then(pl.lit("Clear"))
@@ -560,6 +564,9 @@ def cmd_add_weather(args: argparse.Namespace) -> int:
             .otherwise(pl.lit("Unknown"))
             .alias("weather_condition"),
             pl.col("weather").str.extract(r"Humidity:\s*(\d+)", 1).cast(pl.Int64).alias("humidity"),
+            # Fill missing temp/wind from weather text
+            pl.col("temp").fill_null(temp_from_text).alias("temp"),
+            pl.col("wind").fill_null(wind_from_text).alias("wind"),
             pl.col("weather").alias("weather_description"),
         ])
 
@@ -572,8 +579,38 @@ def cmd_add_weather(args: argparse.Namespace) -> int:
     count = db.store_game_weather(pandas_df)
     print(f"  [OK] Stored weather data for {count} games in {args.season}.")
 
-    games_with_weather = len(pandas_df[pandas_df["temp"].notna()])
-    print(f"       {games_with_weather}/{len(pandas_df)} games have temperature data.")
+    # --- Augment indoor/dome games with sensible defaults ---
+    indoor_roofs = {"dome", "closed", "open"}
+    indoor = pandas_df["roof"].str.lower().isin(indoor_roofs) if "roof" in pandas_df.columns else pd.Series(False)
+    needs_default = indoor & pandas_df["temp"].isna()
+    n_filled = 0
+    if needs_default.any():
+        cursor = db.conn.cursor()
+        for _, row in pandas_df[needs_default].iterrows():
+            cursor.execute(
+                """UPDATE game_weather
+                   SET temp = 72, wind = 0, humidity = 50,
+                       weather_condition = COALESCE(weather_condition, 'Dome'),
+                       weather_description = COALESCE(weather_description, 'Dome, climate-controlled')
+                   WHERE game_id = ?""",
+                (row["game_id"],),
+            )
+        db.conn.commit()
+        n_filled = int(needs_default.sum())
+        print(f"  [AU] Filled {n_filled} indoor games with dome defaults (72°F, 0 wind).")
+
+    # Re-read from DB to get accurate counts
+    result = db.get_game_weather(season=args.season)
+    total = len(result)
+    with_temp = int(result["temp"].notna().sum())
+    print(f"       {with_temp}/{total} games have temperature data.")
+
+    # Warn about remaining outdoor gaps
+    if "roof" in result.columns:
+        outdoor_missing = result[(result["roof"].str.lower() == "outdoors") & (result["temp"].isna())]
+        if not outdoor_missing.empty:
+            print(f"  [WARN] {len(outdoor_missing)} outdoor games still missing weather data.")
+
     return 0
 
 
