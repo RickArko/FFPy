@@ -59,10 +59,15 @@ Production Dockerfile + `fly.toml` in repo. CI builds and deploys to Fly.io on `
 
 ## Further reading
 
-- [TESTING.md](TESTING.md) — test suite and manual smoke test
-- [CONTRIBUTING.md](CONTRIBUTING.md) — contributing guide
+- [docs/testing.md](docs/testing.md) — test suite and manual smoke test
+- [docs/db/database.md](docs/db/database.md) — database schema and CLI
+- [docs/optimization.md](docs/optimization.md) — optimizer internals
+- [docs/streamlit/player-comparison.md](docs/streamlit/player-comparison.md) — Streamlit UI details
+- [docs/integration/espn.md](docs/integration/espn.md) — ESPN API integration
+- [docs/integration/pickem.md](docs/integration/pickem.md) — Pick'em platform integration
+- [docs/deployment/fly.md](docs/deployment/fly.md) — Fly.io deployment guide
 - [QUICKSTART.md](QUICKSTART.md) — two-minute walkthrough
-- `docs/` — database guide, optimizer internals, Streamlit UI details, ESPN integration, auth plan
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contributing guide
 - `examples/` — runnable scripts (optimize, pick'em, ESPN league, play analysis)
 - `notebooks/` — EDA and solver comparison notebooks
 

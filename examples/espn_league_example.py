@@ -45,7 +45,7 @@ def main():
         print("1. Copy .env.example to .env")
         print("2. Add your ESPN_LEAGUE_ID")
         print("3. For private leagues, add ESPN_SWID and ESPN_S2 cookies")
-        print("\nSee docs/ESPN_API_INTEGRATION_GUIDE.md for details")
+        print("\nSee docs/integration/espn.md for details")
         return
 
     league_id = int(league_id)
@@ -236,7 +236,7 @@ def main():
         print("2. Private league requires ESPN_SWID and ESPN_S2 cookies")
         print("3. Invalid or expired cookies")
         print("4. Network connectivity issues")
-        print("\nSee docs/ESPN_API_INTEGRATION_GUIDE.md for troubleshooting")
+        print("\nSee docs/integration/espn.md for troubleshooting")
 
 
 if __name__ == "__main__":

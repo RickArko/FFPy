@@ -234,7 +234,7 @@ src/ffpy/
     └── 001_initial_schema.sql   # Database schema
 
 demo_projections.py          # Demo script
-docs/db/DATABASE_GUIDE.md    # This file
+docs/db/database.md    # This file
 ```
 
 ## Performance
