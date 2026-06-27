@@ -26,12 +26,14 @@ dependencies = [
     "ipykernel>=6.29.5,<7",
     "matplotlib>=3.10.8",
     "seaborn>=0.13.2",
+    "cryptography>=44.0.0",
 ]
 
 [project.scripts]
 ffpy = "ffpy.app:main"
 ffpy-db = "ffpy.cli:main"
 ffpy-pickem-web = "ffpy.pickem_web:main"
+ffpy-league-api = "ffpy.league_api:main"
 
 [build-system]
 requires = ["uv_build>=0.9.18,<0.10.0"]

@@ -1,5 +1,6 @@
 """Database operations for FFPy - Focus on historical actual stats."""
 
+import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -97,6 +98,7 @@ class FFPyDatabase:
             "011_game_weather.sql",
             "012_player_rosters.sql",
             "013_offensive_line_stats.sql",
+            "014_league_import.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
@@ -2103,3 +2105,179 @@ class FFPyDatabase:
                 results[f"table_{table}_rows"] = -1
 
         return results
+
+    # ==================== USER CREDENTIALS (League Import) ====================
+
+    def store_user_credentials(
+        self, user_id: str, provider: str, ciphertext: str, label: str = ""
+    ) -> None:
+        """Store or update encrypted credentials for a user/provider."""
+        self.conn.execute(
+            """
+            INSERT INTO user_credentials (user_id, provider, encrypted, label)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, provider) DO UPDATE SET
+                encrypted = excluded.encrypted,
+                label = excluded.label,
+                updated_at = CURRENT_TIMESTAMP
+        """,
+            (user_id, provider, ciphertext, label),
+        )
+        self.conn.commit()
+
+    def get_user_credentials(self, user_id: str) -> list[dict]:
+        """List stored credentials metadata (without ciphertext) for a user."""
+        cursor = self.conn.execute(
+            "SELECT cred_id, provider, label, created_at, updated_at "
+            "FROM user_credentials WHERE user_id = ?",
+            (user_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_credential_ciphertext(self, user_id: str, provider: str) -> str | None:
+        """Retrieve the encrypted credential blob for a user/provider."""
+        cursor = self.conn.execute(
+            "SELECT encrypted FROM user_credentials WHERE user_id = ? AND provider = ?",
+            (user_id, provider),
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def delete_user_credentials(self, user_id: str, provider: str) -> None:
+        """Delete stored credentials for a user/provider."""
+        self.conn.execute(
+            "DELETE FROM user_credentials WHERE user_id = ? AND provider = ?",
+            (user_id, provider),
+        )
+        self.conn.commit()
+
+    # ==================== USER LEAGUES (League Import) ====================
+
+    def store_user_league(self, user_id: str, data: dict) -> str:
+        """Store league metadata, teams, and matchups from an import."""
+        league = data["league"]
+        self.conn.execute(
+            """
+            INSERT INTO user_leagues
+                (league_id, user_id, provider, league_name, season,
+                 scoring_type, roster_size, num_teams, playoff_teams, league_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(league_id) DO UPDATE SET
+                league_name = excluded.league_name,
+                league_json = excluded.league_json,
+                refreshed_at = CURRENT_TIMESTAMP
+        """,
+            (
+                league["league_id"],
+                user_id,
+                league["provider"],
+                league["name"],
+                league["season"],
+                league.get("scoring_type"),
+                league.get("roster_size"),
+                league.get("num_teams"),
+                league.get("playoff_teams"),
+                json.dumps(league),
+            ),
+        )
+        for team in data.get("teams", []):
+            self.conn.execute(
+                """
+                INSERT INTO league_teams
+                    (team_id, league_id, team_name, owner_name,
+                     wins, losses, ties, points_for, points_against,
+                     rank, roster_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(team_id) DO UPDATE SET
+                    roster_json = excluded.roster_json,
+                    points_for = excluded.points_for
+            """,
+                (
+                    team["team_id"],
+                    league["league_id"],
+                    team["name"],
+                    team.get("owner"),
+                    team.get("wins", 0),
+                    team.get("losses", 0),
+                    team.get("ties", 0),
+                    team.get("points_for", 0),
+                    team.get("points_against", 0),
+                    team.get("rank"),
+                    json.dumps(team.get("roster", [])),
+                ),
+            )
+        for m in data.get("matchups", []):
+            self.conn.execute(
+                """
+                INSERT INTO league_matchups
+                    (league_id, week, home_team_id, away_team_id,
+                     home_score, away_score, is_playoff, is_consolation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(league_id, week, home_team_id, away_team_id)
+                DO UPDATE SET home_score=excluded.home_score,
+                              away_score=excluded.away_score
+            """,
+                (
+                    league["league_id"],
+                    m["week"],
+                    m["home_team_id"],
+                    m["away_team_id"],
+                    m.get("home_score"),
+                    m.get("away_score"),
+                    m.get("is_playoff", 0),
+                    m.get("is_consolation", 0),
+                ),
+            )
+        self.conn.commit()
+        return league["league_id"]
+
+    def get_user_leagues(self, user_id: str) -> list[dict]:
+        """List all imported leagues for a user."""
+        cursor = self.conn.execute(
+            "SELECT * FROM user_leagues WHERE user_id = ? ORDER BY imported_at DESC",
+            (user_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_user_league(self, league_id: str, user_id: str) -> dict | None:
+        """Get a single league by ID, verifying user ownership."""
+        cursor = self.conn.execute(
+            "SELECT * FROM user_leagues WHERE league_id = ? AND user_id = ?",
+            (league_id, user_id),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_league_teams(self, league_id: str, user_id: str) -> list[dict]:
+        """Get teams for a league, verifying user ownership."""
+        cursor = self.conn.execute(
+            """
+            SELECT t.* FROM league_teams t
+            JOIN user_leagues l ON t.league_id = l.league_id
+            WHERE t.league_id = ? AND l.user_id = ?
+            ORDER BY t.rank, t.points_for DESC
+        """,
+            (league_id, user_id),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_league_matchups(self, league_id: str, week: int, user_id: str) -> list[dict]:
+        """Get matchups for a league/week, verifying user ownership."""
+        cursor = self.conn.execute(
+            """
+            SELECT m.* FROM league_matchups m
+            JOIN user_leagues l ON m.league_id = l.league_id
+            WHERE m.league_id = ? AND m.week = ? AND l.user_id = ?
+            ORDER BY m.matchup_id
+        """,
+            (league_id, week, user_id),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def delete_user_league(self, league_id: str, user_id: str) -> None:
+        """Delete a league and its teams/matchups (CASCADE)."""
+        self.conn.execute(
+            "DELETE FROM user_leagues WHERE league_id = ? AND user_id = ?",
+            (league_id, user_id),
+        )
+        self.conn.commit()

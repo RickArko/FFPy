@@ -1,0 +1,22 @@
+name: League Integration Tests
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday morning
+  workflow_dispatch:       # Manual trigger
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      ESPN_SWID: ${{ secrets.ESPN_SWID }}
+      ESPN_S2: ${{ secrets.ESPN_S2 }}
+      ESPN_LEAGUE_ID: ${{ secrets.ESPN_LEAGUE_ID }}
+      YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+      YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
+      YAHOO_ACCESS_TOKEN: ${{ secrets.YAHOO_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: make bootstrap
+      - run: uv run pytest tests/test_league_integration_espn.py -v --tb=short
+      - run: uv run pytest tests/test_league_integration_sleeper.py -v --tb=short
+      - run: uv run pytest tests/test_league_integration_yahoo.py -v --tb=short
