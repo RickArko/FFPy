@@ -314,6 +314,34 @@ class EnhancedProjectionModel:
                 features.target_share, prior, weeks_of_history
             )
 
+        # --- Rookie / draft-capital boost (Phase 1: rosters) ---
+        try:
+            dc = self.db.get_rookie_draft_capital(player_name, season)
+            is_rookie = self.db.is_rookie(player_name, season)
+        except Exception:
+            dc = None
+            is_rookie = False
+
+        if is_rookie and weeks_of_history < 3:
+            # Rookies with high draft capital get a volume bridge
+            if dc and dc["draft_round"] <= 3:
+                rookie_mult = 1.0 + (0.15 / dc["draft_round"])  # Round 1: +15%, Round 2: +7.5%, etc.
+                if features.target_share is not None:
+                    features.target_share = min(features.target_share * rookie_mult,
+                                                _get_league_avg_target_share(position) * 1.5)
+                if position == "RB" and features.snap_pct is not None:
+                    features.snap_pct = min(features.snap_pct * rookie_mult, 0.65)
+            # Undrafted rookies get a small floor boost
+            elif dc is None or dc["draft_round"] > 6:
+                if features.target_share is not None:
+                    features.target_share = max(features.target_share,
+                                                _get_league_avg_target_share(position) * 0.5)
+        elif is_rookie and dc is not None and dc["draft_round"] <= 2:
+            # Even with some history, high-pick rookies get a mild boost
+            if features.target_share is not None:
+                features.target_share = min(features.target_share * 1.08,
+                                            _get_league_avg_target_share(position) * 1.3)
+
         return features
 
     def _get_efficiency_features(

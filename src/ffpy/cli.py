@@ -381,6 +381,14 @@ def cmd_prepare(args: argparse.Namespace) -> int:
                             if v.get("missing_epa"):
                                 print(f"  Missing EPA: {v['missing_epa']}")
 
+                # Load rosters unless skipped
+                if not args.skip_rosters:
+                    try:
+                        with NFLVerseLoader(db) as loader:
+                            loader.load_rosters(season=args.season, verbose=not args.quiet)
+                    except Exception as e:
+                        print(f"  [WARN] Could not load rosters: {e}")
+
             db.close()
             db = None
 
@@ -446,16 +454,8 @@ def cmd_load_injuries(args: argparse.Namespace) -> int:
         db.close()
 
 
-def _stub_phase3_warning(cmd: str) -> None:
-    print(f"[INFO] '{cmd}' is a Phase 3 feature (external platform data).")
-    print("  The integration stubs are in place but return empty data.")
-    print("  Implement the fetcher in src/ffpy/integrations/ to enable.")
-
-
 def cmd_load_dfs(args: argparse.Namespace) -> int:
     from ffpy.database import FFPyDatabase
-
-    _stub_phase3_warning("load-dfs")
     from ffpy.integrations.dfs import fetch_all_platforms
 
     platforms = args.platforms.split(",") if args.platforms else None
@@ -478,8 +478,6 @@ def cmd_load_dfs(args: argparse.Namespace) -> int:
 
 def cmd_load_adp(args: argparse.Namespace) -> int:
     from ffpy.database import FFPyDatabase
-
-    _stub_phase3_warning("load-adp")
     from ffpy.integrations.adp import fetch_all_platforms
 
     platforms = args.platforms.split(",") if args.platforms else None
@@ -495,6 +493,41 @@ def cmd_load_adp(args: argparse.Namespace) -> int:
             total += count
             print(f"  {platform}: stored {count} rows")
         print(f"\nTotal: {total} ADP rows")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_compute_ol_stats(args: argparse.Namespace) -> int:
+    """Compute offensive line stats from play-by-play data."""
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        df = db.compute_offensive_line_stats(season=args.season, weeks=args.weeks)
+        if df.empty:
+            if not args.quiet:
+                print("  [WARN] No play data to compute offensive line stats from.")
+            return 0
+        stored = db.store_offensive_line_stats(df, args.season)
+        if stored > 0 and not args.quiet:
+            print(f"  [OK] Stored {stored} offensive line stat rows for {args.season}")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_rosters(args: argparse.Namespace) -> int:
+    """Load player roster and bio data from nflreadpy."""
+    from ffpy.database import FFPyDatabase
+    from ffpy.nflverse import NFLVerseLoader
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        with NFLVerseLoader(db) as loader:
+            stats = loader.load_rosters(season=args.season, verbose=not args.quiet)
+        if not args.quiet:
+            print(f"\nStored {stats.get('stored', 0)} roster rows for {args.season}.")
         return 0
     finally:
         db.close()
@@ -718,6 +751,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-ftn", action="store_true", help="Skip FTN charting in real mode")
     p.add_argument("--no-snaps", action="store_true", help="Skip snap counts in real mode")
+    p.add_argument("--skip-rosters", action="store_true", help="Skip player rosters in real mode")
     p.add_argument("--refresh-pbp", action="store_true", help="Reload play-by-play even if the season exists")
     p.add_argument("--quiet", action="store_true", help="Suppress progress output")
     p.add_argument(
@@ -793,6 +827,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--week", type=int, default=None, help="Optional week filter")
     p.add_argument("--db-path", help="Custom database path")
     p.set_defaults(func=cmd_load_depth_charts)
+
+    p = sub.add_parser(
+        "load-rosters",
+        help="Load player roster & bio data from nflreadpy",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    p.set_defaults(func=cmd_load_rosters)
+
+    p = sub.add_parser(
+        "compute-ol-stats",
+        help="Compute offensive line stats from play-by-play data",
+    )
+    p.add_argument("--season", type=int, default=Config.NFL_SEASON)
+    p.add_argument("--weeks", type=int, default=4, help="Rolling window size")
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    p.set_defaults(func=cmd_compute_ol_stats)
 
     p = sub.add_parser(
         "add-weather",

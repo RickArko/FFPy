@@ -364,8 +364,22 @@ class NFLVerseLoader:
         Returns:
             Number of records stored
         """
+        df = snaps_df.copy()
+
+        # Normalize nflreadpy column names to DB schema.
+        # nflreadpy returns 'player' but our schema expects 'player_name'.
+        column_map = {
+            "player": "player_name",
+            "pfr_id": "pfr_player_id",
+        }
+        df = df.rename(columns={k: v for k, v in column_map.items() if k in df.columns})
+
+        # Ensure player_id is treated as text (it's a GSIS ID string, not an integer)
+        if "player_id" in df.columns:
+            df["player_id"] = df["player_id"].astype(str)
+
         try:
-            count = self.db.store_snap_counts(snaps_df, show_progress=verbose)
+            count = self.db.store_snap_counts(df, show_progress=verbose)
             if verbose:
                 print(f"  [OK] Stored {count} snap count records")
             return count
@@ -742,6 +756,105 @@ class NFLVerseLoader:
 
         if verbose:
             print(f"  [OK] Stored {stored} injury rows")
+
+        return {"stored": stored}
+
+
+    # ==================== PLAYER ROSTERS (Phase 1) ====================
+
+    @staticmethod
+    def _derive_draft_round(draft_number: Optional[int]) -> Optional[int]:
+        """Derive draft round from overall pick number."""
+        if draft_number is None or draft_number < 1:
+            return None
+        if draft_number <= 32:
+            return 1
+        if draft_number <= 64:
+            return 2
+        if draft_number <= 96:
+            return 3
+        if draft_number <= 128:
+            return 4
+        if draft_number <= 160:
+            return 5
+        if draft_number <= 192:
+            return 6
+        if draft_number <= 224:
+            return 7
+        return None
+
+    def load_rosters(self, season: int, verbose: bool = True) -> Dict[str, int]:
+        """
+        Load player roster and bio data from nflreadpy.
+
+        Args:
+            season: Season year
+            verbose: Print progress messages
+
+        Returns:
+            Dict with total rows stored
+        """
+        if verbose:
+            print(f"Loading player rosters for {season}...")
+
+        try:
+            rosters = nfl.load_rosters(seasons=[season])
+        except Exception as e:
+            if verbose:
+                print(f"  [ERROR] Could not load rosters: {e}")
+            return {"stored": 0}
+
+        if rosters.is_empty():
+            if verbose:
+                print("  [WARN] No roster data available")
+            return {"stored": 0}
+
+        pdf = rosters.to_pandas()
+        out = pd.DataFrame()
+
+        # nflreadpy columns: full_name, gsis_id, position, team, height,
+        # weight, college, years_exp, headshot_url, draft_number, draft_club,
+        # entry_year, rookie_year, birth_date, status
+        out["gsis_id"] = pdf.get("gsis_id", None)
+        out["player_name"] = pdf.get("full_name", None)
+        out["position"] = pdf.get("position", None)
+        out["team"] = pdf.get("team", None)
+        out["season"] = season
+        out["height"] = pdf.get("height", None)
+        out["weight"] = pdf.get("weight", None)
+        out["years_exp"] = pdf.get("years_exp", None)
+        out["college"] = pdf.get("college", None)
+        out["status"] = pdf.get("status", None)
+        out["headshot_url"] = pdf.get("headshot_url", None)
+
+        # Draft info
+        draft_num = pdf.get("draft_number", None)
+        out["draft_pick"] = draft_num
+        out["draft_round"] = draft_num.apply(self._derive_draft_round) if draft_num is not None else None
+        out["draft_team"] = pdf.get("draft_club", None)
+
+        # Compute age from birth_date if available
+        birth = pdf.get("birth_date", None)
+        if birth is not None:
+            import datetime
+            ref = datetime.date(season, 9, 1)  # approximate season start
+            out["age"] = birth.apply(
+                lambda b: (ref - b.date()).days // 365 if hasattr(b, "date") and pd.notna(b) else None
+            )
+        else:
+            out["age"] = None
+
+        # Drop rows with no gsis_id or no player_name
+        out = out.dropna(subset=["gsis_id", "player_name"]).reset_index(drop=True)
+
+        if out.empty:
+            if verbose:
+                print("  [WARN] No roster records with valid gsis_id")
+            return {"stored": 0}
+
+        stored = self.db.store_player_rosters(out, season)
+        if verbose:
+            print(f"  [OK] Stored {stored} roster rows")
 
         return {"stored": stored}
 
