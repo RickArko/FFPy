@@ -1,5 +1,6 @@
 """Database operations for FFPy - Focus on historical actual stats."""
 
+import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -95,6 +96,9 @@ class FFPyDatabase:
             "009_depth_charts.sql",
             "010_quality_views.sql",
             "011_game_weather.sql",
+            "012_player_rosters.sql",
+            "013_offensive_line_stats.sql",
+            "014_league_import.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
@@ -379,6 +383,8 @@ class FFPyDatabase:
             "dfs_salaries",
             "adp",
             "depth_charts",
+            "player_rosters",
+            "game_weather",
         ]
 
         for table in tables:
@@ -1542,6 +1548,354 @@ class FFPyDatabase:
         query = f"SELECT * FROM depth_charts WHERE {where_sql} ORDER BY team, position, depth_spot"
         return pd.read_sql(query, self.conn, params=params)
 
+    # ==================== PLAYER ROSTERS (Phase 1) ====================
+
+    def store_player_rosters(self, df: pd.DataFrame, season: int) -> int:
+        """
+        Store or replace seasonal player roster data.
+
+        Args:
+            df: DataFrame with columns matching player_rosters schema
+            season: Season year
+
+        Returns:
+            Number of rows stored
+        """
+        df = df.copy()
+        df = df.dropna(subset=["gsis_id"])
+        if df.empty:
+            return 0
+
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(player_rosters)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("roster_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        column_sql = ", ".join(available_cols)
+        placeholders = ", ".join("?" for _ in available_cols)
+        update_sql = ", ".join(f"{col}=excluded.{col}" for col in available_cols if col not in ("gsis_id", "season"))
+        cursor.executemany(
+            f"""INSERT INTO player_rosters ({column_sql})
+                VALUES ({placeholders})
+                ON CONFLICT(gsis_id, season) DO UPDATE SET {update_sql}""",
+            _sqlite_records(df[available_cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_player_rosters(
+        self,
+        season: Optional[int] = None,
+        player_name: Optional[str] = None,
+        position: Optional[str] = None,
+        team: Optional[str] = None,
+        gsis_id: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Retrieve player roster data.
+
+        Args:
+            season: Optional season filter
+            player_name: Optional player name filter
+            position: Optional position filter
+            team: Optional team filter
+            gsis_id: Optional GSIS ID filter
+
+        Returns:
+            DataFrame with roster data
+        """
+        conditions: list[str] = []
+        params: list = []
+        if season is not None:
+            conditions.append("season = ?")
+            params.append(season)
+        if player_name is not None:
+            conditions.append("player_name = ?")
+            params.append(player_name)
+        if position is not None:
+            conditions.append("position = ?")
+            params.append(position)
+        if team is not None:
+            conditions.append("team = ?")
+            params.append(team)
+        if gsis_id is not None:
+            conditions.append("gsis_id = ?")
+            params.append(gsis_id)
+
+        where_sql = " AND ".join(conditions) if conditions else "1"
+        query = f"SELECT * FROM player_rosters WHERE {where_sql} ORDER BY player_name"
+        return pd.read_sql(query, self.conn, params=params)
+
+    def get_rookie_draft_capital(self, player_name: str, season: int) -> Optional[Dict[str, int]]:
+        """
+        Get a player's draft capital (round, pick) from their rookie season.
+
+        Uses the earliest season available in player_rosters for the player.
+
+        Args:
+            player_name: Player name
+            season: Current season (used to find earliest roster entry)
+
+        Returns:
+            Dict with draft_round and draft_pick, or None if unknown
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """SELECT draft_round, draft_pick
+               FROM player_rosters
+               WHERE player_name = ?
+                 AND draft_round IS NOT NULL
+               ORDER BY season ASC
+               LIMIT 1""",
+            (player_name,),
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return {"draft_round": int(row[0]), "draft_pick": int(row[1]) if row[1] is not None else 999}
+        return None
+
+    def is_rookie(self, player_name: str, season: int) -> bool:
+        """
+        Check if a player is a rookie (years_exp == 0 or 1 in their first season).
+
+        Args:
+            player_name: Player name
+            season: Current season
+
+        Returns:
+            True if the player is in their rookie season
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """SELECT years_exp
+               FROM player_rosters
+               WHERE player_name = ? AND season = ?
+               LIMIT 1""",
+            (player_name, season),
+        )
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return int(row[0]) <= 1
+        # Fall back to checking if the player's earliest roster entry is this season
+        cursor.execute(
+            """SELECT MIN(season) FROM player_rosters WHERE player_name = ?""",
+            (player_name,),
+        )
+        min_season = cursor.fetchone()
+        return min_season is not None and min_season[0] is not None and min_season[0] == season
+
+    # ==================== VEGAS IMPLIED TEAM TOTALS ====================
+
+    def get_implied_team_totals(
+        self,
+        season: int,
+        week: Optional[int] = None,
+        team: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Compute implied team scores from Vegas spread and total lines.
+
+        Implied home score = (total_line - spread_line) / 2
+        Implied away score = (total_line + spread_line) / 2
+
+        Args:
+            season: Season year
+            week: Optional week filter
+            team: Optional team filter (home or away)
+
+        Returns:
+            DataFrame with game_id, season, week, home_team, away_team,
+            spread_line, total_line, implied_home_score, implied_away_score
+        """
+        conditions: list[str] = ["g.season = ?"]
+        params: list = [season]
+
+        if week is not None:
+            conditions.append("g.week = ?")
+            params.append(week)
+        if team is not None:
+            conditions.append("(g.home_team = ? OR g.away_team = ?)")
+            params.extend([team, team])
+
+        where_sql = " AND ".join(conditions)
+        query = f"""
+            SELECT
+                g.game_id,
+                g.season,
+                g.week,
+                g.game_date,
+                g.home_team,
+                g.away_team,
+                g.spread_line,
+                g.total_line,
+                CASE
+                    WHEN g.spread_line IS NOT NULL AND g.total_line IS NOT NULL
+                    THEN ROUND((g.total_line - g.spread_line) / 2.0, 1)
+                    ELSE NULL
+                END AS implied_home_score,
+                CASE
+                    WHEN g.spread_line IS NOT NULL AND g.total_line IS NOT NULL
+                    THEN ROUND((g.total_line + g.spread_line) / 2.0, 1)
+                    ELSE NULL
+                END AS implied_away_score
+            FROM games g
+            WHERE {where_sql}
+            ORDER BY g.week, g.game_date
+        """
+        return pd.read_sql(query, self.conn, params=params)
+
+    # ==================== OFFENSIVE LINE STATS (Phase 3) ====================
+
+    def compute_offensive_line_stats(self, season: int, weeks: int = 4) -> pd.DataFrame:
+        """Compute rolling offensive line stats from plays table.
+
+        For each team-week, calculates pressure rate, sack rate, and
+        adjusted line yards from the plays table, then returns a 4-week
+        rolling average.
+
+        Args:
+            season: Season year
+            weeks: Rolling window size (default 4)
+
+        Returns:
+            DataFrame with offensive_line_stats columns
+        """
+        # Check plays table exists (it's only created by migration 002)
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='plays'")
+        if not cursor.fetchone():
+            return pd.DataFrame()
+
+        query = """
+            SELECT
+                posteam AS team,
+                week,
+                COUNT(*) AS dropbacks,
+                SUM(CASE WHEN sack = 1 THEN 1 ELSE 0 END) AS sacks
+            FROM plays
+            WHERE season = ?
+              AND qb_dropback = 1
+              AND week <= (SELECT MAX(week) FROM plays WHERE season = ?)
+            GROUP BY posteam, week
+        """
+        pass_df = pd.read_sql(query, self.conn, params=[season, season])
+
+        rush_query = """
+            SELECT
+                posteam AS team,
+                week,
+                COUNT(*) AS rush_attempts,
+                SUM(yards_gained) AS rush_yards,
+                SUM(CASE WHEN yardline_100 IS NOT NULL AND yards_gained IS NOT NULL
+                         THEN yards_gained
+                         ELSE 0 END) AS raw_yards,
+                SUM(CASE WHEN yards_gained <= 0 THEN yards_gained * 1.2
+                         WHEN yards_gained <= 4 THEN yards_gained * 1.0
+                         WHEN yards_gained <= 10 THEN yards_gained * 0.5
+                         ELSE 0.0 END) AS adjusted_yards
+            FROM plays
+            WHERE season = ?
+              AND play_type = 'run'
+              AND week <= (SELECT MAX(week) FROM plays WHERE season = ?)
+            GROUP BY posteam, week
+        """
+        rush_df = pd.read_sql(rush_query, self.conn, params=[season, season])
+
+        if pass_df.empty and rush_df.empty:
+            return pd.DataFrame()
+
+        merged = pd.merge(pass_df, rush_df, on=["team", "week"], how="outer").fillna(0)
+
+        merged["sack_rate"] = merged["sacks"] / merged["dropbacks"].replace(0, float("nan"))
+        merged["adjusted_line_yards"] = merged["adjusted_yards"] / merged["rush_attempts"].replace(0, float("nan"))
+        merged["pressure_rate"] = merged["sack_rate"] * 1.5  # approximate: pressure rate ≈ 1.5× sack rate
+        merged["yards_before_contact_per_rush"] = 0.0  # not available in basic PBP
+        merged["yards_after_contact_per_rush"] = 0.0
+        merged["season"] = season
+
+        result = merged[["team", "season", "week", "pressure_rate", "sack_rate",
+                         "adjusted_line_yards", "yards_before_contact_per_rush",
+                         "yards_after_contact_per_rush", "rush_attempts", "dropbacks"]].copy()
+
+        # Compute rolling averages
+        result = result.sort_values(["team", "week"])
+        rolling_cols = ["pressure_rate", "sack_rate", "adjusted_line_yards"]
+        for col in rolling_cols:
+            result[f"{col}_rolling"] = result.groupby("team")[col].transform(
+                lambda x: x.rolling(window=weeks, min_periods=1).mean()
+            )
+
+        return result
+
+    def store_offensive_line_stats(self, df: pd.DataFrame, season: int) -> int:
+        """Store offensive line stats.
+
+        Args:
+            df: DataFrame with columns matching offensive_line_stats schema
+            season: Season year
+
+        Returns:
+            Number of rows stored
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(offensive_line_stats)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("ol_stat_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        column_sql = ", ".join(available_cols)
+        placeholders = ", ".join("?" for _ in available_cols)
+        update_sql = ", ".join(f"{col}=excluded.{col}" for col in available_cols if col not in ("team", "season", "week"))
+        cursor.executemany(
+            f"""INSERT INTO offensive_line_stats ({column_sql})
+                VALUES ({placeholders})
+                ON CONFLICT(team, season, week) DO UPDATE SET {update_sql}""",
+            _sqlite_records(df[available_cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_offensive_line_stats(
+        self,
+        team: Optional[str] = None,
+        season: Optional[int] = None,
+        week: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Retrieve offensive line stats.
+
+        Args:
+            team: Optional team filter
+            season: Optional season filter
+            week: Optional week filter
+
+        Returns:
+            DataFrame with offensive line stats
+        """
+        conditions: list[str] = []
+        params: list = []
+        if team is not None:
+            conditions.append("team = ?")
+            params.append(team)
+        if season is not None:
+            conditions.append("season = ?")
+            params.append(season)
+        if week is not None:
+            conditions.append("week = ?")
+            params.append(week)
+
+        where_sql = " AND ".join(conditions) if conditions else "1"
+        query = f"SELECT * FROM offensive_line_stats WHERE {where_sql} ORDER BY team, week"
+        return pd.read_sql(query, self.conn, params=params)
+
     # ==================== DEFENSIVE MATCHUP STATS ====================
 
     def get_defensive_matchup_stats(
@@ -1741,6 +2095,7 @@ class FFPyDatabase:
             "dfs_salaries",
             "adp",
             "depth_charts",
+            "player_rosters",
         ]
         for table in tables:
             try:
@@ -1750,3 +2105,179 @@ class FFPyDatabase:
                 results[f"table_{table}_rows"] = -1
 
         return results
+
+    # ==================== USER CREDENTIALS (League Import) ====================
+
+    def store_user_credentials(
+        self, user_id: str, provider: str, ciphertext: str, label: str = ""
+    ) -> None:
+        """Store or update encrypted credentials for a user/provider."""
+        self.conn.execute(
+            """
+            INSERT INTO user_credentials (user_id, provider, encrypted, label)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, provider) DO UPDATE SET
+                encrypted = excluded.encrypted,
+                label = excluded.label,
+                updated_at = CURRENT_TIMESTAMP
+        """,
+            (user_id, provider, ciphertext, label),
+        )
+        self.conn.commit()
+
+    def get_user_credentials(self, user_id: str) -> list[dict]:
+        """List stored credentials metadata (without ciphertext) for a user."""
+        cursor = self.conn.execute(
+            "SELECT cred_id, provider, label, created_at, updated_at "
+            "FROM user_credentials WHERE user_id = ?",
+            (user_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_credential_ciphertext(self, user_id: str, provider: str) -> str | None:
+        """Retrieve the encrypted credential blob for a user/provider."""
+        cursor = self.conn.execute(
+            "SELECT encrypted FROM user_credentials WHERE user_id = ? AND provider = ?",
+            (user_id, provider),
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def delete_user_credentials(self, user_id: str, provider: str) -> None:
+        """Delete stored credentials for a user/provider."""
+        self.conn.execute(
+            "DELETE FROM user_credentials WHERE user_id = ? AND provider = ?",
+            (user_id, provider),
+        )
+        self.conn.commit()
+
+    # ==================== USER LEAGUES (League Import) ====================
+
+    def store_user_league(self, user_id: str, data: dict) -> str:
+        """Store league metadata, teams, and matchups from an import."""
+        league = data["league"]
+        self.conn.execute(
+            """
+            INSERT INTO user_leagues
+                (league_id, user_id, provider, league_name, season,
+                 scoring_type, roster_size, num_teams, playoff_teams, league_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(league_id) DO UPDATE SET
+                league_name = excluded.league_name,
+                league_json = excluded.league_json,
+                refreshed_at = CURRENT_TIMESTAMP
+        """,
+            (
+                league["league_id"],
+                user_id,
+                league["provider"],
+                league["name"],
+                league["season"],
+                league.get("scoring_type"),
+                league.get("roster_size"),
+                league.get("num_teams"),
+                league.get("playoff_teams"),
+                json.dumps(league),
+            ),
+        )
+        for team in data.get("teams", []):
+            self.conn.execute(
+                """
+                INSERT INTO league_teams
+                    (team_id, league_id, team_name, owner_name,
+                     wins, losses, ties, points_for, points_against,
+                     rank, roster_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(team_id) DO UPDATE SET
+                    roster_json = excluded.roster_json,
+                    points_for = excluded.points_for
+            """,
+                (
+                    team["team_id"],
+                    league["league_id"],
+                    team["name"],
+                    team.get("owner"),
+                    team.get("wins", 0),
+                    team.get("losses", 0),
+                    team.get("ties", 0),
+                    team.get("points_for", 0),
+                    team.get("points_against", 0),
+                    team.get("rank"),
+                    json.dumps(team.get("roster", [])),
+                ),
+            )
+        for m in data.get("matchups", []):
+            self.conn.execute(
+                """
+                INSERT INTO league_matchups
+                    (league_id, week, home_team_id, away_team_id,
+                     home_score, away_score, is_playoff, is_consolation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(league_id, week, home_team_id, away_team_id)
+                DO UPDATE SET home_score=excluded.home_score,
+                              away_score=excluded.away_score
+            """,
+                (
+                    league["league_id"],
+                    m["week"],
+                    m["home_team_id"],
+                    m["away_team_id"],
+                    m.get("home_score"),
+                    m.get("away_score"),
+                    m.get("is_playoff", 0),
+                    m.get("is_consolation", 0),
+                ),
+            )
+        self.conn.commit()
+        return league["league_id"]
+
+    def get_user_leagues(self, user_id: str) -> list[dict]:
+        """List all imported leagues for a user."""
+        cursor = self.conn.execute(
+            "SELECT * FROM user_leagues WHERE user_id = ? ORDER BY imported_at DESC",
+            (user_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_user_league(self, league_id: str, user_id: str) -> dict | None:
+        """Get a single league by ID, verifying user ownership."""
+        cursor = self.conn.execute(
+            "SELECT * FROM user_leagues WHERE league_id = ? AND user_id = ?",
+            (league_id, user_id),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_league_teams(self, league_id: str, user_id: str) -> list[dict]:
+        """Get teams for a league, verifying user ownership."""
+        cursor = self.conn.execute(
+            """
+            SELECT t.* FROM league_teams t
+            JOIN user_leagues l ON t.league_id = l.league_id
+            WHERE t.league_id = ? AND l.user_id = ?
+            ORDER BY t.rank, t.points_for DESC
+        """,
+            (league_id, user_id),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_league_matchups(self, league_id: str, week: int, user_id: str) -> list[dict]:
+        """Get matchups for a league/week, verifying user ownership."""
+        cursor = self.conn.execute(
+            """
+            SELECT m.* FROM league_matchups m
+            JOIN user_leagues l ON m.league_id = l.league_id
+            WHERE m.league_id = ? AND m.week = ? AND l.user_id = ?
+            ORDER BY m.matchup_id
+        """,
+            (league_id, week, user_id),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def delete_user_league(self, league_id: str, user_id: str) -> None:
+        """Delete a league and its teams/matchups (CASCADE)."""
+        self.conn.execute(
+            "DELETE FROM user_leagues WHERE league_id = ? AND user_id = ?",
+            (league_id, user_id),
+        )
+        self.conn.commit()

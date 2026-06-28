@@ -104,7 +104,7 @@ createApp({
         position: this.form.position,
         top_n: String(this.form.top_n),
       });
-      return `/api/projections?${params.toString()}`;
+      return `api/projections?${params.toString()}`;
     },
     async loadProjections() {
       this.loading = true;

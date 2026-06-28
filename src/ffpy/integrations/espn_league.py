@@ -183,6 +183,50 @@ class ESPNLeagueIntegration:
 
         return pd.DataFrame(players)
 
+    def get_all_rosters(self, week: Optional[int] = None) -> Dict[int, pd.DataFrame]:
+        """
+        Get rosters for all teams in a single API call.
+
+        This is more efficient than calling get_team_roster() for each team,
+        because the ESPN 'mRoster' view returns the entire league in one request.
+
+        Args:
+            week: Specific week (optional)
+
+        Returns:
+            Dict mapping team_id to roster DataFrame
+        """
+        params = {"view": "mRoster"}
+        if week:
+            params["scoringPeriodId"] = week
+
+        data = self._make_request(params)
+        rosters: Dict[int, pd.DataFrame] = {}
+
+        for team_data in data.get("teams", []):
+            team_id = team_data.get("id")
+            if team_id is None:
+                continue
+
+            roster_entries = team_data.get("roster", {}).get("entries", [])
+            players = []
+            for entry in roster_entries:
+                player_data = entry.get("playerPoolEntry", {}).get("player", {})
+                players.append(
+                    {
+                        "player_id": player_data.get("id"),
+                        "player": player_data.get("fullName", "Unknown"),
+                        "position": self._get_position(player_data.get("defaultPositionId", 0)),
+                        "team": self._get_team_abbr(player_data.get("proTeamId", 0)),
+                        "lineup_slot": self.LINEUP_SLOTS.get(entry.get("lineupSlotId", 20), "BENCH"),
+                        "acquisition_type": entry.get("acquisitionType", ""),
+                        "injury_status": player_data.get("injuryStatus", "ACTIVE"),
+                    }
+                )
+            rosters[team_id] = pd.DataFrame(players)
+
+        return rosters
+
     def get_league_rosters(self, week: Optional[int] = None) -> Dict[int, pd.DataFrame]:
         """
         Get rosters for all teams in the league.
@@ -193,14 +237,7 @@ class ESPNLeagueIntegration:
         Returns:
             Dict mapping team_id to roster DataFrame
         """
-        rosters = {}
-        teams = self.get_all_teams()
-
-        for team in teams:
-            team_id = team["id"]
-            rosters[team_id] = self.get_team_roster(team_id, week)
-
-        return rosters
+        return self.get_all_rosters(week)
 
     def get_standings(self) -> pd.DataFrame:
         """
