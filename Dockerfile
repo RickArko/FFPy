@@ -33,6 +33,10 @@ COPY src ./src
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 RUN chmod +x ./docker/entrypoint.sh
 
+# Install the project itself so console scripts (ffpy-web, etc.) are created
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
 FROM base AS runtime
 
 ENV HOST=0.0.0.0 \
