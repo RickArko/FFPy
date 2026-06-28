@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pandas as pd
 import uvicorn
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -98,6 +99,10 @@ def _import_from_espn(league_id: str, season: int, creds: dict) -> dict:
     )
     info = integration.get_league_info()
     teams = integration.get_all_teams()
+
+    # Fetch all rosters in a single ESPN API call (mRoster view returns entire league)
+    all_rosters = integration.get_all_rosters()
+
     matchups: List[dict] = []
     for week in range(1, 18):
         try:
@@ -115,13 +120,16 @@ def _import_from_espn(league_id: str, season: int, creds: dict) -> dict:
                     }
                 )
         except Exception:
+            # ESPN returns empty schedule for future weeks; stop when we hit the first failure
             break
+
     team_list = []
     for t in teams:
-        roster = integration.get_team_roster(t["id"])
+        team_id = t["id"]
+        roster = all_rosters.get(team_id, pd.DataFrame())
         team_list.append(
             {
-                "team_id": f"espn:{league_id}:{t['id']}",
+                "team_id": f"espn:{league_id}:{team_id}",
                 "name": t["name"],
                 "owner": t.get("owner", "Unknown"),
                 "wins": t.get("wins", 0),
@@ -350,13 +358,13 @@ def create_league_app(
     # -----------------------------------------------------------------------
     @app.get("/api/auth/me")
     def auth_me(
-        credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+        user: AuthenticatedUser = Depends(get_current_user),
     ) -> Dict[str, Any]:
-        user = _get_current_user(credentials)
+        is_real = auth_enabled and user.user_id != "anon"
         return {
-            "authenticated": user is not None,
+            "authenticated": is_real,
             "auth_required": auth_enabled,
-            "user": user.to_dict() if user else None,
+            "user": user.to_dict() if is_real else None,
         }
 
     @app.get("/api/auth/config")

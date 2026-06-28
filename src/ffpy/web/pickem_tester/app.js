@@ -250,7 +250,7 @@ createApp({
       this.status = null;
     },
     async fetchPublicAuthConfig() {
-      const response = await fetch("/api/auth/config");
+      const response = await fetch("api/auth/config");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload.detail || "Could not load auth config");
@@ -537,8 +537,9 @@ createApp({
     <div class="shell">
       <header class="hero">
         <nav class="top-nav" aria-label="FFPy tools">
-          <a class="nav-link is-active" href="/">Pick'em Tester</a>
-          <a class="nav-link" href="/projections">Projections</a>
+          <a class="nav-link is-active" href="./">Pick'em Tester</a>
+          <a class="nav-link" href="projections">Projections</a>
+          <a class="nav-link" href="/league/">League Manager</a>
         </nav>
         <h1>Pick'em Strategy Tester</h1>
         <p>

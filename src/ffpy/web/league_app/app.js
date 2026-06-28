@@ -8,11 +8,12 @@ createApp({
         <nav>
           <a href="#" class="nav-link" :class="{ active: page === 'dashboard' }" @click.prevent="page='dashboard'; loadLeagues()">Dashboard</a>
           <a href="#" class="nav-link" :class="{ active: page === 'import' }" @click.prevent="page='import'; importStep=1">Import</a>
+          <a href="/pickem/" class="nav-link" target="_blank">Pick'em</a>
           <template v-if="isAuthenticated">
             <span class="small">{{ authUser?.email || 'User' }}</span>
             <button class="btn-ghost" @click="signOut">Sign Out</button>
           </template>
-          <template v-else>
+          <template v-else-if="browserAuthAvailable">
             <button class="btn-ghost" @click="page='login'">Sign In</button>
           </template>
         </nav>
@@ -22,21 +23,33 @@ createApp({
       <div v-if="status" class="message success">{{ status }}</div>
 
       <!-- LOGIN -->
-      <div v-if="page === 'login'" class="card auth-card">
-        <div class="auth-toggle">
-          <button :class="{ active: authForm.mode === 'signin' }" @click="authForm.mode='signin'">Sign In</button>
-          <button :class="{ active: authForm.mode === 'signup' }" @click="authForm.mode='signup'">Create Account</button>
+      <div v-if="page === 'login'">
+        <div v-if="browserAuthAvailable" class="card auth-card">
+          <div class="auth-toggle">
+            <button :class="{ active: authForm.mode === 'signin' }" @click="authForm.mode='signin'">Sign In</button>
+            <button :class="{ active: authForm.mode === 'signup' }" @click="authForm.mode='signup'">Create Account</button>
+          </div>
+          <label>Email</label>
+          <input type="email" v-model="authForm.email" placeholder="you@example.com" />
+          <label>Password</label>
+          <input type="password" v-model="authForm.password" placeholder="••••••••" />
+          <button style="margin-top:10px;width:100%" :disabled="authSubmitting" @click="authForm.mode==='signup' ? signUp() : signIn()">
+            {{ authSubmitting ? 'Working…' : (authForm.mode==='signup' ? 'Create Account' : 'Sign In') }}
+          </button>
+          <p v-if="pendingVerificationEmail" class="small" style="margin-top:8px">
+            Verification email sent to {{ pendingVerificationEmail }}. Confirm, then sign in.
+          </p>
         </div>
-        <label>Email</label>
-        <input type="email" v-model="authForm.email" placeholder="you@example.com" />
-        <label>Password</label>
-        <input type="password" v-model="authForm.password" placeholder="••••••••" />
-        <button style="margin-top:10px;width:100%" :disabled="authSubmitting" @click="authForm.mode==='signup' ? signUp() : signIn()">
-          {{ authSubmitting ? 'Working…' : (authForm.mode==='signup' ? 'Create Account' : 'Sign In') }}
-        </button>
-        <p v-if="pendingVerificationEmail" class="small" style="margin-top:8px">
-          Verification email sent to {{ pendingVerificationEmail }}. Confirm, then sign in.
-        </p>
+        <div v-else-if="authRequired" class="card auth-card">
+          <h2>Authentication Required</h2>
+          <p>Browser-based auth is not configured. If you have a dev token, paste it below.</p>
+          <input v-model="devToken" placeholder="Paste dev token..." />
+          <button style="margin-top:10px;width:100%" :disabled="!devToken.trim()" @click="useDevToken">Authenticate</button>
+        </div>
+        <div v-else class="card">
+          <p>Authentication is not required for this instance.</p>
+          <button @click="page='dashboard'">Go to Dashboard</button>
+        </div>
       </div>
 
       <!-- DASHBOARD -->
@@ -256,6 +269,7 @@ createApp({
       authSession: null,
       authUser: null,
       pendingVerificationEmail: null,
+      devToken: "",
       supabaseClient: null,
       error: null,
       status: null,
@@ -316,7 +330,7 @@ createApp({
       return payload;
     },
     async fetchPublicAuthConfig() {
-      const res = await fetch("/api/auth/config");
+      const res = await fetch("api/auth/config");
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(payload.detail || "Could not load auth config");
       return payload;
@@ -349,7 +363,7 @@ createApp({
     async refreshCurrentUser() {
       if (!this.authSession) { this.authUser = null; return; }
       const token = this.currentAccessToken();
-      const res = await fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("api/auth/me", { headers: { Authorization: `Bearer ${token}` } });
       const payload = await res.json().catch(() => ({}));
       this.authUser = payload.user || null;
     },
@@ -411,6 +425,20 @@ createApp({
       this.leagues = [];
       this.page = "dashboard";
     },
+    async useDevToken() {
+      this.clearMessages();
+      if (!this.devToken.trim()) { this.error = "Enter a dev token"; return; }
+      this.authSession = { access_token: this.devToken.trim() };
+      this.authUser = null;
+      await this.refreshCurrentUser();
+      if (this.authUser) {
+        this.page = "dashboard";
+        await this.loadLeagues();
+      } else {
+        this.error = "Dev token rejected by server.";
+        this.authSession = null;
+      }
+    },
     clearMessages() {
       this.error = null;
       this.status = null;
@@ -418,7 +446,7 @@ createApp({
     async loadLeagues() {
       this.loading = true;
       try {
-        this.leagues = await this.fetchJson("/api/leagues");
+        this.leagues = await this.fetchJson("api/leagues");
       } catch (e) {
         this.error = e.message || "Failed to load leagues";
       } finally {
@@ -437,7 +465,7 @@ createApp({
     async loadLeagueTeams() {
       if (!this.selectedLeague) return;
       try {
-        this.leagueTeams = await this.fetchJson(`/api/leagues/${this.selectedLeague.league_id}/teams`);
+        this.leagueTeams = await this.fetchJson(`api/leagues/${this.selectedLeague.league_id}/teams`);
       } catch (e) {
         this.error = e.message || "Failed to load teams";
       }
@@ -445,7 +473,7 @@ createApp({
     async loadLeagueMatchups(week) {
       if (!this.selectedLeague) return;
       try {
-        this.leagueMatchups = await this.fetchJson(`/api/leagues/${this.selectedLeague.league_id}/matchups/${week}`);
+        this.leagueMatchups = await this.fetchJson(`api/leagues/${this.selectedLeague.league_id}/matchups/${week}`);
       } catch (e) {
         this.error = e.message || "Failed to load matchups";
       }
@@ -453,7 +481,7 @@ createApp({
     async deleteLeague(leagueId) {
       if (!confirm("Delete this league?")) return;
       try {
-        await this.fetchJson(`/api/leagues/${leagueId}`, { method: "DELETE" });
+        await this.fetchJson(`api/leagues/${leagueId}`, { method: "DELETE" });
         this.leagues = this.leagues.filter((l) => l.league_id !== leagueId);
         if (this.selectedLeague && this.selectedLeague.league_id === leagueId) {
           this.page = "dashboard";
@@ -479,7 +507,7 @@ createApp({
     async saveCredentials() {
       this.clearMessages();
       try {
-        await this.fetchJson("/api/leagues/credentials", {
+        await this.fetchJson("api/leagues/credentials", {
           method: "POST",
           body: JSON.stringify({
             provider: this.importProvider,
@@ -497,7 +525,7 @@ createApp({
       this.clearMessages();
       this.importLoading = true;
       try {
-        const result = await this.fetchJson("/api/leagues/import", {
+        const result = await this.fetchJson("api/leagues/import", {
           method: "POST",
           body: JSON.stringify({
             provider: this.importProvider,
@@ -522,7 +550,7 @@ createApp({
       this.clearMessages();
       this.optimizeLoading = true;
       try {
-        const result = await this.fetchJson(`/api/leagues/${this.selectedLeague.league_id}/optimize`, {
+        const result = await this.fetchJson(`api/leagues/${this.selectedLeague.league_id}/optimize`, {
           method: "POST",
           body: JSON.stringify(this.optimizePayload),
         });

@@ -34,6 +34,7 @@ ffpy = "ffpy.app:main"
 ffpy-db = "ffpy.cli:main"
 ffpy-pickem-web = "ffpy.pickem_web:main"
 ffpy-league-api = "ffpy.league_api:main"
+ffpy-web = "ffpy.unified_web:main"
 
 [build-system]
 requires = ["uv_build>=0.9.18,<0.10.0"]

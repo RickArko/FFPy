@@ -62,4 +62,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl --fail --silent --show-error http://127.0.0.1:8000/api/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["python", "-m", "ffpy.pickem_web"]
+CMD ["ffpy-web"]
