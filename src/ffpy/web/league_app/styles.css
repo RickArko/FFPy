@@ -347,6 +347,146 @@ tr:hover td {
   color: var(--accent);
 }
 
+/* Draft Help */
+.draft-help-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.draft-help-results {
+  margin-top: 18px;
+}
+
+.draft-help-results h4 {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.draft-pick-card {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.draft-pick-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.pick-label {
+  font-weight: 600;
+  color: var(--accent-2);
+  min-width: 72px;
+}
+
+.pick-player {
+  flex: 1;
+  font-weight: 500;
+}
+
+.pick-adp {
+  font-size: 12px;
+}
+
+.reason-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reason-list.compact {
+  padding-left: 14px;
+  font-size: 12px;
+}
+
+.reason-list li {
+  margin-bottom: 2px;
+}
+
+.draft-board-table {
+  width: 100%;
+  font-size: 13px;
+}
+
+.draft-board-table th,
+.draft-board-table td {
+  vertical-align: top;
+  padding: 8px 6px;
+}
+
+.draft-board-table tr.stack-row {
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.tier-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.draft-notes {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--surface-2);
+}
+
+.roster-block {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--surface-2);
+}
+
+.roster-block:last-child {
+  border-bottom: none;
+}
+
+.roster-table {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.roster-table th,
+.roster-table td {
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.my-roster-preview {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--surface-1);
+  border-radius: 8px;
+}
+
+.roster-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.roster-chip {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+.muted { color: var(--muted); }
+
 /* Misc */
 .small { font-size: 12px; color: var(--muted); }
 

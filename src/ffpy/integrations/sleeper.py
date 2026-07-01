@@ -43,6 +43,11 @@ class SleeperIntegration:
         return SleeperIntegration._get(f"/league/{league_id}/rosters")
 
     @staticmethod
+    def get_league_users(league_id: str) -> List[dict]:
+        """GET /v1/league/{league_id}/users — display names and team metadata."""
+        return SleeperIntegration._get(f"/league/{league_id}/users")
+
+    @staticmethod
     def get_matchups(league_id: str, week: int) -> List[dict]:
         """GET /v1/league/{league_id}/matchups/{week}"""
         return SleeperIntegration._get(f"/league/{league_id}/matchups/{week}")
@@ -56,3 +61,35 @@ class SleeperIntegration:
     def get_players() -> dict:
         """GET /v1/players/nfl — full player database (slow, cache it)."""
         return SleeperIntegration._get("/players/nfl")
+
+    @staticmethod
+    def player_display_name(player: dict, fallback_id: str = "") -> str:
+        """Best-effort display name from a Sleeper player record."""
+        if not player:
+            return fallback_id or "Unknown"
+        name = (player.get("full_name") or "").strip()
+        if not name:
+            first = (player.get("first_name") or "").strip()
+            last = (player.get("last_name") or "").strip()
+            name = f"{first} {last}".strip()
+        if not name and player.get("position") == "DEF":
+            team = player.get("team") or fallback_id
+            return f"{team} DST" if team else "DST"
+        return name or fallback_id or "Unknown"
+
+    @staticmethod
+    def enrich_roster(player_ids: List[Any], players_map: dict) -> List[dict]:
+        """Turn Sleeper player IDs into roster dicts with names for storage/UI."""
+        enriched: List[dict] = []
+        for raw_id in player_ids or []:
+            pid = str(raw_id)
+            sp = players_map.get(pid, {})
+            enriched.append(
+                {
+                    "player_id": pid,
+                    "player": SleeperIntegration.player_display_name(sp, pid),
+                    "position": sp.get("position") or "",
+                    "team": sp.get("team") or "",
+                }
+            )
+        return enriched

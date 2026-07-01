@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import uvicorn
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -48,12 +48,19 @@ class LeagueImportRequest(BaseModel):
     provider: str = Field(..., pattern=r"^(espn|yahoo|sleeper)$")
     league_id: str
     season: int = Field(..., ge=2000, le=2100)
+    sleeper_username: Optional[str] = None  # local/no-auth: key imports to this user
 
 
 class OptimizeRequest(BaseModel):
     team_id: str
     week: int = Field(..., ge=1, le=25)
 
+
+class DraftHelpRequest(BaseModel):
+    team_id: str
+    num_players: int = Field(100, ge=1, le=200)
+    pick_slots: Optional[List[int]] = None
+    num_teams: int = Field(10, ge=4, le=20)
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -234,47 +241,76 @@ def _import_from_yahoo(league_id: str, season: int, creds: dict) -> dict:
 
 
 def _import_from_sleeper(league_id: str, season: int) -> dict:
+    from collections import defaultdict
+
+    from ffpy.draft_strategy import load_sleeper_players
+
     league = SleeperIntegration.get_league(league_id)
     rosters = SleeperIntegration.get_rosters(league_id)
+    users = SleeperIntegration.get_league_users(league_id)
+    user_by_id = {u.get("user_id"): u for u in users}
+    players_map = load_sleeper_players()
+
     teams = []
     for r in rosters:
-        owner_id = r.get("owner_id", "")
+        roster_id = r.get("roster_id")
+        owner_id = r.get("owner_id") or ""
+        user = user_by_id.get(owner_id, {})
+        metadata = user.get("metadata") or {}
+        team_name = (
+            metadata.get("team_name")
+            or user.get("display_name")
+            or (f"Team {roster_id}" if roster_id is not None else "Unknown")
+        )
+        owner_display = user.get("display_name") or owner_id
+
         teams.append(
             {
-                "team_id": f"sleeper:{league_id}:{owner_id}",
-                "name": r.get("settings", {}).get("team_name", "Unknown"),
-                "owner": owner_id,
+                "team_id": f"sleeper:{league_id}:{roster_id}",
+                "name": team_name,
+                "owner": owner_display,
                 "wins": r.get("settings", {}).get("wins", 0),
                 "losses": r.get("settings", {}).get("losses", 0),
                 "ties": r.get("settings", {}).get("ties", 0),
                 "points_for": r.get("settings", {}).get("fpts", 0),
                 "points_against": r.get("settings", {}).get("fpts_against", 0),
                 "rank": None,
-                "roster": r.get("players", []),
+                "roster": SleeperIntegration.enrich_roster(r.get("players", []), players_map),
             }
         )
+
+    teams.sort(key=lambda t: (-(t.get("wins") or 0), -(t.get("points_for") or 0)))
+
     matchups: List[dict] = []
     for week in range(1, 18):
         try:
             week_matchups = SleeperIntegration.get_matchups(league_id, week)
-            for m in week_matchups:
-                roster_id = m.get("roster_id")
-                matchup_id = m.get("matchup_id")
-                # Sleeper matchups are roster-centric; pair by matchup_id
-                if matchup_id and roster_id:
-                    matchups.append(
-                        {
-                            "week": week,
-                            "home_team_id": f"sleeper:{league_id}:{roster_id}",
-                            "away_team_id": f"sleeper:{league_id}:{matchup_id}",
-                            "home_score": m.get("points"),
-                            "away_score": None,
-                            "is_playoff": 0,
-                            "is_consolation": 0,
-                        }
-                    )
         except Exception:
             break
+        if not week_matchups:
+            break
+        by_matchup: dict = defaultdict(list)
+        for m in week_matchups:
+            matchup_id = m.get("matchup_id")
+            roster_id = m.get("roster_id")
+            if matchup_id is None or roster_id is None:
+                continue
+            by_matchup[matchup_id].append(m)
+        for group in by_matchup.values():
+            if len(group) < 2:
+                continue
+            home, away = group[0], group[1]
+            matchups.append(
+                {
+                    "week": week,
+                    "home_team_id": f"sleeper:{league_id}:{home.get('roster_id')}",
+                    "away_team_id": f"sleeper:{league_id}:{away.get('roster_id')}",
+                    "home_score": home.get("points"),
+                    "away_score": away.get("points"),
+                    "is_playoff": 0,
+                    "is_consolation": 0,
+                }
+            )
     return {
         "league": {
             "league_id": f"sleeper:{league_id}",
@@ -339,6 +375,25 @@ def create_league_app(
         except TokenVerificationError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
 
+    def _get_league_or_404(db: FFPyDatabase, league_id: str, user: AuthenticatedUser) -> dict:
+        if not auth_enabled:
+            league = db.get_league_by_id(league_id)
+        else:
+            league = db.get_user_league(league_id, user.user_id)
+        if not league:
+            raise HTTPException(status_code=404, detail="League not found")
+        return league
+
+    def _get_teams(db: FFPyDatabase, league_id: str, user: AuthenticatedUser) -> List[dict]:
+        if not auth_enabled:
+            return db.get_teams_for_league(league_id)
+        return db.get_league_teams(league_id, user.user_id)
+
+    def _get_matchups(db: FFPyDatabase, league_id: str, week: int, user: AuthenticatedUser) -> List[dict]:
+        if not auth_enabled:
+            return db.get_matchups_for_league(league_id, week)
+        return db.get_league_matchups(league_id, week, user.user_id)
+
     # -----------------------------------------------------------------------
     # Static SPA
     # -----------------------------------------------------------------------
@@ -391,6 +446,9 @@ def create_league_app(
         user: AuthenticatedUser = Depends(get_current_user),
         db: FFPyDatabase = Depends(get_db),
     ) -> Dict[str, str]:
+        # Sleeper is public — no secrets to encrypt or persist.
+        if payload.provider == "sleeper":
+            return {"status": "ok"}
         if not MASTER_KEY:
             raise HTTPException(status_code=500, detail="Encryption key not configured")
         cipher = encrypt_credentials(payload.credentials, user.user_id, MASTER_KEY)
@@ -418,6 +476,39 @@ def create_league_app(
     # -----------------------------------------------------------------------
     import_router = APIRouter(prefix="/api/leagues", tags=["import"])
 
+    @import_router.get("/sleeper/discover")
+    def discover_sleeper_leagues(
+        username: str,
+        season: int = Query(2026, ge=2000, le=2100),
+        user: AuthenticatedUser = Depends(get_current_user),
+    ) -> List[Dict[str, Any]]:
+        """Look up Sleeper leagues for a username (no credentials required)."""
+        del user  # auth gate only
+        username = username.strip()
+        if not username:
+            raise HTTPException(status_code=400, detail="username is required")
+        try:
+            sleeper_user = SleeperIntegration.get_user(username)
+            user_id = sleeper_user.get("user_id")
+            if not user_id:
+                raise HTTPException(status_code=404, detail=f"Sleeper user '{username}' not found")
+            leagues = SleeperIntegration.get_user_leagues(str(user_id), season)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Sleeper discover failed for %s", username)
+            raise HTTPException(status_code=502, detail=f"Sleeper API error: {exc}") from exc
+        return [
+            {
+                "league_id": lg.get("league_id"),
+                "name": lg.get("name"),
+                "season": lg.get("season"),
+                "status": lg.get("status"),
+                "total_rosters": lg.get("total_rosters"),
+            }
+            for lg in leagues
+        ]
+
     @import_router.post("/import")
     def import_league(
         payload: LeagueImportRequest,
@@ -443,7 +534,15 @@ def create_league_app(
         else:
             raise HTTPException(status_code=400, detail="Unsupported provider")
 
-        league_id = db.store_user_league(user.user_id, data)
+        store_user_id = user.user_id
+        if payload.provider == "sleeper" and payload.sleeper_username:
+            # When auth is off (anon) tie imports to the Sleeper username so
+            # draft-help and league lists work without Supabase sign-in.
+            name = payload.sleeper_username.strip()
+            if name and (not auth_enabled or user.user_id == "anon"):
+                store_user_id = name
+
+        league_id = db.store_user_league(store_user_id, data)
         return {"league_id": league_id, "teams": len(data["teams"]), "status": "imported"}
 
     # -----------------------------------------------------------------------
@@ -456,6 +555,8 @@ def create_league_app(
         user: AuthenticatedUser = Depends(get_current_user),
         db: FFPyDatabase = Depends(get_db),
     ) -> List[dict]:
+        if not auth_enabled:
+            return db.get_all_leagues()
         return db.get_user_leagues(user.user_id)
 
     @league_router.get("/{league_id}")
@@ -464,10 +565,7 @@ def create_league_app(
         user: AuthenticatedUser = Depends(get_current_user),
         db: FFPyDatabase = Depends(get_db),
     ) -> dict:
-        league = db.get_user_league(league_id, user.user_id)
-        if not league:
-            raise HTTPException(status_code=404, detail="League not found")
-        return league
+        return _get_league_or_404(db, league_id, user)
 
     @league_router.get("/{league_id}/teams")
     def get_teams(
@@ -475,7 +573,8 @@ def create_league_app(
         user: AuthenticatedUser = Depends(get_current_user),
         db: FFPyDatabase = Depends(get_db),
     ) -> List[dict]:
-        return db.get_league_teams(league_id, user.user_id)
+        _get_league_or_404(db, league_id, user)
+        return _get_teams(db, league_id, user)
 
     @league_router.get("/{league_id}/matchups/{week}")
     def get_matchups(
@@ -484,7 +583,8 @@ def create_league_app(
         user: AuthenticatedUser = Depends(get_current_user),
         db: FFPyDatabase = Depends(get_db),
     ) -> List[dict]:
-        return db.get_league_matchups(league_id, week, user.user_id)
+        _get_league_or_404(db, league_id, user)
+        return _get_matchups(db, league_id, week, user)
 
     @league_router.delete("/{league_id}")
     def delete_league(
@@ -492,8 +592,47 @@ def create_league_app(
         user: AuthenticatedUser = Depends(get_current_user),
         db: FFPyDatabase = Depends(get_db),
     ) -> Dict[str, str]:
-        db.delete_user_league(league_id, user.user_id)
+        league = _get_league_or_404(db, league_id, user)
+        db.delete_user_league(league_id, league["user_id"])
         return {"status": "deleted"}
+
+    @league_router.post("/{league_id}/draft-help")
+    def draft_help(
+        league_id: str,
+        payload: DraftHelpRequest,
+        user: AuthenticatedUser = Depends(get_current_user),
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        """Return a ranked draft board with reasons for the requesting team."""
+        from ffpy.draft_strategy import DraftStrategyConfig, DraftStrategyEngine, load_sleeper_players
+
+        league = _get_league_or_404(db, league_id, user)
+        teams = _get_teams(db, league_id, user)
+        team = next((t for t in teams if t["team_id"] == payload.team_id), None)
+        if not team:
+            raise HTTPException(status_code=404, detail="Team not found")
+
+        num_teams = payload.num_teams or int(league.get("num_teams") or 10)
+        pick_slots = payload.pick_slots
+        if not pick_slots and num_teams:
+            # Default snake turn for pick #1 in a 3-round draft.
+            pick_slots = [1, 2 * num_teams, 2 * num_teams + 1]
+
+        config = DraftStrategyConfig(num_teams=num_teams, pick_slots=pick_slots)
+        engine = DraftStrategyEngine(db, config)
+        provider = (league.get("provider") or "").lower()
+        sleeper_players = load_sleeper_players() if provider == "sleeper" else None
+
+        try:
+            return engine.generate(
+                league=league,
+                teams=teams,
+                my_team_id=payload.team_id,
+                num_players=payload.num_players,
+                sleeper_players=sleeper_players,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @league_router.post("/{league_id}/optimize")
     def optimize_lineup(
@@ -505,10 +644,8 @@ def create_league_app(
         """Run lineup optimizer for a league team."""
         from ffpy.optimizer import LineupOptimizer, Player, RosterConstraints
 
-        league = db.get_user_league(league_id, user.user_id)
-        if not league:
-            raise HTTPException(status_code=404, detail="League not found")
-        teams = db.get_league_teams(league_id, user.user_id)
+        league = _get_league_or_404(db, league_id, user)
+        teams = _get_teams(db, league_id, user)
         team = next((t for t in teams if t["team_id"] == payload.team_id), None)
         if not team:
             raise HTTPException(status_code=404, detail="Team not found")
