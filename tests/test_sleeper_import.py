@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
-
 from ffpy.integrations.sleeper import SleeperIntegration
 from ffpy.league_api import _import_from_sleeper
 

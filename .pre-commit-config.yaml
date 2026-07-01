@@ -1,6 +1,9 @@
 # Pre-commit hooks — must match CI (`uv run ruff check .`).
-# Install: uv run pre-commit install
-# Manual run: uv run pre-commit run --all-files
+# Install: make precommit-install  (or: uv run pre-commit install)
+# Manual run: make precommit        (or: uv run pre-commit run --all-files)
+#
+# The ruff-pre-commit hooks auto-fix staged files; ruff-check-ci scans the full
+# tree like GitHub Actions so notebook/test lint issues cannot slip through.
 
 default_language_version:
   python: python3.13
@@ -12,3 +15,12 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: ruff-check-ci
+        name: ruff check (CI parity)
+        entry: uv run ruff check .
+        language: system
+        pass_filenames: false
+        always_run: true

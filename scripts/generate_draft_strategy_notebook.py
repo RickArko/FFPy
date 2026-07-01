@@ -527,8 +527,7 @@ display(
     chosen = []
 
     for i, slot in enumerate(picks):
-        # Players likely gone: ADP better (lower) than slot minus small noise
-        gone = remaining[remaining["adp"] < slot - 0.5]
+        # Players with ADP better (lower) than this slot are treated as already drafted.
         pool = remaining[remaining["adp"] >= slot - 0.5]
         if pool.empty:
             pool = remaining
