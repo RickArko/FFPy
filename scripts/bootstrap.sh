@@ -31,11 +31,8 @@ fi
 
 info "uv: $(uv --version)"
 
-info "Syncing Python dependencies (uv sync)"
-uv sync
-
-info "Registering Jupyter kernel 'ffpy'"
-uv run python -m ipykernel install --user --name ffpy --display-name "Python (FFPy)"
+info "Installing dependencies, Jupyter kernel, and git hooks"
+make install
 
 if [ ! -f .env ]; then
     info "Seeding .env from .env.example (edit to add API keys)"
@@ -51,4 +48,5 @@ echo
 info "Bootstrap complete."
 echo "  Start the app:           make run"
 echo "  Generate app data:       make data"
+echo "  Lint before pushing:     make precommit   (also runs on git commit)"
 echo "  See all make targets:    make help"

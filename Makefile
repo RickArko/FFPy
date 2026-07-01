@@ -5,6 +5,7 @@
 .DEFAULT_GOAL := help
 .PHONY: help bootstrap install data full-data run dev pickem-web pickem-web-auth-local \
         pickem-web-auth-supabase pickem-auth-token notebook test cov lint fmt check \
+        precommit precommit-install precommit-update \
         db.prepare db.migrate db.load db.update db.stats db.mock \
         db.compute-stats db.ngs db.injuries db.audit db.dfs db.adp db.depth-chart db.weather \
         supabase.check fly.app fly.volume fly.secrets fly.secrets-list \
@@ -41,10 +42,16 @@ help: ## Show this help
 bootstrap: ## First-time setup (installs uv, syncs deps, seeds .env, migrates DB)
 	@bash scripts/bootstrap.sh
 
-install: ## Sync dependencies and register the `ffpy` Jupyter kernel
+install: ## Sync dependencies, register Jupyter kernel, and install git hooks
 	$(UV) sync
 	@echo "==> Registering Jupyter kernel 'ffpy'"
 	@$(UV) run python -m ipykernel install --user --name ffpy --display-name "Python (FFPy)"
+	@if git rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "==> Installing pre-commit hooks (runs CI lint on every commit)"; \
+		$(UV) run pre-commit install; \
+	else \
+		echo "==> Skipping pre-commit (not a git checkout)"; \
+	fi
 
 data: db.prepare ## Generate all required app data (DATA_MODE=real|mock)
 
@@ -100,7 +107,7 @@ fmt: ## Format with ruff
 precommit: ## Run pre-commit hooks on all files (install via `make precommit-install`)
 	$(UV) run pre-commit run --all-files
 
-precommit-install: ## Install pre-commit hooks into .git/hooks/
+precommit-install: ## Install pre-commit hooks into .git/hooks/ (also run by `make install`)
 	$(UV) run pre-commit install
 
 precommit-update: ## Update pre-commit hook versions to latest
