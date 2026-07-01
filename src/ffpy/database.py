@@ -2189,8 +2189,14 @@ class FFPyDatabase:
                      rank, roster_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(team_id) DO UPDATE SET
+                    team_name = excluded.team_name,
+                    owner_name = excluded.owner_name,
+                    wins = excluded.wins,
+                    losses = excluded.losses,
+                    ties = excluded.ties,
                     roster_json = excluded.roster_json,
-                    points_for = excluded.points_for
+                    points_for = excluded.points_for,
+                    points_against = excluded.points_against
             """,
                 (
                     team["team_id"],
@@ -2239,11 +2245,27 @@ class FFPyDatabase:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_all_leagues(self) -> list[dict]:
+        """List all imported leagues (local dev when auth is disabled)."""
+        cursor = self.conn.execute(
+            "SELECT * FROM user_leagues ORDER BY imported_at DESC",
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def get_user_league(self, league_id: str, user_id: str) -> dict | None:
         """Get a single league by ID, verifying user ownership."""
         cursor = self.conn.execute(
             "SELECT * FROM user_leagues WHERE league_id = ? AND user_id = ?",
             (league_id, user_id),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_league_by_id(self, league_id: str) -> dict | None:
+        """Get a single league by ID without ownership check."""
+        cursor = self.conn.execute(
+            "SELECT * FROM user_leagues WHERE league_id = ?",
+            (league_id,),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -2261,6 +2283,18 @@ class FFPyDatabase:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_teams_for_league(self, league_id: str) -> list[dict]:
+        """Get teams for a league without ownership check."""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM league_teams
+            WHERE league_id = ?
+            ORDER BY rank, points_for DESC
+        """,
+            (league_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def get_league_matchups(self, league_id: str, week: int, user_id: str) -> list[dict]:
         """Get matchups for a league/week, verifying user ownership."""
         cursor = self.conn.execute(
@@ -2271,6 +2305,18 @@ class FFPyDatabase:
             ORDER BY m.matchup_id
         """,
             (league_id, week, user_id),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_matchups_for_league(self, league_id: str, week: int) -> list[dict]:
+        """Get matchups for a league/week without ownership check."""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM league_matchups
+            WHERE league_id = ? AND week = ?
+            ORDER BY matchup_id
+        """,
+            (league_id, week),
         )
         return [dict(row) for row in cursor.fetchall()]
 

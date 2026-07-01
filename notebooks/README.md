@@ -55,6 +55,12 @@ Recommended order:
    - Model formulation side-by-side (API comparison table)
    - Benchmark: solve time vs problem size
 
+5. **`04_draft_strategy_macker.ipynb` — Dynasty Draft Strategy (correlation-aware)**
+   - Recommends three snake picks for a Sleeper dynasty league
+   - Blends positional need, ADP value, preseason VORP, and weekly starter correlation
+   - Uses imported league rosters + `ffpy-db load-adp`
+   - Requires populated `actual_stats` (2023–2025) and imported league data
+
 ### `eda/Players.ipynb` - Player Performance Analysis
 
 Comprehensive exploratory data analysis of the FFPy database:

@@ -75,11 +75,16 @@ createApp({
 
       <!-- IMPORT WIZARD -->
       <div v-if="page === 'import'">
-        <div class="card">
+        <div v-if="authLockedReason" class="card">
+          <h2 class="card-title">Sign in to import</h2>
+          <p class="small">{{ authLockedReason }}</p>
+          <button v-if="browserAuthAvailable" @click="page='login'">Sign In</button>
+        </div>
+        <div v-else class="card">
           <h2 class="card-title">Import League</h2>
           <div class="wizard-steps">
             <div class="wizard-step" :class="{ active: importStep === 1 }">1. Provider</div>
-            <div class="wizard-step" :class="{ active: importStep === 2 }">2. Credentials</div>
+            <div class="wizard-step" :class="{ active: importStep === 2 }">{{ importProvider === 'sleeper' ? '2. League' : '2. Credentials' }}</div>
             <div class="wizard-step" :class="{ active: importStep === 3 }">3. Import</div>
           </div>
 
@@ -113,12 +118,35 @@ createApp({
             </div>
             <div v-if="importProvider === 'sleeper'">
               <label>Sleeper Username</label>
-              <input v-model="importCreds.username" placeholder="sleeper username" />
-              <p class="small">Sleeper does not require credentials for public leagues.</p>
+              <input v-model="importCreds.username" placeholder="macker1477" @keyup.enter="discoverSleeperLeagues" />
+              <label>Season</label>
+              <input type="number" v-model.number="importSeason" />
+              <p class="small">Sleeper is public — no password or API keys needed.</p>
+              <button style="margin-top:8px" :disabled="sleeperDiscoverLoading || !importCreds.username" @click="discoverSleeperLeagues">
+                {{ sleeperDiscoverLoading ? 'Looking up…' : 'Find my leagues' }}
+              </button>
+              <div v-if="sleeperLeagues.length" style="margin-top:12px">
+                <label>League</label>
+                <select v-model="importLeagueId">
+                  <option value="">Select league…</option>
+                  <option v-for="lg in sleeperLeagues" :key="lg.league_id" :value="String(lg.league_id)">
+                    {{ lg.name }} ({{ lg.season }}, {{ lg.status || 'unknown' }})
+                  </option>
+                </select>
+              </div>
+              <p v-else-if="sleeperDiscoverAttempted && !sleeperDiscoverLoading" class="small" style="margin-top:8px">
+                No leagues for this username/season. Try another season (e.g. 2025 or 2026).
+              </p>
             </div>
-            <div style="display:flex;gap:8px;margin-top:12px">
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
               <button class="btn-ghost" @click="importStep=1">Back</button>
-              <button :disabled="importLoading" @click="saveCredentials">Save Credentials</button>
+              <button v-if="importProvider !== 'sleeper'" :disabled="importLoading" @click="saveCredentials">Save Credentials</button>
+              <button v-else :disabled="importLoading || sleeperDiscoverLoading" @click="runSleeperImport">
+                {{ importLoading ? 'Importing…' : (sleeperDiscoverLoading ? 'Looking up…' : 'Import League') }}
+              </button>
+              <span v-if="importProvider === 'sleeper' && !importLeagueId && !sleeperDiscoverLoading" class="small">
+                Finds your leagues, then imports the selected one.
+              </span>
             </div>
           </div>
 
@@ -158,6 +186,7 @@ createApp({
           <div class="tab" :class="{ active: activeTab === 'rosters' }" @click="activeTab='rosters'">Rosters</div>
           <div class="tab" :class="{ active: activeTab === 'matchups' }" @click="activeTab='matchups'; loadLeagueMatchups(1)">Matchups</div>
           <div class="tab" :class="{ active: activeTab === 'optimizer' }" @click="activeTab='optimizer'">Optimizer</div>
+          <div class="tab" :class="{ active: activeTab === 'draft-help' }" @click="activeTab='draft-help'; ensureDraftHelp()">Draft Help</div>
         </div>
 
         <!-- Standings -->
@@ -182,12 +211,22 @@ createApp({
 
         <!-- Rosters -->
         <div v-if="activeTab === 'rosters'" class="card">
-          <div v-for="t in leagueTeams" :key="t.team_id" style="margin-bottom:14px">
+          <div v-for="t in leagueTeams" :key="t.team_id" class="roster-block">
             <strong>{{ t.team_name }}</strong>
             <div class="small">Owner: {{ t.owner_name || 'Unknown' }}</div>
-            <div class="small" v-if="t.roster_json">
-              Roster: {{ JSON.parse(t.roster_json || '[]').length }} players
-            </div>
+            <table v-if="parseRoster(t.roster_json).length" class="roster-table">
+              <thead>
+                <tr><th>Player</th><th>Pos</th><th>Team</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="(p, idx) in parseRoster(t.roster_json)" :key="p.player_id || p.name || idx">
+                  <td>{{ p.name }}</td>
+                  <td>{{ p.position || '—' }}</td>
+                  <td>{{ p.team || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-else class="small">No players on roster.</p>
           </div>
         </div>
 
@@ -201,9 +240,9 @@ createApp({
             </thead>
             <tbody>
               <tr v-for="m in leagueMatchups" :key="m.matchup_id">
-                <td>{{ m.home_team_id }}</td>
+                <td>{{ teamName(m.home_team_id) }}</td>
                 <td>{{ m.home_score ?? '-' }}</td>
-                <td>{{ m.away_team_id }}</td>
+                <td>{{ teamName(m.away_team_id) }}</td>
                 <td>{{ m.away_score ?? '-' }}</td>
               </tr>
             </tbody>
@@ -232,6 +271,105 @@ createApp({
             </div>
           </div>
         </div>
+
+        <!-- Draft Help -->
+        <div v-if="activeTab === 'draft-help'" class="card">
+          <h3 class="card-title">Draft Help</h3>
+          <p class="small">Top 100 targets ranked by need, ADP value, projections, and weekly correlation with your roster.</p>
+
+          <div class="draft-help-controls">
+            <div>
+              <label>Your team</label>
+              <select v-model="draftHelpPayload.team_id">
+                <option value="">Select team…</option>
+                <option v-for="t in leagueTeams" :key="t.team_id" :value="t.team_id">
+                  {{ t.team_name }} <span v-if="t.owner_name">({{ t.owner_name }})</span>
+                </option>
+              </select>
+            </div>
+            <div>
+              <label>Pick slots (comma-separated)</label>
+              <input v-model="draftHelpPayload.pick_slots_text" placeholder="1, 20, 21" />
+            </div>
+            <div>
+              <label>Board size</label>
+              <input type="number" v-model.number="draftHelpPayload.num_players" min="10" max="200" />
+            </div>
+          </div>
+
+          <button style="margin-top:12px" :disabled="draftHelpLoading || !draftHelpPayload.team_id" @click="loadDraftHelp">
+            {{ draftHelpLoading ? 'Building board…' : 'Get Draft Recommendations' }}
+          </button>
+
+          <div v-if="draftHelpPayload.team_id && parseRoster(selectedTeamRoster).length" class="my-roster-preview">
+            <h4>Current roster</h4>
+            <div class="roster-chips">
+              <span v-for="(p, idx) in parseRoster(selectedTeamRoster)" :key="p.player_id || p.name || idx" class="roster-chip">
+                {{ p.name }} <span class="muted">({{ p.position }})</span>
+              </span>
+            </div>
+          </div>
+
+          <div v-if="draftHelp" class="draft-help-results">
+            <div v-if="draftHelp.picks && draftHelp.picks.length" class="draft-picks">
+              <h4>Recommended picks</h4>
+              <div v-for="p in draftHelp.picks" :key="p.pick_slot || p.label" class="draft-pick-card">
+                <div class="draft-pick-header">
+                  <span class="pick-label">{{ p.label }}</span>
+                  <span class="pick-player">{{ p.player }} <span class="muted">({{ p.position }} {{ p.team }})</span></span>
+                  <span class="pick-adp muted">ADP {{ p.adp }}</span>
+                </div>
+                <ul class="reason-list">
+                  <li v-for="(reason, i) in p.reasons" :key="i">{{ reason }}</li>
+                </ul>
+              </div>
+            </div>
+
+            <div v-if="draftHelp.roster_needs && draftHelp.roster_needs.length" class="roster-needs">
+              <h4>Roster needs</h4>
+              <table>
+                <thead><tr><th>Slot</th><th>Starters</th><th>Depth</th><th>Gap</th></tr></thead>
+                <tbody>
+                  <tr v-for="n in draftHelp.roster_needs" :key="n.position">
+                    <td>{{ n.position }}</td><td>{{ n.starters }}</td><td>{{ n.depth }}</td><td>{{ n.gap }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div v-if="draftHelp.rankings && draftHelp.rankings.length" class="draft-board">
+              <h4>Top {{ draftHelp.rankings.length }} targets</h4>
+              <table class="draft-board-table">
+                <thead>
+                  <tr>
+                    <th>#</th><th>Player</th><th>Pos</th><th>Team</th><th>ADP</th><th>Proj</th><th>VORP</th><th>Tier</th><th>Why target</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="r in draftHelp.rankings" :key="r.rank" :class="{ 'stack-row': r.stack }">
+                    <td>{{ r.rank }}</td>
+                    <td>{{ r.player }}</td>
+                    <td>{{ r.position }}</td>
+                    <td>{{ r.team }}</td>
+                    <td>{{ r.adp }}</td>
+                    <td>{{ r.projected_ppg }}</td>
+                    <td>{{ r.vorp }}</td>
+                    <td><span class="tier-badge">{{ r.tier }}</span></td>
+                    <td>
+                      <ul class="reason-list compact">
+                        <li v-for="(reason, i) in r.reasons" :key="i">{{ reason }}</li>
+                      </ul>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div v-if="draftHelp.notes && draftHelp.notes.length" class="draft-notes small">
+              <p v-for="(note, i) in draftHelp.notes" :key="i">{{ note }}</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   `,
@@ -249,9 +387,15 @@ createApp({
       importSeason: new Date().getFullYear(),
       importLeagueId: "",
       importLoading: false,
+      sleeperLeagues: [],
+      sleeperDiscoverLoading: false,
+      sleeperDiscoverAttempted: false,
       optimizePayload: { team_id: "", week: 1 },
       optimizeResult: null,
       optimizeLoading: false,
+      draftHelpPayload: { team_id: "", pick_slots_text: "1, 20, 21", num_players: 100 },
+      draftHelp: null,
+      draftHelpLoading: false,
       authLoading: true,
       authSubmitting: false,
       authConfig: {
@@ -297,6 +441,10 @@ createApp({
       if (!this.isVerifiedUser) return "Verify your email.";
       return null;
     },
+    selectedTeamRoster() {
+      const team = this.leagueTeams.find((t) => t.team_id === this.draftHelpPayload.team_id);
+      return team ? team.roster_json : "[]";
+    },
   },
   async mounted() {
     try {
@@ -326,7 +474,17 @@ createApp({
       const includeJson = opts.body !== undefined;
       const res = await fetch(url, { ...opts, headers: this.buildHeaders(opts.headers || {}, includeJson) });
       const payload = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(payload.detail || "Request failed");
+      if (!res.ok) {
+        const detail = payload.detail;
+        const message = typeof detail === "string"
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d) => d.msg || JSON.stringify(d)).join("; ")
+            : res.status === 401
+              ? "Sign in required — use Sign In in the header"
+              : "Request failed";
+        throw new Error(message);
+      }
       return payload;
     },
     async fetchPublicAuthConfig() {
@@ -459,6 +617,7 @@ createApp({
       this.leagueMatchups = [];
       this.activeTab = "standings";
       this.optimizeResult = null;
+      this.draftHelp = null;
       this.page = "league";
       await this.loadLeagueTeams();
     },
@@ -495,6 +654,9 @@ createApp({
     selectProvider(p) {
       this.importProvider = p;
       this.importCreds = {};
+      this.sleeperLeagues = [];
+      this.importLeagueId = "";
+      this.sleeperDiscoverAttempted = false;
       if (p === "sleeper") {
         this.importCreds = { username: "" };
       } else if (p === "espn") {
@@ -503,6 +665,52 @@ createApp({
         this.importCreds = { client_id: "", client_secret: "", access_token: "" };
       }
       this.importStep = 2;
+    },
+    async discoverSleeperLeagues() {
+      this.clearMessages();
+      const username = (this.importCreds.username || "").trim();
+      if (!username) {
+        this.error = "Enter your Sleeper username";
+        return;
+      }
+      this.sleeperDiscoverLoading = true;
+      this.sleeperDiscoverAttempted = true;
+      try {
+        const season = Number(this.importSeason) || new Date().getFullYear();
+        const leagues = await this.fetchJson(
+          `api/leagues/sleeper/discover?username=${encodeURIComponent(username)}&season=${season}`,
+        );
+        this.sleeperLeagues = leagues;
+        if (!leagues.length) {
+          this.error = `No Sleeper leagues found for ${username} in ${season}. Try 2025 or 2026.`;
+          this.importLeagueId = "";
+        } else {
+          this.importLeagueId = leagues.length === 1 ? String(leagues[0].league_id) : String(this.importLeagueId || "");
+          if (leagues.length === 1) {
+            this.status = `Found "${leagues[0].name}" — ready to import`;
+          } else {
+            this.status = `Found ${leagues.length} leagues — pick one from the list`;
+          }
+        }
+        return leagues;
+      } catch (e) {
+        this.error = e.message || "Could not look up Sleeper leagues";
+        return [];
+      } finally {
+        this.sleeperDiscoverLoading = false;
+      }
+    },
+    async runSleeperImport() {
+      this.clearMessages();
+      if (!this.importLeagueId) {
+        const leagues = await this.discoverSleeperLeagues();
+        if (!leagues.length) return;
+        if (leagues.length > 1 && !this.importLeagueId) {
+          this.error = "Select a league from the list, then click Import League again";
+          return;
+        }
+      }
+      await this.runImport();
     },
     async saveCredentials() {
       this.clearMessages();
@@ -525,19 +733,24 @@ createApp({
       this.clearMessages();
       this.importLoading = true;
       try {
+        const body = {
+          provider: this.importProvider,
+          league_id: this.importLeagueId,
+          season: Number(this.importSeason),
+        };
+        if (this.importProvider === "sleeper" && this.importCreds.username) {
+          body.sleeper_username = this.importCreds.username.trim();
+        }
         const result = await this.fetchJson("api/leagues/import", {
           method: "POST",
-          body: JSON.stringify({
-            provider: this.importProvider,
-            league_id: this.importLeagueId,
-            season: Number(this.importSeason),
-          }),
+          body: JSON.stringify(body),
         });
         this.status = `Imported ${result.teams} teams into league ${result.league_id}`;
         this.importStep = 1;
         this.importProvider = "";
         this.importCreds = {};
         this.importLeagueId = "";
+        this.sleeperLeagues = [];
         await this.loadLeagues();
         this.page = "dashboard";
       } catch (e) {
@@ -559,6 +772,63 @@ createApp({
         this.error = e.message || "Optimization failed";
       } finally {
         this.optimizeLoading = false;
+      }
+    },
+    ensureDraftHelp() {
+      if (!this.draftHelpPayload.team_id && this.leagueTeams.length === 1) {
+        this.draftHelpPayload.team_id = this.leagueTeams[0].team_id;
+      }
+      if (!this.draftHelpPayload.team_id && this.optimizePayload.team_id) {
+        this.draftHelpPayload.team_id = this.optimizePayload.team_id;
+      }
+    },
+    parsePickSlots(text) {
+      if (!text || !text.trim()) return null;
+      const slots = text.split(",").map((s) => parseInt(s.trim(), 10)).filter((n) => !Number.isNaN(n));
+      return slots.length ? slots : null;
+    },
+    parseRoster(rosterJson) {
+      try {
+        const entries = JSON.parse(rosterJson || "[]");
+        return entries.map((entry) => {
+          if (entry && typeof entry === "object") {
+            return {
+              player_id: entry.player_id,
+              name: entry.player || entry.fullName || entry.full_name || "Unknown",
+              position: entry.position || "",
+              team: entry.team || "",
+            };
+          }
+          return { name: String(entry), position: "", team: "" };
+        });
+      } catch {
+        return [];
+      }
+    },
+    teamName(teamId) {
+      const team = this.leagueTeams.find((t) => t.team_id === teamId);
+      return team ? team.team_name : teamId;
+    },
+    async loadDraftHelp() {
+      this.clearMessages();
+      this.draftHelpLoading = true;
+      try {
+        const pickSlots = this.parsePickSlots(this.draftHelpPayload.pick_slots_text);
+        const body = {
+          team_id: this.draftHelpPayload.team_id,
+          num_players: this.draftHelpPayload.num_players || 100,
+        };
+        if (pickSlots) body.pick_slots = pickSlots;
+        const result = await this.fetchJson(
+          `api/leagues/${this.selectedLeague.league_id}/draft-help`,
+          { method: "POST", body: JSON.stringify(body) },
+        );
+        this.draftHelp = result;
+        this.status = `Draft board ready — ${result.rankings.length} targets`;
+      } catch (e) {
+        this.error = e.message || "Draft help failed";
+      } finally {
+        this.draftHelpLoading = false;
       }
     },
   },
