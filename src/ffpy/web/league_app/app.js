@@ -75,11 +75,16 @@ createApp({
 
       <!-- IMPORT WIZARD -->
       <div v-if="page === 'import'">
-        <div class="card">
+        <div v-if="authLockedReason" class="card">
+          <h2 class="card-title">Sign in to import</h2>
+          <p class="small">{{ authLockedReason }}</p>
+          <button v-if="browserAuthAvailable" @click="page='login'">Sign In</button>
+        </div>
+        <div v-else class="card">
           <h2 class="card-title">Import League</h2>
           <div class="wizard-steps">
             <div class="wizard-step" :class="{ active: importStep === 1 }">1. Provider</div>
-            <div class="wizard-step" :class="{ active: importStep === 2 }">2. Credentials</div>
+            <div class="wizard-step" :class="{ active: importStep === 2 }">{{ importProvider === 'sleeper' ? '2. League' : '2. Credentials' }}</div>
             <div class="wizard-step" :class="{ active: importStep === 3 }">3. Import</div>
           </div>
 
@@ -124,18 +129,24 @@ createApp({
                 <label>League</label>
                 <select v-model="importLeagueId">
                   <option value="">Select league…</option>
-                  <option v-for="lg in sleeperLeagues" :key="lg.league_id" :value="lg.league_id">
+                  <option v-for="lg in sleeperLeagues" :key="lg.league_id" :value="String(lg.league_id)">
                     {{ lg.name }} ({{ lg.season }}, {{ lg.status || 'unknown' }})
                   </option>
                 </select>
               </div>
+              <p v-else-if="sleeperDiscoverAttempted && !sleeperDiscoverLoading" class="small" style="margin-top:8px">
+                No leagues for this username/season. Try another season (e.g. 2025 or 2026).
+              </p>
             </div>
-            <div style="display:flex;gap:8px;margin-top:12px">
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
               <button class="btn-ghost" @click="importStep=1">Back</button>
               <button v-if="importProvider !== 'sleeper'" :disabled="importLoading" @click="saveCredentials">Save Credentials</button>
-              <button v-else :disabled="importLoading || !importLeagueId" @click="runImport">
-                {{ importLoading ? 'Importing…' : 'Import League' }}
+              <button v-else :disabled="importLoading || sleeperDiscoverLoading" @click="runSleeperImport">
+                {{ importLoading ? 'Importing…' : (sleeperDiscoverLoading ? 'Looking up…' : 'Import League') }}
               </button>
+              <span v-if="importProvider === 'sleeper' && !importLeagueId && !sleeperDiscoverLoading" class="small">
+                Finds your leagues, then imports the selected one.
+              </span>
             </div>
           </div>
 
@@ -378,6 +389,7 @@ createApp({
       importLoading: false,
       sleeperLeagues: [],
       sleeperDiscoverLoading: false,
+      sleeperDiscoverAttempted: false,
       optimizePayload: { team_id: "", week: 1 },
       optimizeResult: null,
       optimizeLoading: false,
@@ -462,7 +474,17 @@ createApp({
       const includeJson = opts.body !== undefined;
       const res = await fetch(url, { ...opts, headers: this.buildHeaders(opts.headers || {}, includeJson) });
       const payload = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(payload.detail || "Request failed");
+      if (!res.ok) {
+        const detail = payload.detail;
+        const message = typeof detail === "string"
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d) => d.msg || JSON.stringify(d)).join("; ")
+            : res.status === 401
+              ? "Sign in required — use Sign In in the header"
+              : "Request failed";
+        throw new Error(message);
+      }
       return payload;
     },
     async fetchPublicAuthConfig() {
@@ -634,6 +656,7 @@ createApp({
       this.importCreds = {};
       this.sleeperLeagues = [];
       this.importLeagueId = "";
+      this.sleeperDiscoverAttempted = false;
       if (p === "sleeper") {
         this.importCreds = { username: "" };
       } else if (p === "espn") {
@@ -651,6 +674,7 @@ createApp({
         return;
       }
       this.sleeperDiscoverLoading = true;
+      this.sleeperDiscoverAttempted = true;
       try {
         const season = Number(this.importSeason) || new Date().getFullYear();
         const leagues = await this.fetchJson(
@@ -658,17 +682,35 @@ createApp({
         );
         this.sleeperLeagues = leagues;
         if (!leagues.length) {
-          this.error = `No Sleeper leagues found for ${username} in ${season}`;
+          this.error = `No Sleeper leagues found for ${username} in ${season}. Try 2025 or 2026.`;
           this.importLeagueId = "";
         } else {
-          this.importLeagueId = leagues.length === 1 ? String(leagues[0].league_id) : "";
-          this.status = `Found ${leagues.length} league(s) for ${username}`;
+          this.importLeagueId = leagues.length === 1 ? String(leagues[0].league_id) : String(this.importLeagueId || "");
+          if (leagues.length === 1) {
+            this.status = `Found "${leagues[0].name}" — ready to import`;
+          } else {
+            this.status = `Found ${leagues.length} leagues — pick one from the list`;
+          }
         }
+        return leagues;
       } catch (e) {
         this.error = e.message || "Could not look up Sleeper leagues";
+        return [];
       } finally {
         this.sleeperDiscoverLoading = false;
       }
+    },
+    async runSleeperImport() {
+      this.clearMessages();
+      if (!this.importLeagueId) {
+        const leagues = await this.discoverSleeperLeagues();
+        if (!leagues.length) return;
+        if (leagues.length > 1 && !this.importLeagueId) {
+          this.error = "Select a league from the list, then click Import League again";
+          return;
+        }
+      }
+      await this.runImport();
     },
     async saveCredentials() {
       this.clearMessages();

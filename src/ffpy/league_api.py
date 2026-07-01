@@ -480,10 +480,8 @@ def create_league_app(
     def discover_sleeper_leagues(
         username: str,
         season: int = Query(2026, ge=2000, le=2100),
-        user: AuthenticatedUser = Depends(get_current_user),
     ) -> List[Dict[str, Any]]:
-        """Look up Sleeper leagues for a username (no credentials required)."""
-        del user  # auth gate only
+        """Look up Sleeper leagues for a username (public; no credentials required)."""
         username = username.strip()
         if not username:
             raise HTTPException(status_code=400, detail="username is required")
