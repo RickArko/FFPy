@@ -108,7 +108,7 @@ def main():
             value=0.0,
             step=0.5,
             help="Extra points added when a QB and WR/TE from the same team start together. "
-                 "0 = disabled, 2-3 = moderate, 5 = aggressive stacking.",
+            "0 = disabled, 2-3 = moderate, 5 = aggressive stacking.",
         )
 
     # === LOAD PROJECTIONS ===
@@ -116,7 +116,11 @@ def main():
     use_historical = data_source == "Historical Model"
     use_real = data_source == "API Data"
 
-    scoring_map = {"PPR": ScoringConfig.ppr, "Half-PPR": ScoringConfig.half_ppr, "Standard": ScoringConfig.standard}
+    scoring_map = {
+        "PPR": ScoringConfig.ppr,
+        "Half-PPR": ScoringConfig.half_ppr,
+        "Standard": ScoringConfig.standard,
+    }
     scoring = scoring_map[scoring_system]()
 
     with st.spinner(f"Loading Week {week} projections..."):

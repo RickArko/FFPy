@@ -2,6 +2,8 @@
 
 A Streamlit app and Python toolkit for fantasy football projections, lineup optimization, play-by-play analytics, and pick'em backtesting. Pulls data from [nflverse](https://nflverse.github.io/), ESPN, or SportsDataIO and runs everything locally against a SQLite database.
 
+**Live app:** [ffpy-pickem.fly.dev](https://ffpy-pickem.fly.dev/) — [League Manager](https://ffpy-pickem.fly.dev/league/) · [Pick'em Tester](https://ffpy-pickem.fly.dev/pickem/)
+
 ![Project Logo](docs/assets/static/FFPy.png)
 
 ---
@@ -96,7 +98,10 @@ Key settings: `API_PROVIDER` (espn/sportsdata), `NFL_SEASON`, `DATABASE_PATH`.
 
 ## Deployment
 
-Production Dockerfile + `fly.toml` in repo. CI builds and deploys to Fly.io on `main` push. See [docs/deployment/fly.md](docs/deployment/fly.md).
+Production Dockerfile + `fly.toml` in repo. CI builds and deploys to Fly.io on `main` push.
+
+- **Live:** [https://ffpy-pickem.fly.dev](https://ffpy-pickem.fly.dev/)
+- **Docs:** [docs/deployment/fly.md](docs/deployment/fly.md)
 
 ## Further reading
 

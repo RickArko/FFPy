@@ -38,6 +38,7 @@ MASTER_KEY = Config.SUPABASE_JWT_SECRET.encode() if Config.SUPABASE_JWT_SECRET e
 # Pydantic models
 # ---------------------------------------------------------------------------
 
+
 class CredentialStoreRequest(BaseModel):
     provider: str = Field(..., pattern=r"^(espn|yahoo|sleeper)$")
     credentials: Dict[str, Any]
@@ -62,9 +63,11 @@ class DraftHelpRequest(BaseModel):
     pick_slots: Optional[List[int]] = None
     num_teams: int = Field(10, ge=4, le=20)
 
+
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_auth_verifier() -> Optional[TokenVerifier]:
     return build_token_verifier_from_config()
@@ -96,6 +99,7 @@ def _require_user(
 # ---------------------------------------------------------------------------
 # Import helpers
 # ---------------------------------------------------------------------------
+
 
 def _import_from_espn(league_id: str, season: int, creds: dict) -> dict:
     integration = ESPNLeagueIntegration(
@@ -331,6 +335,7 @@ def _import_from_sleeper(league_id: str, season: int) -> dict:
 # App factory
 # ---------------------------------------------------------------------------
 
+
 def create_league_app(
     db_path: Optional[str] = None,
     *,
@@ -366,7 +371,9 @@ def create_league_app(
         token: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
     ) -> AuthenticatedUser:
         if not auth_enabled:
-            return AuthenticatedUser(user_id="anon", email=None, role="authenticated", email_confirmed=True, claims={})
+            return AuthenticatedUser(
+                user_id="anon", email=None, role="authenticated", email_confirmed=True, claims={}
+            )
         if not token:
             raise HTTPException(status_code=401, detail="Missing authorization token")
         assert resolved_auth_verifier is not None
@@ -424,9 +431,7 @@ def create_league_app(
 
     @app.get("/api/auth/config")
     def auth_config() -> Dict[str, Any]:
-        browser_auth_available = bool(
-            auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_BROWSER_KEY
-        )
+        browser_auth_available = bool(auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_BROWSER_KEY)
         return {
             "auth_required": auth_enabled,
             "browser_auth_available": browser_auth_available,

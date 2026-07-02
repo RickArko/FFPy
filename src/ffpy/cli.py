@@ -581,27 +581,29 @@ def cmd_add_weather(args: argparse.Namespace) -> int:
         temp_from_text = pl.col("weather").str.extract(r"Temp:\s*(\d+)", 1).cast(pl.Int64)
         wind_from_text = pl.col("weather").str.extract(r"Wind:.*?(\d+)", 1).cast(pl.Int64)
 
-        weather_df = weather_df.with_columns([
-            pl.when(pl.col("weather").str.contains("(?i)clear|sunny"))
-            .then(pl.lit("Clear"))
-            .when(pl.col("weather").str.contains("(?i)cloudy|mostly cloudy|partly cloudy"))
-            .then(pl.lit("Cloudy"))
-            .when(pl.col("weather").str.contains("(?i)rain|showers|drizzle"))
-            .then(pl.lit("Rain"))
-            .when(pl.col("weather").str.contains("(?i)snow|sleet|wintry"))
-            .then(pl.lit("Snow"))
-            .when(pl.col("weather").str.contains("(?i)fog|mist"))
-            .then(pl.lit("Fog"))
-            .when(pl.col("weather").str.contains("(?i)dome|indoors"))
-            .then(pl.lit("Dome"))
-            .otherwise(pl.lit("Unknown"))
-            .alias("weather_condition"),
-            pl.col("weather").str.extract(r"Humidity:\s*(\d+)", 1).cast(pl.Int64).alias("humidity"),
-            # Fill missing temp/wind from weather text
-            pl.col("temp").fill_null(temp_from_text).alias("temp"),
-            pl.col("wind").fill_null(wind_from_text).alias("wind"),
-            pl.col("weather").alias("weather_description"),
-        ])
+        weather_df = weather_df.with_columns(
+            [
+                pl.when(pl.col("weather").str.contains("(?i)clear|sunny"))
+                .then(pl.lit("Clear"))
+                .when(pl.col("weather").str.contains("(?i)cloudy|mostly cloudy|partly cloudy"))
+                .then(pl.lit("Cloudy"))
+                .when(pl.col("weather").str.contains("(?i)rain|showers|drizzle"))
+                .then(pl.lit("Rain"))
+                .when(pl.col("weather").str.contains("(?i)snow|sleet|wintry"))
+                .then(pl.lit("Snow"))
+                .when(pl.col("weather").str.contains("(?i)fog|mist"))
+                .then(pl.lit("Fog"))
+                .when(pl.col("weather").str.contains("(?i)dome|indoors"))
+                .then(pl.lit("Dome"))
+                .otherwise(pl.lit("Unknown"))
+                .alias("weather_condition"),
+                pl.col("weather").str.extract(r"Humidity:\s*(\d+)", 1).cast(pl.Int64).alias("humidity"),
+                # Fill missing temp/wind from weather text
+                pl.col("temp").fill_null(temp_from_text).alias("temp"),
+                pl.col("wind").fill_null(wind_from_text).alias("wind"),
+                pl.col("weather").alias("weather_description"),
+            ]
+        )
 
     pandas_df = weather_df.to_pandas()
 
@@ -614,7 +616,9 @@ def cmd_add_weather(args: argparse.Namespace) -> int:
 
     # --- Augment indoor/dome games with sensible defaults ---
     indoor_roofs = {"dome", "closed", "open"}
-    indoor = pandas_df["roof"].str.lower().isin(indoor_roofs) if "roof" in pandas_df.columns else pd.Series(False)
+    indoor = (
+        pandas_df["roof"].str.lower().isin(indoor_roofs) if "roof" in pandas_df.columns else pd.Series(False)
+    )
     needs_default = indoor & pandas_df["temp"].isna()
     n_filled = 0
     if needs_default.any():

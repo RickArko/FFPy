@@ -67,7 +67,9 @@ def test_matchups(league_id: int, season: int, swid: str, s2: str, week: int = 1
     matchups = integration.get_matchups(week)
     print(f"\n⚔️  Matchups for Week {week} ({len(matchups)} found):")
     for m in matchups:
-        print(f"   {m['home_team_id']} ({m['home_score']:.1f}) vs {m['away_team_id']} ({m['away_score']:.1f})")
+        print(
+            f"   {m['home_team_id']} ({m['home_score']:.1f}) vs {m['away_team_id']} ({m['away_score']:.1f})"
+        )
 
 
 def test_full_import(league_id: int, season: int, swid: str, s2: str, persist: bool = False):
@@ -103,14 +105,20 @@ def test_full_import(league_id: int, season: int, swid: str, s2: str, persist: b
 
 def main():
     parser = argparse.ArgumentParser(description="Test ESPN league import")
-    parser.add_argument("--league-id", type=int, default=int(os.getenv("ESPN_LEAGUE_ID", "0")), help="Your ESPN league ID")
+    parser.add_argument(
+        "--league-id", type=int, default=int(os.getenv("ESPN_LEAGUE_ID", "0")), help="Your ESPN league ID"
+    )
     parser.add_argument("--season", type=int, default=int(os.getenv("NFL_SEASON", "2024")))
     parser.add_argument("--swid", default=os.getenv("ESPN_SWID", ""), help="ESPN SWID cookie")
     parser.add_argument("--s2", default=os.getenv("ESPN_S2", ""), help="ESPN s2 cookie")
     parser.add_argument("--team-id", type=int, default=None, help="Test roster for a specific team ID")
     parser.add_argument("--week", type=int, default=1, help="Test matchups for a specific week")
-    parser.add_argument("--persist", action="store_true", help="Store the full import in your local SQLite DB")
-    parser.add_argument("--full", action="store_true", help="Run full import test (default: just connectivity)")
+    parser.add_argument(
+        "--persist", action="store_true", help="Store the full import in your local SQLite DB"
+    )
+    parser.add_argument(
+        "--full", action="store_true", help="Run full import test (default: just connectivity)"
+    )
     args = parser.parse_args()
 
     if not args.league_id:

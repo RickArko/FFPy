@@ -62,7 +62,11 @@ def fetch_draft_rankings(season: int) -> pd.DataFrame:
 
         # Filter to standard position player rankings (not DST, dynasty, etc.)
         valid_page_types = [
-            "best-overall", "best-qb", "best-rb", "best-wr", "best-te",
+            "best-overall",
+            "best-qb",
+            "best-rb",
+            "best-wr",
+            "best-te",
         ]
         pdf = pdf[pdf["page_type"].isin(valid_page_types)].copy()
         return pdf

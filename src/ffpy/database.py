@@ -1578,7 +1578,9 @@ class FFPyDatabase:
 
         column_sql = ", ".join(available_cols)
         placeholders = ", ".join("?" for _ in available_cols)
-        update_sql = ", ".join(f"{col}=excluded.{col}" for col in available_cols if col not in ("gsis_id", "season"))
+        update_sql = ", ".join(
+            f"{col}=excluded.{col}" for col in available_cols if col not in ("gsis_id", "season")
+        )
         cursor.executemany(
             f"""INSERT INTO player_rosters ({column_sql})
                 VALUES ({placeholders})
@@ -1812,15 +1814,28 @@ class FFPyDatabase:
         merged = pd.merge(pass_df, rush_df, on=["team", "week"], how="outer").fillna(0)
 
         merged["sack_rate"] = merged["sacks"] / merged["dropbacks"].replace(0, float("nan"))
-        merged["adjusted_line_yards"] = merged["adjusted_yards"] / merged["rush_attempts"].replace(0, float("nan"))
+        merged["adjusted_line_yards"] = merged["adjusted_yards"] / merged["rush_attempts"].replace(
+            0, float("nan")
+        )
         merged["pressure_rate"] = merged["sack_rate"] * 1.5  # approximate: pressure rate ≈ 1.5× sack rate
         merged["yards_before_contact_per_rush"] = 0.0  # not available in basic PBP
         merged["yards_after_contact_per_rush"] = 0.0
         merged["season"] = season
 
-        result = merged[["team", "season", "week", "pressure_rate", "sack_rate",
-                         "adjusted_line_yards", "yards_before_contact_per_rush",
-                         "yards_after_contact_per_rush", "rush_attempts", "dropbacks"]].copy()
+        result = merged[
+            [
+                "team",
+                "season",
+                "week",
+                "pressure_rate",
+                "sack_rate",
+                "adjusted_line_yards",
+                "yards_before_contact_per_rush",
+                "yards_after_contact_per_rush",
+                "rush_attempts",
+                "dropbacks",
+            ]
+        ].copy()
 
         # Compute rolling averages
         result = result.sort_values(["team", "week"])
@@ -1854,7 +1869,9 @@ class FFPyDatabase:
 
         column_sql = ", ".join(available_cols)
         placeholders = ", ".join("?" for _ in available_cols)
-        update_sql = ", ".join(f"{col}=excluded.{col}" for col in available_cols if col not in ("team", "season", "week"))
+        update_sql = ", ".join(
+            f"{col}=excluded.{col}" for col in available_cols if col not in ("team", "season", "week")
+        )
         cursor.executemany(
             f"""INSERT INTO offensive_line_stats ({column_sql})
                 VALUES ({placeholders})
@@ -1990,7 +2007,9 @@ class FFPyDatabase:
 
         column_sql = ", ".join(available_cols)
         placeholders = ", ".join("?" for _ in available_cols)
-        update_sql = ", ".join(f"{col}=excluded.{col}" for col in available_cols if col not in ("game_id", "season", "week"))
+        update_sql = ", ".join(
+            f"{col}=excluded.{col}" for col in available_cols if col not in ("game_id", "season", "week")
+        )
 
         cursor.executemany(
             f"""INSERT INTO game_weather ({column_sql})
@@ -2108,9 +2127,7 @@ class FFPyDatabase:
 
     # ==================== USER CREDENTIALS (League Import) ====================
 
-    def store_user_credentials(
-        self, user_id: str, provider: str, ciphertext: str, label: str = ""
-    ) -> None:
+    def store_user_credentials(self, user_id: str, provider: str, ciphertext: str, label: str = "") -> None:
         """Store or update encrypted credentials for a user/provider."""
         self.conn.execute(
             """
@@ -2128,8 +2145,7 @@ class FFPyDatabase:
     def get_user_credentials(self, user_id: str) -> list[dict]:
         """List stored credentials metadata (without ciphertext) for a user."""
         cursor = self.conn.execute(
-            "SELECT cred_id, provider, label, created_at, updated_at "
-            "FROM user_credentials WHERE user_id = ?",
+            "SELECT cred_id, provider, label, created_at, updated_at FROM user_credentials WHERE user_id = ?",
             (user_id,),
         )
         return [dict(row) for row in cursor.fetchall()]
