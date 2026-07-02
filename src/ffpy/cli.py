@@ -533,6 +533,210 @@ def cmd_load_rosters(args: argparse.Namespace) -> int:
         db.close()
 
 
+def cmd_load_cfb_games(args: argparse.Namespace) -> int:
+    """Load college football game schedules."""
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_games(season=args.season, verbose=not args.quiet)
+        if not args.quiet:
+            print(f"\nStored {stats.get('stored', 0)} CFB games for {args.season}.")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_cfb_rosters(args: argparse.Namespace) -> int:
+    """Load college football roster data."""
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_rosters(season=args.season, verbose=not args.quiet)
+        if not args.quiet:
+            print(f"\nStored {stats.get('stored', 0)} CFB roster rows for {args.season}.")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_cfb_pbp(args: argparse.Namespace) -> int:
+    """Load college football play-by-play data."""
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_pbp(season=args.season, verbose=not args.quiet)
+        if not args.quiet:
+            print(
+                f"\nStored {stats.get('games', 0)} CFB games and "
+                f"{stats.get('plays', 0):,} plays for {args.season}."
+            )
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_cfb(args: argparse.Namespace) -> int:
+    """Load college football games, rosters, and optionally PBP."""
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_season(
+                season=args.season,
+                include_games=not args.skip_games,
+                include_rosters=not args.skip_rosters,
+                include_pbp=args.pbp,
+                verbose=not args.quiet,
+            )
+        if not args.quiet:
+            print(
+                f"\nCFB load complete for {args.season}: "
+                f"{stats.get('games', 0)} games, "
+                f"{stats.get('rosters', 0)} roster rows, "
+                f"{stats.get('plays', 0):,} plays."
+            )
+        return 0
+    finally:
+        db.close()
+
+
+def _parse_cfb_conferences(raw: str) -> list[str]:
+    from ffpy.integrations.cfbd import DEFAULT_CONFERENCES
+
+    if not raw or not raw.strip():
+        return list(DEFAULT_CONFERENCES)
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def cmd_load_cfb_teams(args: argparse.Namespace) -> int:
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.database import FFPyDatabase
+
+    confs = _parse_cfb_conferences(args.conferences)
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_teams(args.season, conferences=confs, verbose=not args.quiet)
+        if not args.quiet:
+            print(f"Stored {stats.get('stored', 0)} CFB teams for {args.season}.")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_cfb_stats(args: argparse.Namespace) -> int:
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.config import Config
+    from ffpy.database import FFPyDatabase
+
+    if not Config.is_cfbd_configured():
+        print("[ERROR] CFBD_API_KEY is required. Set it in .env")
+        return 1
+    confs = _parse_cfb_conferences(args.conferences)
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_cfbd_stats(
+                args.season,
+                conferences=confs,
+                start_week=args.start_week,
+                end_week=args.end_week,
+                verbose=not args.quiet,
+            )
+        if not args.quiet:
+            print(f"CFB stats load complete: {stats}")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_build_cfb_players(args: argparse.Namespace) -> int:
+    from ffpy.cfb_players import build_cfb_players
+    from ffpy.database import FFPyDatabase
+
+    confs = _parse_cfb_conferences(args.conferences)
+    db = FFPyDatabase(args.db_path)
+    try:
+        stats = build_cfb_players(db, args.season, conferences=confs)
+        if not args.quiet:
+            print(f"Built {stats.get('players', 0)} players, {stats.get('id_maps', 0)} ID maps.")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_compute_cfb_fantasy(args: argparse.Namespace) -> int:
+    from ffpy.cfb_stats import compute_cfb_fantasy_points
+    from ffpy.database import FFPyDatabase
+
+    confs = _parse_cfb_conferences(args.conferences)
+    db = FFPyDatabase(args.db_path)
+    try:
+        stored = compute_cfb_fantasy_points(
+            db,
+            args.season,
+            scoring_preset=args.preset,
+            fcs_discount=args.fcs_discount,
+            conferences=confs,
+        )
+        if not args.quiet:
+            print(f"Stored {stored} CFB fantasy point rows for {args.season}.")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_compute_cfb_projections(args: argparse.Namespace) -> int:
+    from ffpy.cfb_projections import CfbProjectionModel
+    from ffpy.database import FFPyDatabase
+
+    confs = _parse_cfb_conferences(args.conferences)
+    model = getattr(args, "model", "historical")
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CfbProjectionModel(db) as proj_model:
+            if args.week:
+                df = proj_model.generate_projections(args.season, args.week, conferences=confs, model=model)
+                if not args.quiet:
+                    print(f"Generated {len(df)} {model} projections for week {args.week}.")
+            else:
+                total = 0
+                for week in range(args.start_week, args.end_week + 1):
+                    df = proj_model.generate_projections(args.season, week, conferences=confs, model=model)
+                    total += len(df)
+                if not args.quiet:
+                    print(
+                        f"Generated {total} {model} projections for weeks {args.start_week}-{args.end_week}."
+                    )
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_audit_cfb(args: argparse.Namespace) -> int:
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        audit = db.audit_cfb_data(season=args.season)
+        for key, val in sorted(audit.items()):
+            print(f"  {key}: {val}")
+        return 0
+    finally:
+        db.close()
+
+
 def cmd_load_depth_charts(args: argparse.Namespace) -> int:
     from ffpy.integrations.depth_chart import fetch_nflverse_depth_charts
     from ffpy.nflverse import setup_database
@@ -840,6 +1044,88 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db-path", help="Custom database path")
     p.add_argument("--quiet", action="store_true", help="Suppress progress output")
     p.set_defaults(func=cmd_load_rosters)
+
+    p = sub.add_parser(
+        "load-cfb",
+        help="Load college football games + rosters (optional PBP via --pbp)",
+    )
+    p.add_argument("--season", type=int, required=True, help="CFB season year")
+    p.add_argument("--pbp", action="store_true", help="Also load play-by-play (large download)")
+    p.add_argument("--skip-games", action="store_true", help="Skip game schedule load")
+    p.add_argument("--skip-rosters", action="store_true", help="Skip roster load")
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    p.set_defaults(func=cmd_load_cfb)
+
+    p = sub.add_parser("load-cfb-games", help="Load college football game schedules")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_load_cfb_games)
+
+    p = sub.add_parser("load-cfb-rosters", help="Load college football rosters")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_load_cfb_rosters)
+
+    p = sub.add_parser("load-cfb-pbp", help="Load college football play-by-play")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_load_cfb_pbp)
+
+    p = sub.add_parser("load-cfb-teams", help="Load CFB teams for SEC/B1G/ACC (CFBD or ESPN fallback)")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument(
+        "--conferences",
+        default="SEC,Big Ten,ACC",
+        help="Comma-separated conferences (default: SEC,Big Ten,ACC)",
+    )
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_load_cfb_teams)
+
+    p = sub.add_parser("load-cfb-stats", help="Load CFB player/team game stats from CFBD API")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--conferences", default="SEC,Big Ten,ACC")
+    p.add_argument("--start-week", type=int, default=1)
+    p.add_argument("--end-week", type=int, default=16)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_load_cfb_stats)
+
+    p = sub.add_parser("build-cfb-players", help="Build CFB player registry and ESPN↔CFBD ID map")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--conferences", default="SEC,Big Ten,ACC")
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_build_cfb_players)
+
+    p = sub.add_parser("compute-cfb-fantasy", help="Compute CFB weekly fantasy points")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--preset", default="college_standard")
+    p.add_argument("--fcs-discount", type=float, default=0.75)
+    p.add_argument("--conferences", default="SEC,Big Ten,ACC")
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_compute_cfb_fantasy)
+
+    p = sub.add_parser("compute-cfb-projections", help="Generate CFB player projections")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--week", type=int, default=None)
+    p.add_argument("--start-week", type=int, default=1)
+    p.add_argument("--end-week", type=int, default=16)
+    p.add_argument("--conferences", default="SEC,Big Ten,ACC")
+    p.add_argument("--model", default="historical", choices=["historical", "opponent_adj"])
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_compute_cfb_projections)
+
+    p = sub.add_parser("audit-cfb", help="Audit CFB fantasy data coverage")
+    p.add_argument("--season", type=int, default=None)
+    p.add_argument("--db-path", help="Custom database path")
+    p.set_defaults(func=cmd_audit_cfb)
 
     p = sub.add_parser(
         "compute-ol-stats",

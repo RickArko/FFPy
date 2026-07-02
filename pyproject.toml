@@ -53,6 +53,7 @@ analysis = [
     "matplotlib~=3.10",
     "seaborn>=0.13.0",
     "numpy>=1.26.0",
+    "xpress>=9.9.0",
 ]
 
 [tool.ruff]

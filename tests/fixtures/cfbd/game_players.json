@@ -1,0 +1,42 @@
+[
+  {
+    "id": 401628319,
+    "teams": [
+      {
+        "team": "Alabama",
+        "conference": "SEC",
+        "homeAway": "home",
+        "categories": [
+          {
+            "name": "passing",
+            "types": ["ATT", "COMP", "YDS", "TD", "INT"],
+            "athletes": [
+              {
+                "id": "4432577",
+                "name": "Jalen Milroe",
+                "stat": "20,14,280,3,1"
+              }
+            ]
+          },
+          {
+            "name": "rushing",
+            "types": ["ATT", "YDS", "TD"],
+            "athletes": [
+              {
+                "id": "4432577",
+                "name": "Jalen Milroe",
+                "stat": "8,45,1"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "team": "Western Kentucky",
+        "conference": "Conference USA",
+        "homeAway": "away",
+        "categories": []
+      }
+    ]
+  }
+]

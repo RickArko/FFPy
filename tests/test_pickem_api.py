@@ -279,6 +279,32 @@ def test_auth_config_exposes_public_supabase_settings_for_browser_sign_in(
     assert payload["supabase_url"] == "https://demo.supabase.co"
     assert payload["supabase_anon_key"] == "publishable-demo-key"
     assert payload["public_app_url"] == "http://localhost:8000"
+    assert payload["auth_redirect_url"] == "http://localhost:8000/pickem/"
+
+
+def test_auth_config_uses_request_origin_when_public_url_is_localhost(
+    api_db: FFPyDatabase,
+    auth_verifier: SupabaseTokenVerifier,
+    usage_logger: InMemoryUsageEventLogger,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(Config, "SUPABASE_URL", "https://demo.supabase.co")
+    monkeypatch.setattr(Config, "SUPABASE_BROWSER_KEY", "publishable-demo-key")
+    monkeypatch.setattr(Config, "PUBLIC_APP_URL", "http://localhost:8000")
+
+    app = create_app(
+        db_path=str(api_db.db_path),
+        require_auth=True,
+        auth_verifier=auth_verifier,
+        usage_logger=usage_logger,
+    )
+    with TestClient(app, base_url="https://ffpy-pickem.fly.dev") as test_client:
+        response = test_client.get("/api/auth/config")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["public_app_url"] == "https://ffpy-pickem.fly.dev"
+    assert payload["auth_redirect_url"] == "https://ffpy-pickem.fly.dev/pickem/"
 
 
 def test_auth_me_reports_auth_requirement(auth_client: TestClient):

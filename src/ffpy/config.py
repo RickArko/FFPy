@@ -30,6 +30,9 @@ class Config:
     SPORTSDATA_API_KEY = os.getenv("SPORTSDATA_API_KEY", "")
     RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
 
+    # CollegeFootballData API (CFB fantasy stats / teams)
+    CFBD_API_KEY = os.getenv("CFBD_API_KEY", "")
+
     # NFL Season Configuration
     NFL_SEASON = int(os.getenv("NFL_SEASON", "2024"))
 
@@ -85,6 +88,11 @@ class Config:
             API provider name ('espn' or 'sportsdata')
         """
         return cls.API_PROVIDER
+
+    @classmethod
+    def is_cfbd_configured(cls) -> bool:
+        """Check if CollegeFootballData API key is set."""
+        return cls.CFBD_API_KEY != "" and cls.CFBD_API_KEY != "your_cfbd_api_key_here"
 
     @classmethod
     def is_sportsdata_configured(cls) -> bool:

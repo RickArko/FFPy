@@ -28,6 +28,7 @@ createApp({
         supabase_url: null,
         supabase_anon_key: null,
         public_app_url: window.location.origin,
+        auth_redirect_url: `${window.location.origin}/pickem/`,
       },
       authForm: {
         mode: "signin",
@@ -134,9 +135,9 @@ createApp({
         return "You are signed in, but the backend still sees this email as unverified. Finish the email confirmation flow, then refresh or sign in again.";
       }
       if (this.pendingVerificationEmail) {
-        return `Check ${this.pendingVerificationEmail} for the verification link. Once you confirm, sign in here to unlock protected runs.`;
+        return `Check ${this.pendingVerificationEmail} for the email link. Open it to finish signing in and unlock protected runs.`;
       }
-      return "Create an account or sign in with email/password. Supabase handles the session, and the backend verifies email confirmation before expensive runs.";
+      return "Create an account with an email link or sign in with your password. Supabase handles the session, and the backend verifies email confirmation before expensive runs.";
     },
     authPillLabel() {
       if (!this.authRequired) {
@@ -151,7 +152,7 @@ createApp({
       if (this.authSubmitting) {
         return this.authForm.mode === "signup" ? "Creating account..." : "Signing in...";
       }
-      return this.authForm.mode === "signup" ? "Create Account" : "Sign In";
+      return this.authForm.mode === "signup" ? "Send Email Link" : "Sign In";
     },
     selectedStrategy() {
       return this.strategies.find((strategy) => strategy.name === this.singleForm.strategyName) || null;
@@ -325,11 +326,11 @@ createApp({
       try {
         let result;
         if (this.authForm.mode === "signup") {
-          result = await this.supabaseClient.auth.signUp({
+          result = await this.supabaseClient.auth.signInWithOtp({
             email: this.authForm.email,
-            password: this.authForm.password,
             options: {
-              emailRedirectTo: this.authConfig.public_app_url || window.location.origin,
+              emailRedirectTo: this.authConfig.auth_redirect_url || `${(this.authConfig.public_app_url || window.location.origin).replace(/\/$/, "")}/pickem/`,
+              shouldCreateUser: true,
             },
           });
         } else {
@@ -357,7 +358,7 @@ createApp({
 
         if (this.authForm.mode === "signup") {
           this.pendingVerificationEmail = this.authForm.email;
-          this.status = `Account created. Check ${this.authForm.email} for the verification link, then sign in here.`;
+          this.status = `Email link sent to ${this.authForm.email}. Open it to finish signing in.`;
           return;
         }
 
@@ -624,16 +625,16 @@ createApp({
                     <input id="auth-email" v-model.trim="authForm.email" type="email" placeholder="you@example.com" />
                   </div>
 
-                  <div class="field">
+                  <div class="field" v-if="authForm.mode === 'signin'">
                     <label for="auth-password">Password</label>
                     <input id="auth-password" v-model="authForm.password" type="password" placeholder="Use a strong password" />
                   </div>
 
                   <p class="field-help" v-if="authForm.mode === 'signup'">
-                    Supabase will send a verification email before protected backtests unlock.
+                    Supabase will send an email link to finish account setup and unlock protected backtests.
                   </p>
                   <p class="field-help" v-if="pendingVerificationEmail">
-                    Waiting on verification for {{ pendingVerificationEmail }}.
+                    Waiting on the email link for {{ pendingVerificationEmail }}.
                   </p>
 
                   <button class="action-button" type="button" :disabled="authSubmitting || loading" @click="submitAuthForm">

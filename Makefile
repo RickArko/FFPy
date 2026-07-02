@@ -8,6 +8,7 @@
         precommit precommit-install precommit-update \
         db.prepare db.migrate db.load db.update db.stats db.mock \
         db.compute-stats db.ngs db.injuries db.audit db.dfs db.adp db.depth-chart db.weather \
+        db.cfb db.cfb-games db.cfb-rosters db.cfb-pbp cfb-full-data \
         supabase.check fly.app fly.volume fly.secrets fly.secrets-list \
         fly.deploy fly.status fly.logs fly.token clean clean-all
 
@@ -158,6 +159,53 @@ db.depth-chart: ## Load depth charts (SEASON=2024)
 
 db.weather: ## Add historical weather data (SEASON=2024)
 	$(UV) run ffpy-db add-weather --season $(SEASON)
+
+db.cfb: ## Load CFB games + rosters (SEASON=2024; add CFB_PBP=1 for play-by-play)
+	$(UV) run ffpy-db load-cfb --season $(SEASON) $(if $(CFB_PBP),--pbp,)
+
+db.cfb-games: ## Load college football game schedules (SEASON=2024)
+	$(UV) run ffpy-db load-cfb-games --season $(SEASON)
+
+db.cfb-rosters: ## Load college football rosters (SEASON=2024)
+	$(UV) run ffpy-db load-cfb-rosters --season $(SEASON)
+
+db.cfb-pbp: ## Load college football play-by-play (SEASON=2024, large download)
+	$(UV) run ffpy-db load-cfb-pbp --season $(SEASON)
+
+CFB_CONFERENCES ?= SEC,Big Ten,ACC
+
+db.cfb-teams: ## Load CFB teams for SEC/B1G/ACC (SEASON=2024)
+	$(UV) run ffpy-db load-cfb-teams --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+
+db.cfb-stats: ## Load CFB player game stats from CFBD (requires CFBD_API_KEY)
+	$(UV) run ffpy-db load-cfb-stats --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+
+db.cfb-players: ## Build CFB player registry + ID crosswalk
+	$(UV) run ffpy-db build-cfb-players --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+
+db.cfb-fantasy: ## Compute CFB weekly fantasy points
+	$(UV) run ffpy-db compute-cfb-fantasy --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+
+db.cfb-projections: ## Generate CFB projections (WEEK=5 optional, MODEL=historical)
+	$(UV) run ffpy-db compute-cfb-projections --season $(SEASON) --conferences "$(CFB_CONFERENCES)" --model $(or $(MODEL),historical) $(if $(WEEK),--week $(WEEK),)
+
+db.cfb-projections-v2: ## Generate opponent-adjusted CFB projections
+	$(UV) run ffpy-db compute-cfb-projections --season $(SEASON) --conferences "$(CFB_CONFERENCES)" --model opponent_adj $(if $(WEEK),--week $(WEEK),)
+
+db.audit-cfb: ## Audit CFB fantasy data tables
+	$(UV) run ffpy-db audit-cfb --season $(SEASON)
+
+cfb-full-data: ## Full CFB fantasy pipeline for SEC/B1G/ACC (SEASON=2024, requires CFBD_API_KEY for stats)
+	$(UV) run ffpy-db load-cfb-teams --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+	-$(UV) run ffpy-db load-cfb --season $(SEASON) --skip-rosters
+	-$(UV) run ffpy-db load-cfb-rosters --season $(SEASON)
+	$(UV) run ffpy-db load-cfb-stats --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+	$(UV) run ffpy-db build-cfb-players --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+	$(UV) run ffpy-db compute-cfb-fantasy --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+	$(UV) run ffpy-db compute-cfb-projections --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+	$(UV) run ffpy-db audit-cfb --season $(SEASON)
+	@echo ""
+	@echo "CFB fantasy pipeline complete for $(SEASON) ($(CFB_CONFERENCES))."
 
 # ---- Fly.io -------------------------------------------------------
 

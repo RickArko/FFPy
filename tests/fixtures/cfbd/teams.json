@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "school": "Alabama",
+    "abbreviation": "ALA",
+    "conference": "SEC",
+    "classification": "fbs",
+    "color": "#9e1b32",
+    "alt_color": "#ffffff"
+  },
+  {
+    "id": 2,
+    "school": "Georgia",
+    "abbreviation": "UGA",
+    "conference": "SEC",
+    "classification": "fbs"
+  }
+]
