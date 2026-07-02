@@ -246,6 +246,8 @@ def test_cfb_database_roundtrip(tmp_path: Path):
             }
         finally:
             conn.close()
-        assert tables == {"cfb_games", "cfb_rosters", "cfb_plays"}
+        assert {"cfb_games", "cfb_rosters", "cfb_plays"}.issubset(tables)
+        assert "cfb_teams" in tables
+        assert "cfb_players" in tables
     finally:
         db.close()

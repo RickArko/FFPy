@@ -173,6 +173,57 @@ def normalize_cfb_schedule(schedule_df: pd.DataFrame, source: str = "espn") -> p
     return out.drop_duplicates(subset=["game_id"]).reset_index(drop=True)
 
 
+def normalize_cfb_schedule_meta(schedule_df: pd.DataFrame) -> pd.DataFrame:
+    """Extract conference/classification metadata for cfb_game_meta."""
+    if schedule_df.empty:
+        return pd.DataFrame()
+    out = pd.DataFrame()
+    out["game_id"] = schedule_df["game_id"].astype(str)
+    for src, dst in (
+        ("home_conference_id", "home_conference"),
+        ("away_conference_id", "away_conference"),
+    ):
+        if src in schedule_df.columns:
+            out[dst] = schedule_df[src].astype(str)
+    if "home_conference" in schedule_df.columns:
+        out["home_conference"] = schedule_df["home_conference"]
+    if "away_conference" in schedule_df.columns:
+        out["away_conference"] = schedule_df["away_conference"]
+    return out.drop_duplicates(subset=["game_id"]).reset_index(drop=True)
+
+
+def cfb_team_summaries_url(season: int) -> str:
+    return f"{SPORTSDATAVERSE_BASE}/espn_cfb_team_summaries/cfb_team_summaries_{season}.parquet"
+
+
+def cfb_player_box_url(season: int) -> str:
+    return f"{SPORTSDATAVERSE_BASE}/espn_cfb_player_box/cfb_player_box_{season}.parquet"
+
+
+def normalize_espn_team_summaries(df: pd.DataFrame, season: int) -> pd.DataFrame:
+    """Map ESPN team summaries to cfb_teams rows."""
+    if df.empty:
+        return pd.DataFrame()
+    school_col = "team_name" if "team_name" in df.columns else "school"
+    rows = []
+    for _, row in df.iterrows():
+        school = row.get(school_col) or row.get("team") or ""
+        from ffpy.integrations.cfbd import team_key_from_name
+
+        rows.append(
+            {
+                "team_key": team_key_from_name(str(school)),
+                "season": season,
+                "cfbd_team": school,
+                "abbreviation": row.get("team_abbreviation") or row.get("abbreviation"),
+                "school": school,
+                "conference": row.get("conference") or "",
+                "classification": row.get("fbs_class") or row.get("classification"),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def extract_cfb_games_from_pbp(pbp_df: pd.DataFrame, source: str = "cfbfastR") -> pd.DataFrame:
     """Derive game-level rows from cfbfastR play-by-play when schedule parquet is unavailable."""
     if pbp_df.empty:
@@ -249,8 +300,10 @@ def normalize_cfb_rosters(rosters_df: pd.DataFrame) -> pd.DataFrame:
     position_href = rosters_df.get("position_href")
     if position_href is not None:
         out["position_id"] = position_href.astype(str).str.extract(r"/positions/(\d+)", expand=False)
+        out["position"] = out["position_id"].map(lambda x: position_from_id(x) if pd.notna(x) else None)
     else:
         out["position_id"] = None
+        out["position"] = None
 
     out["team_abbreviation"] = rosters_df.get("team_abbreviation")
     out["team_name"] = rosters_df.get("team_name")
@@ -501,3 +554,100 @@ class CFBVerseLoader:
             stats["plays"] = pbp_stats.get("plays", 0)
 
         return stats
+
+    def load_teams(
+        self,
+        season: int,
+        conferences: list[str] | None = None,
+        verbose: bool = True,
+    ) -> dict[str, int]:
+        """Load cfb_teams from CFBD (primary) or ESPN team summaries (fallback)."""
+        from ffpy.integrations.cfbd import DEFAULT_CONFERENCES, CFBDClient
+
+        confs = conferences or list(DEFAULT_CONFERENCES)
+        if verbose:
+            print(f"Loading CFB teams for {season} ({', '.join(confs)})...")
+
+        stored = 0
+        try:
+            client = CFBDClient()
+            teams = client.fetch_teams_for_conferences(season, confs)
+            stored = self.db.store_cfb_teams(teams)
+            if verbose:
+                print(f"  [OK] Stored {stored} teams from CFBD")
+        except Exception as exc:
+            if verbose:
+                print(f"  [WARN] CFBD teams failed ({exc}); trying ESPN team summaries...")
+            try:
+                summaries = fetch_cfb_parquet(cfb_team_summaries_url(season)).to_pandas()
+                teams = normalize_espn_team_summaries(summaries, season)
+                teams = teams[teams["conference"].isin(confs)] if not teams.empty else teams
+                stored = self.db.store_cfb_teams(teams)
+                if verbose:
+                    print(f"  [OK] Stored {stored} teams from ESPN summaries")
+            except FileNotFoundError:
+                if verbose:
+                    print("  [WARN] No ESPN team summaries available")
+        return {"stored": stored}
+
+    def load_cfbd_stats(
+        self,
+        season: int,
+        conferences: list[str] | None = None,
+        start_week: int = 1,
+        end_week: int = 16,
+        verbose: bool = True,
+    ) -> dict[str, int]:
+        """Load player game stats and team defense from CFBD API."""
+        from ffpy.integrations.cfbd import DEFAULT_CONFERENCES, CFBDClient
+
+        confs = conferences or list(DEFAULT_CONFERENCES)
+        client = CFBDClient()
+        player_frames = []
+        def_frames = []
+        game_meta_rows = []
+
+        if verbose:
+            print(f"Loading CFBD stats for {season} weeks {start_week}-{end_week}...")
+
+        for week in range(start_week, end_week + 1):
+            for conf in confs:
+                games = client.fetch_games(season, week=week, conference=conf)
+                if not games.empty:
+                    for _, g in games.iterrows():
+                        game_meta_rows.append(
+                            {
+                                "game_id": str(g.get("cfbd_game_id")),
+                                "cfbd_game_id": g.get("cfbd_game_id"),
+                                "home_conference": g.get("home_conference"),
+                                "away_conference": g.get("away_conference"),
+                                "home_classification": g.get("home_classification"),
+                                "away_classification": g.get("away_classification"),
+                                "home_team_key": g.get("home_team_key"),
+                                "away_team_key": g.get("away_team_key"),
+                            }
+                        )
+                pf = client.fetch_game_players(season, week=week, conference=conf)
+                if not pf.empty:
+                    player_frames.append(pf)
+                df = client.fetch_game_teams(season, week=week, conference=conf)
+                if not df.empty:
+                    def_frames.append(df)
+
+        players_stored = 0
+        def_stored = 0
+        meta_stored = 0
+        if player_frames:
+            players_stored = self.db.store_cfb_player_game_stats(pd.concat(player_frames, ignore_index=True))
+        if def_frames:
+            def_stored = self.db.store_cfb_team_defense_stats(pd.concat(def_frames, ignore_index=True))
+        if game_meta_rows:
+            meta_stored = self.db.store_cfb_game_meta(pd.DataFrame(game_meta_rows))
+
+        if verbose:
+            print(
+                f"  [OK] Stored {players_stored} player stat rows, "
+                f"{def_stored} defense rows, {meta_stored} game meta"
+            )
+
+        return {"player_stats": players_stored, "defense_stats": def_stored, "game_meta": meta_stored}

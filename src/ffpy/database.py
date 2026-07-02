@@ -100,10 +100,25 @@ class FFPyDatabase:
             "013_offensive_line_stats.sql",
             "014_league_import.sql",
             "015_cfb_schema.sql",
+            "016_cfb_fantasy_schema.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
+        self._upgrade_cfb_columns()
         self.conn.commit()
+
+    def _upgrade_cfb_columns(self) -> None:
+        """Idempotent column adds for CFB tables upgraded from 015."""
+        alters = [
+            "ALTER TABLE cfb_rosters ADD COLUMN position_id TEXT",
+            "ALTER TABLE cfb_rosters ADD COLUMN position TEXT",
+            "ALTER TABLE cfb_rosters ADD COLUMN cfbd_athlete_id INTEGER",
+        ]
+        for stmt in alters:
+            try:
+                self.conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
 
     def close(self):
         """Close database connection."""
@@ -1923,6 +1938,485 @@ class FFPyDatabase:
         except Exception:
             return pd.DataFrame(columns=["season", "n_games", "n_roster_players", "n_plays"])
 
+    # ==================== CFB FANTASY (Migration 016) ====================
+
+    def store_cfb_teams(self, df: pd.DataFrame) -> int:
+        if df.empty:
+            return 0
+        cols = [
+            "team_key",
+            "season",
+            "cfbd_team",
+            "espn_team_id",
+            "abbreviation",
+            "school",
+            "conference",
+            "division",
+            "classification",
+            "color",
+            "alt_color",
+        ]
+        available = [c for c in cols if c in df.columns]
+        subset = df[available].drop_duplicates(subset=["team_key", "season"])
+        column_sql = ", ".join(available)
+        placeholders = ", ".join("?" for _ in available)
+        update_sql = ", ".join(f"{c}=excluded.{c}" for c in available if c not in ("team_key", "season"))
+        self.conn.executemany(
+            f"""INSERT INTO cfb_teams ({column_sql}) VALUES ({placeholders})
+                ON CONFLICT(team_key, season) DO UPDATE SET {update_sql}""",
+            _sqlite_records(subset),
+        )
+        self.conn.commit()
+        return len(subset)
+
+    def get_cfb_teams(self, season: int, conference: Optional[str] = None) -> pd.DataFrame:
+        query = "SELECT * FROM cfb_teams WHERE season = ?"
+        params: list = [season]
+        if conference:
+            query += " AND conference = ?"
+            params.append(conference)
+        query += " ORDER BY conference, school"
+        return pd.read_sql(query, self.conn, params=params)
+
+    def store_cfb_game_meta(self, df: pd.DataFrame) -> int:
+        if df.empty:
+            return 0
+        cols = [
+            "game_id",
+            "cfbd_game_id",
+            "home_conference",
+            "away_conference",
+            "home_classification",
+            "away_classification",
+            "home_team_key",
+            "away_team_key",
+        ]
+        available = [c for c in cols if c in df.columns]
+        subset = df[available].copy()
+        subset["game_id"] = subset["game_id"].astype(str)
+        column_sql = ", ".join(available)
+        placeholders = ", ".join("?" for _ in available)
+        update_sql = ", ".join(f"{c}=excluded.{c}" for c in available if c != "game_id")
+        self.conn.executemany(
+            f"""INSERT INTO cfb_game_meta ({column_sql}) VALUES ({placeholders})
+                ON CONFLICT(game_id) DO UPDATE SET {update_sql}""",
+            _sqlite_records(subset),
+        )
+        self.conn.commit()
+        return len(subset)
+
+    def get_cfb_game_meta(self, season: Optional[int] = None) -> pd.DataFrame:
+        if season is None:
+            return pd.read_sql("SELECT * FROM cfb_game_meta", self.conn)
+        return pd.read_sql(
+            """
+            SELECT m.* FROM cfb_game_meta m
+            JOIN cfb_games g ON m.game_id = g.game_id
+            WHERE g.season = ?
+            """,
+            self.conn,
+            params=[season],
+        )
+
+    def store_cfb_player_game_stats(self, df: pd.DataFrame) -> int:
+        if df.empty:
+            return 0
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(cfb_player_game_stats)")
+        schema_cols = {row[1] for row in cursor.fetchall()}
+        cols = [c for c in df.columns if c in schema_cols and c != "stat_id"]
+        if not cols:
+            return 0
+        update_cols = [c for c in cols if c not in ("cfbd_athlete_id", "cfbd_game_id", "category")]
+        update_sql = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
+        column_sql = ", ".join(cols)
+        placeholders = ", ".join("?" for _ in cols)
+        cursor.executemany(
+            f"""INSERT INTO cfb_player_game_stats ({column_sql}) VALUES ({placeholders})
+                ON CONFLICT(cfbd_athlete_id, cfbd_game_id, category) DO UPDATE SET {update_sql}""",
+            _sqlite_records(df[cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_cfb_player_game_stats(
+        self, season: int, week: Optional[int] = None, team_key: Optional[str] = None
+    ) -> pd.DataFrame:
+        query = "SELECT * FROM cfb_player_game_stats WHERE season = ?"
+        params: list = [season]
+        if week is not None:
+            query += " AND week = ?"
+            params.append(week)
+        if team_key:
+            query += " AND team_key = ?"
+            params.append(team_key)
+        return pd.read_sql(query, self.conn, params=params)
+
+    def store_cfb_team_defense_stats(self, df: pd.DataFrame) -> int:
+        if df.empty:
+            return 0
+        cols = [
+            "team_key",
+            "cfbd_game_id",
+            "season",
+            "week",
+            "opponent_team_key",
+            "sacks",
+            "interceptions",
+            "fumbles_recovered",
+            "defensive_tds",
+            "safeties",
+            "points_allowed",
+            "yards_allowed",
+            "stat_json",
+            "source",
+        ]
+        available = [c for c in cols if c in df.columns]
+        column_sql = ", ".join(available)
+        placeholders = ", ".join("?" for _ in available)
+        update_sql = ", ".join(
+            f"{c}=excluded.{c}" for c in available if c not in ("team_key", "cfbd_game_id")
+        )
+        self.conn.executemany(
+            f"""INSERT INTO cfb_team_defense_stats ({column_sql}) VALUES ({placeholders})
+                ON CONFLICT(team_key, cfbd_game_id) DO UPDATE SET {update_sql}""",
+            _sqlite_records(df[available]),
+        )
+        self.conn.commit()
+        return len(df)
+
+    def get_cfb_team_defense_stats(self, season: int, week: Optional[int] = None) -> pd.DataFrame:
+        query = "SELECT * FROM cfb_team_defense_stats WHERE season = ?"
+        params: list = [season]
+        if week is not None:
+            query += " AND week = ?"
+            params.append(week)
+        return pd.read_sql(query, self.conn, params=params)
+
+    def store_cfb_players(self, df: pd.DataFrame, season: int) -> int:
+        if df.empty:
+            return 0
+        df = df.copy()
+        df["season"] = season
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(cfb_players)")
+        schema_cols = {row[1] for row in cursor.fetchall()}
+        cols = [
+            c for c in df.columns if c in schema_cols and c not in ("player_id", "created_at", "updated_at")
+        ]
+        stored = 0
+        for _, row in df.iterrows():
+            cfbd_id = row.get("cfbd_athlete_id")
+            espn_id = row.get("espn_athlete_id")
+            existing = None
+            if pd.notna(cfbd_id):
+                cursor.execute(
+                    "SELECT player_id FROM cfb_players WHERE season = ? AND cfbd_athlete_id = ?",
+                    (season, int(cfbd_id)),
+                )
+                existing = cursor.fetchone()
+            if existing is None and pd.notna(espn_id):
+                cursor.execute(
+                    "SELECT player_id FROM cfb_players WHERE season = ? AND espn_athlete_id = ?",
+                    (season, int(espn_id)),
+                )
+                existing = cursor.fetchone()
+            values = [_sqlite_value(row[c]) for c in cols]
+            if existing:
+                set_sql = ", ".join(f"{c}=?" for c in cols)
+                cursor.execute(
+                    f"UPDATE cfb_players SET {set_sql}, updated_at = CURRENT_TIMESTAMP WHERE player_id = ?",
+                    values + [existing[0]],
+                )
+            else:
+                column_sql = ", ".join(cols)
+                placeholders = ", ".join("?" for _ in cols)
+                cursor.execute(
+                    f"INSERT INTO cfb_players ({column_sql}) VALUES ({placeholders})",
+                    values,
+                )
+            stored += 1
+        self.conn.commit()
+        return stored
+
+    def get_cfb_players(
+        self,
+        season: int,
+        conferences: Optional[List[str]] = None,
+        position: Optional[str] = None,
+        fantasy_eligible: Optional[bool] = None,
+    ) -> pd.DataFrame:
+        query = "SELECT * FROM cfb_players WHERE season = ?"
+        params: list = [season]
+        if conferences:
+            placeholders = ", ".join("?" for _ in conferences)
+            query += f" AND conference IN ({placeholders})"
+            params.extend(conferences)
+        if position:
+            query += " AND position = ?"
+            params.append(position)
+        if fantasy_eligible is not None:
+            query += " AND fantasy_eligible = ?"
+            params.append(1 if fantasy_eligible else 0)
+        query += " ORDER BY full_name"
+        return pd.read_sql(query, self.conn, params=params)
+
+    def store_cfb_id_map(self, df: pd.DataFrame) -> int:
+        if df.empty:
+            return 0
+        cols = [
+            "season",
+            "espn_athlete_id",
+            "cfbd_athlete_id",
+            "full_name",
+            "team_key",
+            "match_method",
+            "confidence",
+        ]
+        available = [c for c in cols if c in df.columns]
+        return _insert_or_ignore_dataframe(self.conn, "cfb_id_map", df, available)
+
+    def store_cfb_fantasy_points(self, df: pd.DataFrame) -> int:
+        if df.empty:
+            return 0
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(cfb_fantasy_points)")
+        schema_cols = {row[1] for row in cursor.fetchall()}
+        cols = [c for c in df.columns if c in schema_cols and c != "fp_id"]
+        update_sql = ", ".join(
+            f"{c}=excluded.{c}" for c in cols if c not in ("player_id", "season", "week", "scoring_preset")
+        )
+        column_sql = ", ".join(cols)
+        placeholders = ", ".join("?" for _ in cols)
+        cursor.executemany(
+            f"""INSERT INTO cfb_fantasy_points ({column_sql}) VALUES ({placeholders})
+                ON CONFLICT(player_id, season, week, scoring_preset) DO UPDATE SET {update_sql}""",
+            _sqlite_records(df[cols]),
+        )
+        self.conn.commit()
+        return len(df)
+
+    def get_cfb_fantasy_points(
+        self,
+        season: int,
+        week: Optional[int] = None,
+        max_week: Optional[int] = None,
+        player_id: Optional[int] = None,
+    ) -> pd.DataFrame:
+        query = "SELECT * FROM cfb_fantasy_points WHERE season = ?"
+        params: list = [season]
+        if week is not None:
+            query += " AND week = ?"
+            params.append(week)
+        if max_week is not None:
+            query += " AND week <= ?"
+            params.append(max_week)
+        if player_id is not None:
+            query += " AND player_id = ?"
+            params.append(player_id)
+        query += " ORDER BY week, actual_points DESC"
+        return pd.read_sql(query, self.conn, params=params)
+
+    def store_cfb_projections(self, df: pd.DataFrame) -> int:
+        if df.empty:
+            return 0
+        cols = [
+            "player_id",
+            "season",
+            "week",
+            "model",
+            "projected_points",
+            "passing_yards",
+            "passing_tds",
+            "interceptions",
+            "rushing_yards",
+            "rushing_tds",
+            "receiving_yards",
+            "receiving_tds",
+            "receptions",
+        ]
+        available = [c for c in cols if c in df.columns]
+        update_sql = ", ".join(
+            f"{c}=excluded.{c}" for c in available if c not in ("player_id", "season", "week", "model")
+        )
+        column_sql = ", ".join(available)
+        placeholders = ", ".join("?" for _ in available)
+        self.conn.executemany(
+            f"""INSERT INTO cfb_projections ({column_sql}) VALUES ({placeholders})
+                ON CONFLICT(player_id, season, week, model) DO UPDATE SET {update_sql}""",
+            _sqlite_records(df[available]),
+        )
+        self.conn.commit()
+        return len(df)
+
+    def get_cfb_projections(
+        self, season: int, week: int, model: str = "historical", conferences: Optional[List[str]] = None
+    ) -> pd.DataFrame:
+        query = """
+            SELECT p.*, pl.full_name, pl.position, pl.team_key, pl.conference
+            FROM cfb_projections p
+            JOIN cfb_players pl ON p.player_id = pl.player_id AND p.season = pl.season
+            WHERE p.season = ? AND p.week = ? AND p.model = ?
+        """
+        params: list = [season, week, model]
+        if conferences:
+            placeholders = ", ".join("?" for _ in conferences)
+            query += f" AND pl.conference IN ({placeholders})"
+            params.extend(conferences)
+        query += " ORDER BY p.projected_points DESC"
+        return pd.read_sql(query, self.conn, params=params)
+
+    def create_cfb_league(self, league: dict) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO cfb_leagues (
+                league_id, user_id, name, season, allowed_conferences,
+                scoring_json, roster_slots_json, num_teams, playoff_weeks, fcs_discount_pct
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                league["league_id"],
+                league["user_id"],
+                league["name"],
+                league["season"],
+                league["allowed_conferences"],
+                league["scoring_json"],
+                league["roster_slots_json"],
+                league.get("num_teams", 10),
+                league.get("playoff_weeks"),
+                league.get("fcs_discount_pct", 0.75),
+            ),
+        )
+        self.conn.commit()
+
+    def get_cfb_league(self, league_id: str) -> Optional[dict]:
+        cursor = self.conn.execute("SELECT * FROM cfb_leagues WHERE league_id = ?", (league_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def list_cfb_leagues(self, user_id: str) -> list[dict]:
+        cursor = self.conn.execute(
+            "SELECT * FROM cfb_leagues WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+
+    def create_cfb_league_team(self, team: dict) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO cfb_league_teams (league_team_id, league_id, team_name, owner_name, faab_budget)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                team["league_team_id"],
+                team["league_id"],
+                team["team_name"],
+                team.get("owner_name"),
+                team.get("faab_budget", 100),
+            ),
+        )
+        self.conn.commit()
+
+    def get_cfb_league_teams(self, league_id: str) -> list[dict]:
+        cursor = self.conn.execute(
+            "SELECT * FROM cfb_league_teams WHERE league_id = ? ORDER BY team_name",
+            (league_id,),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+
+    def set_cfb_lineup(self, league_team_id: str, season: int, week: int, entries: list[dict]) -> None:
+        self.conn.execute(
+            "DELETE FROM cfb_lineups WHERE league_team_id = ? AND season = ? AND week = ?",
+            (league_team_id, season, week),
+        )
+        for entry in entries:
+            self.conn.execute(
+                """
+                INSERT INTO cfb_lineups (league_team_id, season, week, player_id, slot, is_starter)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    league_team_id,
+                    season,
+                    week,
+                    entry["player_id"],
+                    entry.get("slot", "FLEX"),
+                    entry.get("is_starter", 1),
+                ),
+            )
+        self.conn.commit()
+
+    def get_cfb_lineup(self, league_team_id: str, season: int, week: int) -> pd.DataFrame:
+        return pd.read_sql(
+            """
+            SELECT l.*, p.full_name, p.position, p.team_key
+            FROM cfb_lineups l
+            JOIN cfb_players p ON l.player_id = p.player_id AND l.season = p.season
+            WHERE l.league_team_id = ? AND l.season = ? AND l.week = ?
+            """,
+            self.conn,
+            params=[league_team_id, season, week],
+        )
+
+    def score_cfb_league_week(self, league_id: str, season: int, week: int) -> list[dict]:
+        teams = self.get_cfb_league_teams(league_id)
+        results = []
+        for team in teams:
+            lineup = self.get_cfb_lineup(team["league_team_id"], season, week)
+            if lineup.empty:
+                results.append({"league_team_id": team["league_team_id"], "points": 0.0, "starters": []})
+                continue
+            starters = lineup[lineup["is_starter"] == 1]
+            total = 0.0
+            starter_rows = []
+            for _, slot in starters.iterrows():
+                fp = self.get_cfb_fantasy_points(season=season, week=week, player_id=int(slot["player_id"]))
+                pts = float(fp["actual_points"].iloc[0]) if not fp.empty else 0.0
+                total += pts
+                starter_rows.append(
+                    {
+                        "player_id": int(slot["player_id"]),
+                        "full_name": slot["full_name"],
+                        "position": slot["position"],
+                        "points": pts,
+                    }
+                )
+            results.append(
+                {
+                    "league_team_id": team["league_team_id"],
+                    "team_name": team["team_name"],
+                    "points": round(total, 2),
+                    "starters": starter_rows,
+                }
+            )
+        return results
+
+    def audit_cfb_data(self, season: Optional[int] = None) -> dict:
+        cursor = self.conn.cursor()
+        tables = [
+            "cfb_teams",
+            "cfb_players",
+            "cfb_player_game_stats",
+            "cfb_team_defense_stats",
+            "cfb_fantasy_points",
+            "cfb_projections",
+            "cfb_games",
+            "cfb_rosters",
+        ]
+        results: dict = {}
+        for table in tables:
+            try:
+                if season and table in ("cfb_teams", "cfb_players", "cfb_games", "cfb_rosters"):
+                    cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE season = ?", (season,))
+                elif season and "season" in table:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE season = ?", (season,))
+                else:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                results[f"{table}_rows"] = int(cursor.fetchone()[0])
+            except Exception:
+                results[f"{table}_rows"] = -1
+        return results
+
     # ==================== VEGAS IMPLIED TEAM TOTALS ====================
 
     def get_implied_team_totals(
@@ -2350,6 +2844,9 @@ class FFPyDatabase:
             "cfb_games",
             "cfb_rosters",
             "cfb_plays",
+            "cfb_teams",
+            "cfb_players",
+            "cfb_fantasy_points",
         ]
         for table in tables:
             try:

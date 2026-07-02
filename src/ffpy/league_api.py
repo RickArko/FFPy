@@ -730,6 +730,17 @@ def create_league_app(
     app.include_router(import_router)
     app.include_router(league_router)
 
+    from ffpy.cfb_league_api import register_cfb_league_router
+
+    cfb_router = APIRouter(prefix="/api/cfb", tags=["cfb"])
+    register_cfb_league_router(
+        cfb_router,
+        get_db=get_db,
+        get_current_user=get_current_user,
+        require_user=auth_enabled,
+    )
+    app.include_router(cfb_router)
+
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.exception("Unhandled exception")
