@@ -113,6 +113,23 @@ make fly.token
 
 Add the token to the GitHub repository secret named `FLY_API_TOKEN`.
 
+## Supabase auth redirects (production)
+
+Email confirmation links must return to the deployed app, not `localhost`. Configure both sides:
+
+**Fly** — `PUBLIC_APP_URL` is set in `fly.toml` (`https://ffpy-pickem.fly.dev`) and via `make fly.secrets`. Redeploy after changing it.
+
+**Supabase dashboard** → **Authentication** → **URL Configuration**:
+
+| Setting | Value |
+|---------|--------|
+| Site URL | `https://ffpy-pickem.fly.dev/league/` |
+| Redirect URLs | `https://ffpy-pickem.fly.dev/**` |
+
+Also add `http://localhost:8080/**` if you test locally against the same Supabase project.
+
+The league app passes `emailRedirectTo: …/league/` on sign-up so verification emails land back on the League Manager.
+
 ## Security notes
 
 - Keep `FLY_API_TOKEN` only in GitHub Actions secrets or your local shell.
