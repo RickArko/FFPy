@@ -10,6 +10,7 @@ primary_region = "iad"
   DATABASE_PATH = "/data/ffpy.db"
   DATABASE_TYPE = "sqlite"
   WEB_AUTH_ENABLED = "true"
+  PUBLIC_APP_URL = "https://ffpy-pickem.fly.dev"
   PYTHONUNBUFFERED = "1"
   PYTHONDONTWRITEBYTECODE = "1"
 

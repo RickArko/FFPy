@@ -556,6 +556,10 @@ createApp({
         this.authSubmitting = false;
       }
     },
+    _authRedirectUrl() {
+      const base = (this.authConfig.public_app_url || window.location.origin).replace(/\/$/, "");
+      return `${base}/league/`;
+    },
     async signUp() {
       this.clearMessages();
       this.authSubmitting = true;
@@ -564,6 +568,9 @@ createApp({
         const { data, error } = await this.supabaseClient.auth.signUp({
           email: this.authForm.email,
           password: this.authForm.password,
+          options: {
+            emailRedirectTo: this._authRedirectUrl(),
+          },
         });
         if (error) throw error;
         this.pendingVerificationEmail = this.authForm.email;
