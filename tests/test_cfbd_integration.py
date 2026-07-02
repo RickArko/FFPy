@@ -28,6 +28,17 @@ def test_normalize_cfbd_game_players_fixture():
     assert df["rushing_yards"].sum() >= 45
 
 
+def test_normalize_cfbd_game_players_v2_fixture():
+    """CFBD API now nests athletes under each stat type block."""
+    data = json.loads((FIXTURES / "game_players_v2.json").read_text())
+    df = normalize_cfbd_game_players(data, season=2024, week=1)
+    assert not df.empty
+    milroe = df[df["cfbd_athlete_id"] == 4432577]
+    assert milroe["passing_yards"].sum() == 280
+    assert milroe["passing_tds"].sum() == 3
+    assert milroe["rushing_yards"].sum() == 45
+
+
 def test_fetch_teams_from_fixture(monkeypatch):
     teams_data = json.loads((FIXTURES / "teams.json").read_text())
 

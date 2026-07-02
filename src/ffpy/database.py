@@ -101,6 +101,7 @@ class FFPyDatabase:
             "014_league_import.sql",
             "015_cfb_schema.sql",
             "016_cfb_fantasy_schema.sql",
+            "017_cfb_transactions.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
@@ -113,6 +114,7 @@ class FFPyDatabase:
             "ALTER TABLE cfb_rosters ADD COLUMN position_id TEXT",
             "ALTER TABLE cfb_rosters ADD COLUMN position TEXT",
             "ALTER TABLE cfb_rosters ADD COLUMN cfbd_athlete_id INTEGER",
+            "ALTER TABLE cfb_player_game_stats ADD COLUMN full_name TEXT",
         ]
         for stmt in alters:
             try:
@@ -2390,6 +2392,255 @@ class FFPyDatabase:
                 }
             )
         return results
+
+    def get_cfb_league_roster(self, league_team_id: str) -> pd.DataFrame:
+        return pd.read_sql(
+            """
+            SELECT r.*, p.full_name, p.position, p.team_key, p.conference
+            FROM cfb_league_rosters r
+            JOIN cfb_players p ON r.player_id = p.player_id
+            WHERE r.league_team_id = ?
+            ORDER BY r.slot, p.full_name
+            """,
+            self.conn,
+            params=[league_team_id],
+        )
+
+    def get_cfb_league_rostered_player_ids(self, league_id: str) -> set[int]:
+        cursor = self.conn.execute(
+            """
+            SELECT r.player_id
+            FROM cfb_league_rosters r
+            JOIN cfb_league_teams t ON r.league_team_id = t.league_team_id
+            WHERE t.league_id = ?
+            """,
+            (league_id,),
+        )
+        return {int(row[0]) for row in cursor.fetchall()}
+
+    def _cfb_max_roster_size(self, league: dict) -> int:
+        import json
+
+        from ffpy.optimizer import RosterConstraints
+
+        slots = json.loads(league.get("roster_slots_json") or "{}")
+        if slots:
+            constraints = RosterConstraints.from_dict(slots)
+            starters = constraints.total_starters or (
+                sum(constraints.positions.values()) + constraints.num_flex
+            )
+            return int(starters) + 6
+        return 15
+
+    def validate_cfb_roster_move(self, league_id: str, player_id: int, action: str = "add") -> None:
+        import json
+
+        league = self.get_cfb_league(league_id)
+        if not league:
+            raise ValueError("League not found")
+        if action != "add":
+            return
+        confs = json.loads(league.get("allowed_conferences") or "[]")
+        season = int(league["season"])
+        player = pd.read_sql(
+            "SELECT * FROM vw_cfb_eligible_players WHERE player_id = ? AND season = ?",
+            self.conn,
+            params=[player_id, season],
+        )
+        if player.empty:
+            raise ValueError("Player is not eligible for this league")
+        if confs and player.iloc[0]["conference"] not in confs:
+            raise ValueError("Player conference not allowed in this league")
+        rostered = self.get_cfb_league_rostered_player_ids(league_id)
+        if player_id in rostered:
+            raise ValueError("Player is already rostered in this league")
+
+    def add_cfb_roster_player(self, league_team_id: str, player_id: int, slot: str = "BENCH") -> None:
+        team = self.conn.execute(
+            "SELECT league_id FROM cfb_league_teams WHERE league_team_id = ?",
+            (league_team_id,),
+        ).fetchone()
+        if not team:
+            raise ValueError("Team not found")
+        league_id = team[0]
+        self.validate_cfb_roster_move(league_id, player_id, action="add")
+        league = self.get_cfb_league(league_id)
+        if league:
+            roster = self.get_cfb_league_roster(league_team_id)
+            if len(roster) >= self._cfb_max_roster_size(league):
+                raise ValueError("Roster is full")
+        self.conn.execute(
+            """
+            INSERT INTO cfb_league_rosters (league_team_id, player_id, slot)
+            VALUES (?, ?, ?)
+            ON CONFLICT(league_team_id, player_id) DO UPDATE SET slot = excluded.slot
+            """,
+            (league_team_id, player_id, slot),
+        )
+        self.conn.commit()
+
+    def drop_cfb_roster_player(self, league_team_id: str, player_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM cfb_league_rosters WHERE league_team_id = ? AND player_id = ?",
+            (league_team_id, player_id),
+        )
+        self.conn.commit()
+
+    def get_cfb_standings(
+        self, league_id: str, season: int, through_week: Optional[int] = None
+    ) -> list[dict]:
+        teams = self.get_cfb_league_teams(league_id)
+        max_week = through_week or 16
+        standings = []
+        for team in teams:
+            points_for = 0.0
+            wins = int(team.get("wins") or 0)
+            losses = int(team.get("losses") or 0)
+            for week in range(1, max_week + 1):
+                week_scores = self.score_cfb_league_week(league_id, season, week)
+                for ws in week_scores:
+                    if ws["league_team_id"] == team["league_team_id"]:
+                        points_for += float(ws["points"])
+            standings.append(
+                {
+                    "league_team_id": team["league_team_id"],
+                    "team_name": team["team_name"],
+                    "owner_name": team.get("owner_name"),
+                    "wins": wins,
+                    "losses": losses,
+                    "points_for": round(points_for, 2),
+                }
+            )
+        standings.sort(key=lambda x: (-x["points_for"], x["team_name"]))
+        for i, row in enumerate(standings, start=1):
+            row["rank"] = i
+        return standings
+
+    def generate_cfb_matchups(self, league_id: str, season: int, week: int) -> int:
+        teams = self.get_cfb_league_teams(league_id)
+        if len(teams) < 2:
+            return 0
+        team_ids = [t["league_team_id"] for t in teams]
+        n = len(team_ids)
+        if week < 1:
+            return 0
+        offset = (week - 1) % (n - 1) if n > 2 else 0
+        rotated = [team_ids[0]] + team_ids[1 + offset :] + team_ids[1 : 1 + offset]
+        if n % 2 == 1:
+            rotated.append(None)
+        pairs = []
+        half = len(rotated) // 2
+        for i in range(half):
+            home = rotated[i]
+            away = rotated[-(i + 1)]
+            if home and away:
+                pairs.append((home, away))
+        self.conn.execute(
+            """
+            DELETE FROM cfb_matchups
+            WHERE league_id = ? AND season = ? AND week = ?
+            """,
+            (league_id, season, week),
+        )
+        for home_id, away_id in pairs:
+            self.conn.execute(
+                """
+                INSERT INTO cfb_matchups (league_id, season, week, home_team_id, away_team_id)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(league_id, season, week, home_team_id, away_team_id) DO NOTHING
+                """,
+                (league_id, season, week, home_id, away_id),
+            )
+        self.conn.commit()
+        return len(pairs)
+
+    def get_cfb_matchups(self, league_id: str, season: int, week: int) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT m.*, ht.team_name AS home_team_name, at.team_name AS away_team_name
+            FROM cfb_matchups m
+            JOIN cfb_league_teams ht ON m.home_team_id = ht.league_team_id
+            JOIN cfb_league_teams at ON m.away_team_id = at.league_team_id
+            WHERE m.league_id = ? AND m.season = ? AND m.week = ?
+            ORDER BY m.matchup_id
+            """,
+            (league_id, season, week),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def score_cfb_matchups(self, league_id: str, season: int, week: int) -> list[dict]:
+        week_scores = {
+            s["league_team_id"]: s["points"] for s in self.score_cfb_league_week(league_id, season, week)
+        }
+        matchups = self.get_cfb_matchups(league_id, season, week)
+        results = []
+        for m in matchups:
+            home_score = float(week_scores.get(m["home_team_id"], 0.0))
+            away_score = float(week_scores.get(m["away_team_id"], 0.0))
+            self.conn.execute(
+                """
+                UPDATE cfb_matchups SET home_score = ?, away_score = ?
+                WHERE league_id = ? AND season = ? AND week = ?
+                  AND home_team_id = ? AND away_team_id = ?
+                """,
+                (home_score, away_score, league_id, season, week, m["home_team_id"], m["away_team_id"]),
+            )
+            if home_score > away_score:
+                self.conn.execute(
+                    "UPDATE cfb_league_teams SET wins = wins + 1 WHERE league_team_id = ?",
+                    (m["home_team_id"],),
+                )
+                self.conn.execute(
+                    "UPDATE cfb_league_teams SET losses = losses + 1 WHERE league_team_id = ?",
+                    (m["away_team_id"],),
+                )
+            elif away_score > home_score:
+                self.conn.execute(
+                    "UPDATE cfb_league_teams SET wins = wins + 1 WHERE league_team_id = ?",
+                    (m["away_team_id"],),
+                )
+                self.conn.execute(
+                    "UPDATE cfb_league_teams SET losses = losses + 1 WHERE league_team_id = ?",
+                    (m["home_team_id"],),
+                )
+            results.append(
+                {
+                    **m,
+                    "home_score": home_score,
+                    "away_score": away_score,
+                }
+            )
+        self.conn.commit()
+        return results
+
+    def create_cfb_transaction(self, tx: dict) -> int:
+        cursor = self.conn.execute(
+            """
+            INSERT INTO cfb_transactions (
+                league_id, league_team_id, tx_type, player_id, faab_bid, status
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                tx["league_id"],
+                tx["league_team_id"],
+                tx["tx_type"],
+                tx["player_id"],
+                tx.get("faab_bid"),
+                tx.get("status", "pending"),
+            ),
+        )
+        self.conn.commit()
+        return int(cursor.lastrowid)
+
+    def list_cfb_transactions(self, league_id: str, status: Optional[str] = None) -> list[dict]:
+        query = "SELECT * FROM cfb_transactions WHERE league_id = ?"
+        params: list = [league_id]
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC"
+        cursor = self.conn.execute(query, params)
+        return [dict(r) for r in cursor.fetchall()]
 
     def audit_cfb_data(self, season: Optional[int] = None) -> dict:
         cursor = self.conn.cursor()

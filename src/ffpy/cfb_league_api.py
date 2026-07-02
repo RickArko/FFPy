@@ -47,6 +47,20 @@ class CfbLineupRequest(BaseModel):
 class CfbOptimizeRequest(BaseModel):
     season: int
     week: int = Field(..., ge=1, le=16)
+    model: str = "historical"
+
+
+class CfbRosterUpdateRequest(BaseModel):
+    add: List[int] = Field(default_factory=list)
+    drop: List[int] = Field(default_factory=list)
+    slot: str = "BENCH"
+
+
+class CfbTransactionCreateRequest(BaseModel):
+    league_team_id: str
+    tx_type: str = Field(..., pattern="^(add|drop|trade)$")
+    player_id: int
+    faab_bid: Optional[float] = None
 
 
 def _load_college_roster_constraints(preset: str = "college_standard") -> RosterConstraints:
@@ -116,6 +130,8 @@ def register_cfb_league_router(
     def cfb_player_pool(
         league_id: str,
         week: int = 1,
+        model: str = "historical",
+        available_only: bool = False,
         db: FFPyDatabase = Depends(get_db),
     ) -> Dict[str, Any]:
         league = db.get_cfb_league(league_id)
@@ -124,7 +140,10 @@ def register_cfb_league_router(
         confs = json.loads(league.get("allowed_conferences") or "[]")
         season = int(league["season"])
         players = db.get_cfb_players(season=season, conferences=confs, fantasy_eligible=True)
-        projections = db.get_cfb_projections(season=season, week=week, conferences=confs)
+        if available_only and not players.empty:
+            rostered = db.get_cfb_league_rostered_player_ids(league_id)
+            players = players[~players["player_id"].isin(rostered)]
+        projections = db.get_cfb_projections(season=season, week=week, model=model, conferences=confs)
         if not projections.empty and not players.empty:
             merged = players.merge(
                 projections[["player_id", "projected_points"]],
@@ -138,8 +157,78 @@ def register_cfb_league_router(
         return {
             "season": season,
             "week": week,
+            "model": model,
             "conferences": confs,
             "players": merged.to_dict(orient="records"),
+        }
+
+    @router.get("/leagues/{league_id}/teams")
+    def list_cfb_teams(
+        league_id: str,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> List[Dict[str, Any]]:
+        if not db.get_cfb_league(league_id):
+            raise HTTPException(status_code=404, detail="League not found")
+        teams = db.get_cfb_league_teams(league_id)
+        out = []
+        for team in teams:
+            roster = db.get_cfb_league_roster(team["league_team_id"])
+            out.append({**team, "roster": roster.to_dict(orient="records")})
+        return out
+
+    @router.get("/leagues/{league_id}/teams/{team_id}/roster")
+    def get_cfb_team_roster(
+        league_id: str,
+        team_id: str,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        if not db.get_cfb_league(league_id):
+            raise HTTPException(status_code=404, detail="League not found")
+        roster = db.get_cfb_league_roster(team_id)
+        return {"league_team_id": team_id, "roster": roster.to_dict(orient="records")}
+
+    @router.post("/leagues/{league_id}/teams/{team_id}/roster")
+    def update_cfb_team_roster(
+        league_id: str,
+        team_id: str,
+        payload: CfbRosterUpdateRequest,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        if not db.get_cfb_league(league_id):
+            raise HTTPException(status_code=404, detail="League not found")
+        for player_id in payload.drop:
+            db.drop_cfb_roster_player(team_id, player_id)
+        added = []
+        for player_id in payload.add:
+            try:
+                db.add_cfb_roster_player(team_id, player_id, slot=payload.slot)
+                added.append(player_id)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        roster = db.get_cfb_league_roster(team_id)
+        return {
+            "league_team_id": team_id,
+            "added": added,
+            "dropped": payload.drop,
+            "roster": roster.to_dict(orient="records"),
+        }
+
+    @router.get("/leagues/{league_id}/standings")
+    def cfb_standings(
+        league_id: str,
+        through_week: int = 16,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        league = db.get_cfb_league(league_id)
+        if not league:
+            raise HTTPException(status_code=404, detail="League not found")
+        season = int(league["season"])
+        standings = db.get_cfb_standings(league_id, season, through_week=through_week)
+        return {
+            "league_id": league_id,
+            "season": season,
+            "through_week": through_week,
+            "standings": standings,
         }
 
     @router.post("/leagues/{league_id}/teams")
@@ -179,6 +268,33 @@ def register_cfb_league_router(
         )
         return {"status": "ok", "week": str(payload.week)}
 
+    @router.post("/leagues/{league_id}/weeks/{week}/matchups/generate")
+    def generate_cfb_matchups(
+        league_id: str,
+        week: int,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        league = db.get_cfb_league(league_id)
+        if not league:
+            raise HTTPException(status_code=404, detail="League not found")
+        season = int(league["season"])
+        count = db.generate_cfb_matchups(league_id, season, week)
+        matchups = db.get_cfb_matchups(league_id, season, week)
+        return {"league_id": league_id, "season": season, "week": week, "count": count, "matchups": matchups}
+
+    @router.get("/leagues/{league_id}/weeks/{week}/matchups")
+    def get_cfb_matchups(
+        league_id: str,
+        week: int,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        league = db.get_cfb_league(league_id)
+        if not league:
+            raise HTTPException(status_code=404, detail="League not found")
+        season = int(league["season"])
+        matchups = db.get_cfb_matchups(league_id, season, week)
+        return {"league_id": league_id, "season": season, "week": week, "matchups": matchups}
+
     @router.get("/leagues/{league_id}/weeks/{week}/scores")
     def cfb_week_scores(
         league_id: str,
@@ -190,7 +306,27 @@ def register_cfb_league_router(
             raise HTTPException(status_code=404, detail="League not found")
         season = int(league["season"])
         scores = db.score_cfb_league_week(league_id, season, week)
-        return {"league_id": league_id, "season": season, "week": week, "teams": scores}
+        matchups = db.get_cfb_matchups(league_id, season, week)
+        return {
+            "league_id": league_id,
+            "season": season,
+            "week": week,
+            "teams": scores,
+            "matchups": matchups,
+        }
+
+    @router.post("/leagues/{league_id}/weeks/{week}/matchups/score")
+    def score_cfb_matchups(
+        league_id: str,
+        week: int,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        league = db.get_cfb_league(league_id)
+        if not league:
+            raise HTTPException(status_code=404, detail="League not found")
+        season = int(league["season"])
+        results = db.score_cfb_matchups(league_id, season, week)
+        return {"league_id": league_id, "season": season, "week": week, "matchups": results}
 
     @router.post("/leagues/{league_id}/teams/{team_id}/optimize")
     def optimize_cfb_lineup(
@@ -203,7 +339,9 @@ def register_cfb_league_router(
         if not league:
             raise HTTPException(status_code=404, detail="League not found")
         confs = json.loads(league.get("allowed_conferences") or "[]")
-        projections = db.get_cfb_projections(season=payload.season, week=payload.week, conferences=confs)
+        projections = db.get_cfb_projections(
+            season=payload.season, week=payload.week, model=payload.model, conferences=confs
+        )
         if projections.empty:
             raise HTTPException(status_code=400, detail="No projections available for this week")
 
@@ -224,6 +362,7 @@ def register_cfb_league_router(
         optimizer = LineupOptimizer(constraints=constraints)
         result = optimizer.optimize(players)
         return {
+            "model": payload.model,
             "total_points": result.total_points,
             "starters": [
                 {
@@ -244,6 +383,37 @@ def register_cfb_league_router(
                 for p in result.bench
             ],
         }
+
+    @router.post("/leagues/{league_id}/transactions")
+    def create_cfb_transaction(
+        league_id: str,
+        payload: CfbTransactionCreateRequest,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        if not db.get_cfb_league(league_id):
+            raise HTTPException(status_code=404, detail="League not found")
+        tx_id = db.create_cfb_transaction(
+            {
+                "league_id": league_id,
+                "league_team_id": payload.league_team_id,
+                "tx_type": payload.tx_type,
+                "player_id": payload.player_id,
+                "faab_bid": payload.faab_bid,
+                "status": "pending",
+            }
+        )
+        return {"transaction_id": tx_id, "status": "pending"}
+
+    @router.get("/leagues/{league_id}/transactions")
+    def list_cfb_transactions(
+        league_id: str,
+        status: Optional[str] = None,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        if not db.get_cfb_league(league_id):
+            raise HTTPException(status_code=404, detail="League not found")
+        txs = db.list_cfb_transactions(league_id, status=status)
+        return {"league_id": league_id, "transactions": txs}
 
     @router.get("/seasons/{season}/coverage")
     def cfb_season_coverage(season: int, db: FFPyDatabase = Depends(get_db)) -> Dict[str, Any]:

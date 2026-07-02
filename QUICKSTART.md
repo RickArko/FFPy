@@ -107,6 +107,8 @@ make notebook
 
 Open **`notebooks/cfb/00_college_fantasy_starter.ipynb`** — a starter exploration (teams, weekly leaders, FCS discount, projections) inspired by the [CFBD Starter Pack](https://collegefootballdata.gumroad.com/l/starter-pack), but querying your local FFPy database instead of raw API calls.
 
+For a full hosted-league workflow (draft, matchups, standings), open **`notebooks/cfb/01_league_commissioner.ipynb`** after loading data. Generate opponent-adjusted projections with `make db.cfb-projections-v2 SEASON=2024`.
+
 ### 5. League API (optional)
 
 After data is loaded, hosted college leagues are available at `/api/cfb/*` when running the web app:

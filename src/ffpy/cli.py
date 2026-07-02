@@ -702,20 +702,23 @@ def cmd_compute_cfb_projections(args: argparse.Namespace) -> int:
     from ffpy.database import FFPyDatabase
 
     confs = _parse_cfb_conferences(args.conferences)
+    model = getattr(args, "model", "historical")
     db = FFPyDatabase(args.db_path)
     try:
-        with CfbProjectionModel(db) as model:
+        with CfbProjectionModel(db) as proj_model:
             if args.week:
-                df = model.generate_projections(args.season, args.week, conferences=confs)
+                df = proj_model.generate_projections(args.season, args.week, conferences=confs, model=model)
                 if not args.quiet:
-                    print(f"Generated {len(df)} projections for week {args.week}.")
+                    print(f"Generated {len(df)} {model} projections for week {args.week}.")
             else:
                 total = 0
                 for week in range(args.start_week, args.end_week + 1):
-                    df = model.generate_projections(args.season, week, conferences=confs)
+                    df = proj_model.generate_projections(args.season, week, conferences=confs, model=model)
                     total += len(df)
                 if not args.quiet:
-                    print(f"Generated {total} projections for weeks {args.start_week}-{args.end_week}.")
+                    print(
+                        f"Generated {total} {model} projections for weeks {args.start_week}-{args.end_week}."
+                    )
         return 0
     finally:
         db.close()
@@ -1114,6 +1117,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--start-week", type=int, default=1)
     p.add_argument("--end-week", type=int, default=16)
     p.add_argument("--conferences", default="SEC,Big Ten,ACC")
+    p.add_argument("--model", default="historical", choices=["historical", "opponent_adj"])
     p.add_argument("--db-path", help="Custom database path")
     p.add_argument("--quiet", action="store_true")
     p.set_defaults(func=cmd_compute_cfb_projections)

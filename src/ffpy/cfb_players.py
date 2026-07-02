@@ -44,14 +44,12 @@ def build_cfb_players(
 
     # From CFBD stats
     if not stats.empty:
-        athlete_weeks = (
-            stats.groupby(["cfbd_athlete_id", "team_key"])
-            .agg(
-                full_name=("full_name", "first"),
-                category=("category", lambda s: s.mode().iloc[0] if len(s) else ""),
-            )
-            .reset_index()
-        )
+        agg: dict = {
+            "category": ("category", lambda s: s.mode().iloc[0] if len(s) else ""),
+        }
+        if "full_name" in stats.columns:
+            agg["full_name"] = ("full_name", "first")
+        athlete_weeks = stats.groupby(["cfbd_athlete_id", "team_key"]).agg(**agg).reset_index()
         for _, row in athlete_weeks.iterrows():
             cfbd_id = int(row["cfbd_athlete_id"])
             if cfbd_id in seen_cfbd:
@@ -61,10 +59,11 @@ def build_cfb_players(
                 continue
             conf = _team_conference(eligible_teams, team_key)
             pos = _category_to_position(row.get("category", ""))
+            display_name = row.get("full_name") if "full_name" in row.index else f"CFBD {cfbd_id}"
             players.append(
                 {
                     "season": season,
-                    "full_name": row["full_name"],
+                    "full_name": display_name or f"CFBD {cfbd_id}",
                     "position": pos,
                     "team_key": team_key,
                     "conference": conf,

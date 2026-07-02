@@ -1,0 +1,66 @@
+[
+  {
+    "id": 401628319,
+    "teams": [
+      {
+        "team": "Alabama",
+        "conference": "SEC",
+        "homeAway": "home",
+        "categories": [
+          {
+            "name": "passing",
+            "types": [
+              {
+                "name": "C/ATT",
+                "athletes": [
+                  {"id": "4432577", "name": "Jalen Milroe", "stat": "20/28"}
+                ]
+              },
+              {
+                "name": "YDS",
+                "athletes": [
+                  {"id": "4432577", "name": "Jalen Milroe", "stat": "280"}
+                ]
+              },
+              {
+                "name": "TD",
+                "athletes": [
+                  {"id": "4432577", "name": "Jalen Milroe", "stat": "3"}
+                ]
+              },
+              {
+                "name": "INT",
+                "athletes": [
+                  {"id": "4432577", "name": "Jalen Milroe", "stat": "1"}
+                ]
+              }
+            ]
+          },
+          {
+            "name": "rushing",
+            "types": [
+              {
+                "name": "CAR",
+                "athletes": [
+                  {"id": "4432577", "name": "Jalen Milroe", "stat": "8"}
+                ]
+              },
+              {
+                "name": "YDS",
+                "athletes": [
+                  {"id": "4432577", "name": "Jalen Milroe", "stat": "45"}
+                ]
+              },
+              {
+                "name": "TD",
+                "athletes": [
+                  {"id": "4432577", "name": "Jalen Milroe", "stat": "1"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

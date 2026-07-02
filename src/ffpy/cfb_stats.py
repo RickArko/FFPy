@@ -25,6 +25,7 @@ def compute_cfb_fantasy_points(
     if stats.empty or players.empty:
         return 0
 
+    stats = stats.drop(columns=["player_id"], errors="ignore")
     stats = stats.merge(
         players[["player_id", "cfbd_athlete_id", "conference", "conference_eligible", "position"]],
         on="cfbd_athlete_id",

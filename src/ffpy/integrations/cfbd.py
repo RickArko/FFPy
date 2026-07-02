@@ -218,56 +218,146 @@ class CFBDClient:
                     )
 
 
+def _apply_cfbd_stat(row: dict[str, Any], cat_name: str, stat_type: str, val: float) -> None:
+    """Merge one stat value into a player game row."""
+    field = _STAT_MAP.get(stat_type, {}).get(cat_name)
+    if field:
+        row[field] = row.get(field, 0) + val
+        return
+    if stat_type == "CAR" and cat_name == "rushing":
+        row["rushing_attempts"] = row.get("rushing_attempts", 0) + val
+
+
+def _parse_catt(stat: str) -> tuple[float | None, float | None]:
+    """Parse C/ATT like '16/22' into (completions, attempts)."""
+    if "/" not in stat:
+        return None, None
+    parts = stat.split("/", 1)
+    try:
+        return float(parts[0]), float(parts[1])
+    except (TypeError, ValueError):
+        return None, None
+
+
 def normalize_cfbd_game_players(data: list[dict], season: int, week: int | None) -> pd.DataFrame:
     """Flatten CFBD /games/players nested JSON into stat rows."""
-    rows: list[dict] = []
+    merged: dict[tuple[int, int, str], dict[str, Any]] = {}
+
+    def upsert_row(
+        cfbd_game_id: int,
+        team_key: str,
+        cat_name: str,
+        athlete_id: int,
+        full_name: str,
+    ) -> dict[str, Any]:
+        key = (athlete_id, cfbd_game_id, cat_name)
+        if key not in merged:
+            merged[key] = {
+                "cfbd_athlete_id": athlete_id,
+                "cfbd_game_id": cfbd_game_id,
+                "season": season,
+                "week": week,
+                "team_key": team_key,
+                "category": cat_name,
+                "full_name": full_name,
+                "source": "cfbd",
+            }
+        return merged[key]
+
     for game in data or []:
         cfbd_game_id = game.get("id")
+        if cfbd_game_id is None:
+            continue
+        try:
+            cfbd_game_id = int(cfbd_game_id)
+        except (TypeError, ValueError):
+            continue
+
         for team_block in game.get("teams") or []:
             team_name = team_block.get("team") or team_block.get("school") or ""
             team_key = team_key_from_name(team_name)
             for category in team_block.get("categories") or []:
                 cat_name = (category.get("name") or "").lower()
                 types = category.get("types") or []
-                for athlete in category.get("athletes") or []:
-                    athlete_id = athlete.get("id")
-                    if athlete_id is None:
-                        continue
-                    try:
-                        athlete_id = int(athlete_id)
-                    except (TypeError, ValueError):
-                        continue
-                    stat_values = athlete.get("stat") or ""
-                    if isinstance(stat_values, str):
-                        stat_parts = stat_values.split(",") if stat_values else []
-                    elif isinstance(stat_values, list):
-                        stat_parts = stat_values
-                    else:
-                        stat_parts = []
-                    row: dict[str, Any] = {
-                        "cfbd_athlete_id": athlete_id,
-                        "cfbd_game_id": cfbd_game_id,
-                        "season": season,
-                        "week": week,
-                        "team_key": team_key,
-                        "category": cat_name,
-                        "full_name": athlete.get("name") or athlete.get("athleteName") or "",
-                        "source": "cfbd",
-                    }
-                    for idx, stat_type in enumerate(types):
-                        if idx >= len(stat_parts):
-                            break
+                category_athletes = category.get("athletes") or []
+
+                # Legacy format: types is list[str], athletes at category level with CSV stats
+                if types and isinstance(types[0], str) and category_athletes:
+                    for athlete in category_athletes:
+                        athlete_id = athlete.get("id")
+                        if athlete_id is None:
+                            continue
                         try:
-                            val = float(stat_parts[idx])
+                            athlete_id = int(athlete_id)
                         except (TypeError, ValueError):
                             continue
-                        field = _STAT_MAP.get(stat_type, {}).get(cat_name)
-                        if field:
-                            row[field] = row.get(field, 0) + val
-                    rows.append(row)
-    if not rows:
+                        if athlete_id < 0:
+                            continue
+                        full_name = athlete.get("name") or athlete.get("athleteName") or ""
+                        if full_name.strip().lower() == "team":
+                            continue
+                        row = upsert_row(cfbd_game_id, team_key, cat_name, athlete_id, full_name)
+                        stat_values = athlete.get("stat") or ""
+                        if isinstance(stat_values, str):
+                            stat_parts = stat_values.split(",") if stat_values else []
+                        elif isinstance(stat_values, list):
+                            stat_parts = stat_values
+                        else:
+                            stat_parts = []
+                        for idx, stat_type in enumerate(types):
+                            if idx >= len(stat_parts):
+                                break
+                            try:
+                                val = float(stat_parts[idx])
+                            except (TypeError, ValueError):
+                                if stat_type == "C/ATT":
+                                    comp, att = _parse_catt(str(stat_parts[idx]))
+                                    if comp is not None:
+                                        row["passing_completions"] = row.get("passing_completions", 0) + comp
+                                    if att is not None:
+                                        row["passing_attempts"] = row.get("passing_attempts", 0) + att
+                                continue
+                            _apply_cfbd_stat(row, cat_name, stat_type, val)
+                    continue
+
+                # Current format: types is list[dict] with per-stat athlete arrays
+                for type_block in types:
+                    if not isinstance(type_block, dict):
+                        continue
+                    stat_type = type_block.get("name") or ""
+                    for athlete in type_block.get("athletes") or []:
+                        athlete_id = athlete.get("id")
+                        if athlete_id is None:
+                            continue
+                        try:
+                            athlete_id = int(athlete_id)
+                        except (TypeError, ValueError):
+                            continue
+                        if athlete_id < 0:
+                            continue
+                        full_name = athlete.get("name") or athlete.get("athleteName") or ""
+                        if full_name.strip().lower() == "team":
+                            continue
+                        row = upsert_row(cfbd_game_id, team_key, cat_name, athlete_id, full_name)
+                        stat_raw = athlete.get("stat")
+                        if stat_raw is None or stat_raw == "":
+                            continue
+                        if stat_type == "C/ATT":
+                            comp, att = _parse_catt(str(stat_raw))
+                            if comp is not None:
+                                row["passing_completions"] = row.get("passing_completions", 0) + comp
+                            if att is not None:
+                                row["passing_attempts"] = row.get("passing_attempts", 0) + att
+                            continue
+                        try:
+                            val = float(stat_raw)
+                        except (TypeError, ValueError):
+                            continue
+                        _apply_cfbd_stat(row, cat_name, stat_type, val)
+
+    if not merged:
         return pd.DataFrame()
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(list(merged.values()))
     numeric_cols = [
         c
         for c in df.columns

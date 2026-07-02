@@ -186,8 +186,11 @@ db.cfb-players: ## Build CFB player registry + ID crosswalk
 db.cfb-fantasy: ## Compute CFB weekly fantasy points
 	$(UV) run ffpy-db compute-cfb-fantasy --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
 
-db.cfb-projections: ## Generate CFB projections (WEEK=5 optional)
-	$(UV) run ffpy-db compute-cfb-projections --season $(SEASON) --conferences "$(CFB_CONFERENCES)" $(if $(WEEK),--week $(WEEK),)
+db.cfb-projections: ## Generate CFB projections (WEEK=5 optional, MODEL=historical)
+	$(UV) run ffpy-db compute-cfb-projections --season $(SEASON) --conferences "$(CFB_CONFERENCES)" --model $(or $(MODEL),historical) $(if $(WEEK),--week $(WEEK),)
+
+db.cfb-projections-v2: ## Generate opponent-adjusted CFB projections
+	$(UV) run ffpy-db compute-cfb-projections --season $(SEASON) --conferences "$(CFB_CONFERENCES)" --model opponent_adj $(if $(WEEK),--week $(WEEK),)
 
 db.audit-cfb: ## Audit CFB fantasy data tables
 	$(UV) run ffpy-db audit-cfb --season $(SEASON)
