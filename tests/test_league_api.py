@@ -60,6 +60,17 @@ def test_auth_me_unauthenticated(client: TestClient):
     assert data["authenticated"] is False
 
 
+def test_auth_config_exposes_league_redirect(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(Config, "PUBLIC_APP_URL", "https://ffpy-pickem.fly.dev")
+
+    res = client.get("/api/auth/config")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["public_app_url"] == "https://ffpy-pickem.fly.dev"
+    assert data["auth_redirect_url"] == "https://ffpy-pickem.fly.dev/league/"
+
+
 def test_store_and_list_credentials(client: TestClient, auth_secret: str):
     token = _generate_test_token("user_abc", auth_secret)
     res = client.post(

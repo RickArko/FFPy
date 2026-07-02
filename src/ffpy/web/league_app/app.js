@@ -31,13 +31,15 @@ createApp({
           </div>
           <label>Email</label>
           <input type="email" v-model="authForm.email" placeholder="you@example.com" />
-          <label>Password</label>
-          <input type="password" v-model="authForm.password" placeholder="••••••••" />
+          <template v-if="authForm.mode === 'signin'">
+            <label>Password</label>
+            <input type="password" v-model="authForm.password" placeholder="••••••••" />
+          </template>
           <button style="margin-top:10px;width:100%" :disabled="authSubmitting" @click="authForm.mode==='signup' ? signUp() : signIn()">
-            {{ authSubmitting ? 'Working…' : (authForm.mode==='signup' ? 'Create Account' : 'Sign In') }}
+            {{ authSubmitting ? 'Working…' : (authForm.mode==='signup' ? 'Send Email Link' : 'Sign In') }}
           </button>
           <p v-if="pendingVerificationEmail" class="small" style="margin-top:8px">
-            Verification email sent to {{ pendingVerificationEmail }}. Confirm, then sign in.
+            Email link sent to {{ pendingVerificationEmail }}. Open it to finish signing in.
           </p>
         </div>
         <div v-else-if="authRequired" class="card auth-card">
@@ -557,6 +559,9 @@ createApp({
       }
     },
     _authRedirectUrl() {
+      if (this.authConfig.auth_redirect_url) {
+        return this.authConfig.auth_redirect_url;
+      }
       const base = (this.authConfig.public_app_url || window.location.origin).replace(/\/$/, "");
       return `${base}/league/`;
     },
@@ -565,18 +570,20 @@ createApp({
       this.authSubmitting = true;
       try {
         this._ensureSupabase();
-        const { data, error } = await this.supabaseClient.auth.signUp({
+        const { data, error } = await this.supabaseClient.auth.signInWithOtp({
           email: this.authForm.email,
-          password: this.authForm.password,
           options: {
             emailRedirectTo: this._authRedirectUrl(),
+            shouldCreateUser: true,
           },
         });
         if (error) throw error;
+        this.authSession = data.session || null;
         this.pendingVerificationEmail = this.authForm.email;
-        this.status = "Verification email sent. Please confirm and sign in.";
+        this.authForm.password = "";
+        this.status = "Email link sent. Open it to finish signing in.";
       } catch (e) {
-        this.error = e.message || "Sign up failed";
+        this.error = e.message || "Could not send email link";
       } finally {
         this.authSubmitting = false;
       }

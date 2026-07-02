@@ -430,14 +430,22 @@ def create_league_app(
         }
 
     @app.get("/api/auth/config")
-    def auth_config() -> Dict[str, Any]:
+    def auth_config(request: Request) -> Dict[str, Any]:
         browser_auth_available = bool(auth_enabled and Config.SUPABASE_URL and Config.SUPABASE_BROWSER_KEY)
+        public_app_url = Config.PUBLIC_APP_URL.rstrip("/")
+        request_origin = str(request.base_url).rstrip("/")
+        if public_app_url.startswith("http://localhost") and not request_origin.startswith(
+            ("http://localhost", "http://127.0.0.1", "http://testserver")
+        ):
+            public_app_url = request_origin
+        auth_redirect_url = f"{public_app_url}/league/"
         return {
             "auth_required": auth_enabled,
             "browser_auth_available": browser_auth_available,
             "supabase_url": Config.SUPABASE_URL if browser_auth_available else None,
             "supabase_anon_key": Config.SUPABASE_BROWSER_KEY if browser_auth_available else None,
-            "public_app_url": Config.PUBLIC_APP_URL,
+            "public_app_url": public_app_url,
+            "auth_redirect_url": auth_redirect_url,
         }
 
     # -----------------------------------------------------------------------
