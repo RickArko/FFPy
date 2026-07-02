@@ -63,7 +63,9 @@ class InjuryInfo:
 # ---------------------------------------------------------------------------
 
 LEAGUE_AVG_TARGET_SHARE: Dict[str, float] = {
-    "WR": 0.16, "TE": 0.12, "RB": 0.08,
+    "WR": 0.16,
+    "TE": 0.12,
+    "RB": 0.08,
 }
 
 DEPTH_CHART_PRIORS: Dict[str, Dict[int, float]] = {
@@ -175,8 +177,10 @@ class EnhancedProjectionModel:
         disabled = set(disable_features or [])
 
         baseline_df = self._baseline_model.generate_projections(
-            season=season, week=week,
-            lookback_weeks=lookback_weeks, recent_weight=recent_weight,
+            season=season,
+            week=week,
+            lookback_weeks=lookback_weeks,
+            recent_weight=recent_weight,
         )
         if baseline_df.empty:
             return baseline_df
@@ -251,9 +255,7 @@ class EnhancedProjectionModel:
         proj = self._apply_final_discounts(proj)
 
         # --- Recalculate fantasy points from stat projections ---
-        proj["projected_points"] = round(
-            calculate_points_from_projection(proj, self.scoring), 1
-        )
+        proj["projected_points"] = round(calculate_points_from_projection(proj, self.scoring), 1)
 
         # Recalculate consistency
         history = self.db.get_player_history(player_name, num_weeks=lookback_weeks)
@@ -291,7 +293,9 @@ class EnhancedProjectionModel:
 
         # Depth chart
         depth = self.db.get_depth_charts(
-            season=season, week=target_week, position=position,
+            season=season,
+            week=target_week,
+            position=position,
         )
         if not depth.empty:
             row = depth[depth["player_name"] == player_name]
@@ -310,9 +314,7 @@ class EnhancedProjectionModel:
         weeks_of_history = len(adv[adv["week"] < target_week])
         prior = _get_depth_chart_prior(position, features.depth_spot) if features.depth_spot else None
         if prior is not None and features.target_share is not None:
-            features.target_share = _blend_prior_with_history(
-                features.target_share, prior, weeks_of_history
-            )
+            features.target_share = _blend_prior_with_history(features.target_share, prior, weeks_of_history)
 
         # --- Rookie / draft-capital boost (Phase 1: rosters) ---
         try:
@@ -327,20 +329,23 @@ class EnhancedProjectionModel:
             if dc and dc["draft_round"] <= 3:
                 rookie_mult = 1.0 + (0.15 / dc["draft_round"])  # Round 1: +15%, Round 2: +7.5%, etc.
                 if features.target_share is not None:
-                    features.target_share = min(features.target_share * rookie_mult,
-                                                _get_league_avg_target_share(position) * 1.5)
+                    features.target_share = min(
+                        features.target_share * rookie_mult, _get_league_avg_target_share(position) * 1.5
+                    )
                 if position == "RB" and features.snap_pct is not None:
                     features.snap_pct = min(features.snap_pct * rookie_mult, 0.65)
             # Undrafted rookies get a small floor boost
             elif dc is None or dc["draft_round"] > 6:
                 if features.target_share is not None:
-                    features.target_share = max(features.target_share,
-                                                _get_league_avg_target_share(position) * 0.5)
+                    features.target_share = max(
+                        features.target_share, _get_league_avg_target_share(position) * 0.5
+                    )
         elif is_rookie and dc is not None and dc["draft_round"] <= 2:
             # Even with some history, high-pick rookies get a mild boost
             if features.target_share is not None:
-                features.target_share = min(features.target_share * 1.08,
-                                            _get_league_avg_target_share(position) * 1.3)
+                features.target_share = min(
+                    features.target_share * 1.08, _get_league_avg_target_share(position) * 1.3
+                )
 
         return features
 
@@ -383,13 +388,17 @@ class EnhancedProjectionModel:
     ) -> InjuryInfo:
         """Look up injury status and compute discount."""
         inj_df = self.db.get_player_injuries(
-            player_name=player_name, season=season, week=target_week,
+            player_name=player_name,
+            season=season,
+            week=target_week,
         )
         info = InjuryInfo()
         if not inj_df.empty:
             row = inj_df.iloc[0]
             info.game_status = str(row.get("game_status", "")) if pd.notna(row.get("game_status")) else None
-            info.practice_status = str(row.get("practice_status", "")) if pd.notna(row.get("practice_status")) else None
+            info.practice_status = (
+                str(row.get("practice_status", "")) if pd.notna(row.get("practice_status")) else None
+            )
             info.discount = _injury_discount(info.game_status)
         return info
 
@@ -458,7 +467,10 @@ class EnhancedProjectionModel:
                 return 1.0
 
             matchup = self.db.get_defensive_matchup_stats(
-                team=player_team, position=position, season=season, weeks=4,
+                team=player_team,
+                position=position,
+                season=season,
+                weeks=4,
             )
             if matchup is None:
                 return 1.0
@@ -585,8 +597,15 @@ class EnhancedProjectionModel:
         discount = proj.get("injury_discount", 1.0)
         if discount <= 0:
             # Player is out — zero out all stats
-            for k in ("passing_yards", "passing_tds", "rushing_yards", "rushing_tds",
-                      "receiving_yards", "receiving_tds", "receptions"):
+            for k in (
+                "passing_yards",
+                "passing_tds",
+                "rushing_yards",
+                "rushing_tds",
+                "receiving_yards",
+                "receiving_tds",
+                "receptions",
+            ):
                 proj[k] = 0
             return proj
 

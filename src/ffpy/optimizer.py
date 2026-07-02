@@ -373,11 +373,13 @@ class LineupOptimizer:
             objective = lpSum([player.ceiling * x[player.name] for player in available_players])
         elif optimize_for == "value":
             # Use projected_points / salary * 1000; fall back to projected if no salary
-            objective = lpSum([
-                (player.value_score if player.value_score is not None else player.projected_points)
-                * x[player.name]
-                for player in available_players
-            ])
+            objective = lpSum(
+                [
+                    (player.value_score if player.value_score is not None else player.projected_points)
+                    * x[player.name]
+                    for player in available_players
+                ]
+            )
         else:
             objective = lpSum([player.projected_points * x[player.name] for player in available_players])
 
@@ -639,7 +641,10 @@ class LineupOptimizer:
             prob += has_qb >= (1.0 / len(qbs)) * lpSum([x[qb.name] for qb in qbs]), f"stack_qb_trigger_{team}"
 
             prob += has_skill <= lpSum([x[s.name] for s in skill]), f"stack_skill_def_{team}"
-            prob += has_skill >= (1.0 / len(skill)) * lpSum([x[s.name] for s in skill]), f"stack_skill_trigger_{team}"
+            prob += (
+                has_skill >= (1.0 / len(skill)) * lpSum([x[s.name] for s in skill]),
+                f"stack_skill_trigger_{team}",
+            )
 
             # stack_exists = has_qb AND has_skill
             prob += stack_exists <= has_qb, f"stack_and1_{team}"

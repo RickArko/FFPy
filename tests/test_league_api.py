@@ -28,6 +28,7 @@ def client(api_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(Config, "SUPABASE_BROWSER_KEY", "")
     monkeypatch.setattr(Config, "SUPABASE_JWT_SECRET", "super-secret-test-key-with-32-bytes")
     import ffpy.league_api as league_api_module
+
     monkeypatch.setattr(league_api_module, "MASTER_KEY", b"super-secret-test-key-with-32-bytes")
     app = create_league_app(db_path=str(api_db.db_path), require_auth=False)
     with TestClient(app) as test_client:
@@ -235,9 +236,7 @@ def test_sleeper_discover(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     assert data[0]["name"] == "Tight ends and loose lips"
 
 
-def test_import_sleeper_username_visible_when_auth_off(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-):
+def test_import_sleeper_username_visible_when_auth_off(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "ffpy.league_api.SleeperIntegration.get_league",
         lambda league_id: {"name": "Test League", "season": 2024, "total_rosters": 10},

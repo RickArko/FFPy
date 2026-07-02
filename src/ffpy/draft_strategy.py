@@ -60,9 +60,7 @@ class DraftStrategyConfig:
 
     # Correlation / projection history.
     corr_seasons: List[int] = field(default_factory=lambda: [2023, 2024, 2025])
-    season_weights: Dict[int, float] = field(
-        default_factory=lambda: {2023: 0.15, 2024: 0.30, 2025: 0.55}
-    )
+    season_weights: Dict[int, float] = field(default_factory=lambda: {2023: 0.15, 2024: 0.30, 2025: 0.55})
     ceiling_z: float = 1.28  # ~90th percentile lineup outcome
     min_weeks_for_corr: int = 8
 
@@ -296,11 +294,7 @@ class DraftStrategyEngine:
 
     def _player_team_lookup(self) -> Dict[str, str]:
         players_df = pd.read_sql("SELECT name, team FROM players", self.db.conn)
-        return {
-            row["name"]: row["team"]
-            for _, row in players_df.iterrows()
-            if row.get("team")
-        }
+        return {row["name"]: row["team"] for _, row in players_df.iterrows() if row.get("team")}
 
     def _build_candidate_pool(self, adp_df: pd.DataFrame, rostered_names: set) -> pd.DataFrame:
         cfg = self.config
@@ -311,10 +305,7 @@ class DraftStrategyEngine:
         team_lookup = self._player_team_lookup()
         cand["team"] = cand["player_name"].map(team_lookup).fillna("")
 
-        parts = [
-            cand[cand["position"] == pos].head(cfg.top_n_per_position)
-            for pos in DRAFTABLE_POSITIONS
-        ]
+        parts = [cand[cand["position"] == pos].head(cfg.top_n_per_position) for pos in DRAFTABLE_POSITIONS]
         cand = pd.concat(parts, ignore_index=True).sort_values("adp").reset_index(drop=True)
         return cand
 
@@ -331,7 +322,9 @@ class DraftStrategyEngine:
             df["position"] = df["position"].map(_map_position)
             frames.append(df)
         if not frames:
-            return pd.DataFrame(columns=["player", "team", "position", "season", "week", "actual_points", "week_key"])
+            return pd.DataFrame(
+                columns=["player", "team", "position", "season", "week", "actual_points", "week_key"]
+            )
         out = pd.concat(frames, ignore_index=True)
         out["week_key"] = out["season"].astype(str) + "_w" + out["week"].astype(str)
         return out
@@ -366,12 +359,14 @@ class DraftStrategyEngine:
         top, floor, span = self._CURVE.get(position, (10.0, 4.0, 40))
         return max(floor, top - (top - floor) * (pos_rank - 1) / max(1, span))
 
-    def _add_projections(self, candidates: pd.DataFrame, weekly: pd.DataFrame, adp_df: pd.DataFrame) -> pd.DataFrame:
+    def _add_projections(
+        self, candidates: pd.DataFrame, weekly: pd.DataFrame, adp_df: pd.DataFrame
+    ) -> pd.DataFrame:
         candidates = candidates.copy()
         # Within-position ADP rank for the market curve.
-        candidates["pos_rank"] = (
-            candidates.sort_values("adp").groupby("position").cumcount() + 1
-        ).reindex(candidates.index)
+        candidates["pos_rank"] = (candidates.sort_values("adp").groupby("position").cumcount() + 1).reindex(
+            candidates.index
+        )
 
         rows = []
         for _, row in candidates.iterrows():

@@ -759,7 +759,6 @@ class NFLVerseLoader:
 
         return {"stored": stored}
 
-
     # ==================== PLAYER ROSTERS (Phase 1) ====================
 
     @staticmethod
@@ -837,6 +836,7 @@ class NFLVerseLoader:
         birth = pdf.get("birth_date", None)
         if birth is not None:
             import datetime
+
             ref = datetime.date(season, 9, 1)  # approximate season start
             out["age"] = birth.apply(
                 lambda b: (ref - b.date()).days // 365 if hasattr(b, "date") and pd.notna(b) else None

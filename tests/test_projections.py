@@ -205,9 +205,11 @@ class TestEnhancedModelAdjustments:
     def test_injury_zero_out(self):
         """Test that Out injury zeros all stats."""
         proj = {
-            "passing_yards": 300, "passing_tds": 2,
+            "passing_yards": 300,
+            "passing_tds": 2,
             "rushing_yards": 0,
-            "receiving_yards": 0, "receiving_tds": 0,
+            "receiving_yards": 0,
+            "receiving_tds": 0,
             "receptions": 0,
             "injury_discount": 0.0,
             "injury_status": "Out",
@@ -221,10 +223,13 @@ class TestEnhancedModelAdjustments:
     def test_injury_questionable_partial(self):
         """Test that Questionable applies 0.75 discount."""
         proj = {
-            "rushing_yards": 100, "rushing_tds": 1,
-            "receiving_yards": 0, "receiving_tds": 0,
+            "rushing_yards": 100,
+            "rushing_tds": 1,
+            "receiving_yards": 0,
+            "receiving_tds": 0,
             "receptions": 0,
-            "passing_yards": 0, "passing_tds": 0,
+            "passing_yards": 0,
+            "passing_tds": 0,
             "injury_discount": 0.75,
             "injury_status": "Questionable",
             "matchup_factor": 1.0,
@@ -240,9 +245,11 @@ class TestEnhancedModelAdjustments:
         proj = {
             "rushing_yards": 100,
             "rushing_tds": 0,
-            "receiving_yards": 0, "receiving_tds": 0,
+            "receiving_yards": 0,
+            "receiving_tds": 0,
             "receptions": 0,
-            "passing_yards": 0, "passing_tds": 0,
+            "passing_yards": 0,
+            "passing_tds": 0,
             "injury_discount": 1.0,
             "injury_status": "Active",
             "matchup_factor": 1.15,
