@@ -533,6 +533,84 @@ def cmd_load_rosters(args: argparse.Namespace) -> int:
         db.close()
 
 
+def cmd_load_cfb_games(args: argparse.Namespace) -> int:
+    """Load college football game schedules."""
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_games(season=args.season, verbose=not args.quiet)
+        if not args.quiet:
+            print(f"\nStored {stats.get('stored', 0)} CFB games for {args.season}.")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_cfb_rosters(args: argparse.Namespace) -> int:
+    """Load college football roster data."""
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_rosters(season=args.season, verbose=not args.quiet)
+        if not args.quiet:
+            print(f"\nStored {stats.get('stored', 0)} CFB roster rows for {args.season}.")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_cfb_pbp(args: argparse.Namespace) -> int:
+    """Load college football play-by-play data."""
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_pbp(season=args.season, verbose=not args.quiet)
+        if not args.quiet:
+            print(
+                f"\nStored {stats.get('games', 0)} CFB games and "
+                f"{stats.get('plays', 0):,} plays for {args.season}."
+            )
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_load_cfb(args: argparse.Namespace) -> int:
+    """Load college football games, rosters, and optionally PBP."""
+    from ffpy.cfbverse import CFBVerseLoader
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        with CFBVerseLoader(db) as loader:
+            stats = loader.load_season(
+                season=args.season,
+                include_games=not args.skip_games,
+                include_rosters=not args.skip_rosters,
+                include_pbp=args.pbp,
+                verbose=not args.quiet,
+            )
+        if not args.quiet:
+            print(
+                f"\nCFB load complete for {args.season}: "
+                f"{stats.get('games', 0)} games, "
+                f"{stats.get('rosters', 0)} roster rows, "
+                f"{stats.get('plays', 0):,} plays."
+            )
+        return 0
+    finally:
+        db.close()
+
+
 def cmd_load_depth_charts(args: argparse.Namespace) -> int:
     from ffpy.integrations.depth_chart import fetch_nflverse_depth_charts
     from ffpy.nflverse import setup_database
@@ -840,6 +918,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db-path", help="Custom database path")
     p.add_argument("--quiet", action="store_true", help="Suppress progress output")
     p.set_defaults(func=cmd_load_rosters)
+
+    p = sub.add_parser(
+        "load-cfb",
+        help="Load college football games + rosters (optional PBP via --pbp)",
+    )
+    p.add_argument("--season", type=int, required=True, help="CFB season year")
+    p.add_argument("--pbp", action="store_true", help="Also load play-by-play (large download)")
+    p.add_argument("--skip-games", action="store_true", help="Skip game schedule load")
+    p.add_argument("--skip-rosters", action="store_true", help="Skip roster load")
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true", help="Suppress progress output")
+    p.set_defaults(func=cmd_load_cfb)
+
+    p = sub.add_parser("load-cfb-games", help="Load college football game schedules")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_load_cfb_games)
+
+    p = sub.add_parser("load-cfb-rosters", help="Load college football rosters")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_load_cfb_rosters)
+
+    p = sub.add_parser("load-cfb-pbp", help="Load college football play-by-play")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_load_cfb_pbp)
 
     p = sub.add_parser(
         "compute-ol-stats",

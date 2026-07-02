@@ -99,6 +99,7 @@ class FFPyDatabase:
             "012_player_rosters.sql",
             "013_offensive_line_stats.sql",
             "014_league_import.sql",
+            "015_cfb_schema.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
@@ -1691,6 +1692,237 @@ class FFPyDatabase:
         min_season = cursor.fetchone()
         return min_season is not None and min_season[0] is not None and min_season[0] == season
 
+    # ==================== COLLEGE FOOTBALL (CFB) ====================
+
+    def store_cfb_games(self, games_df: pd.DataFrame) -> int:
+        """Store or replace college football game metadata."""
+        if games_df.empty:
+            return 0
+
+        game_columns = [
+            "game_id",
+            "season",
+            "week",
+            "season_type",
+            "game_date",
+            "neutral_site",
+            "conference_game",
+            "home_id",
+            "away_id",
+            "home_team",
+            "away_team",
+            "home_abbreviation",
+            "away_abbreviation",
+            "home_score",
+            "away_score",
+            "home_winner",
+            "away_winner",
+            "venue",
+            "attendance",
+            "status",
+            "game_finished",
+            "source",
+        ]
+        available_cols = [col for col in game_columns if col in games_df.columns]
+        subset = games_df[available_cols].copy()
+        subset["game_id"] = subset["game_id"].astype(str)
+
+        if (
+            "home_score" in subset.columns
+            and "away_score" in subset.columns
+            and "game_finished" not in subset.columns
+        ):
+            subset["game_finished"] = (subset["home_score"].notna() & subset["away_score"].notna()).astype(
+                int
+            )
+
+        columns = list(subset.columns)
+        column_sql = ", ".join(columns)
+        placeholders = ", ".join("?" for _ in columns)
+        cursor = self.conn.cursor()
+        cursor.executemany(
+            f"INSERT OR REPLACE INTO cfb_games ({column_sql}) VALUES ({placeholders})",
+            _sqlite_records(subset),
+        )
+        self.conn.commit()
+        return len(subset)
+
+    def get_cfb_games(
+        self,
+        season: int,
+        week: Optional[int] = None,
+        season_type: Optional[int] = None,
+        finished_only: bool = True,
+    ) -> pd.DataFrame:
+        """Fetch college football games for a season/week."""
+        query = """
+            SELECT game_id, season, week, season_type, game_date,
+                   home_team, away_team, home_abbreviation, away_abbreviation,
+                   home_score, away_score, venue, status, game_finished, source
+            FROM cfb_games
+            WHERE season = ?
+        """
+        params: List = [season]
+
+        if week is not None:
+            query += " AND week = ?"
+            params.append(week)
+        if season_type is not None:
+            query += " AND season_type = ?"
+            params.append(season_type)
+        if finished_only:
+            query += " AND home_score IS NOT NULL AND away_score IS NOT NULL"
+
+        query += " ORDER BY week, game_date, game_id"
+        return pd.read_sql(query, self.conn, params=params)
+
+    def store_cfb_rosters(self, df: pd.DataFrame, season: int) -> int:
+        """Store or update college football roster rows for a season."""
+        df = df.copy()
+        df["season"] = season
+        df = df.dropna(subset=["athlete_id", "full_name"])
+        if df.empty:
+            return 0
+
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(cfb_rosters)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+        available_cols = [
+            col for col in df.columns if col in schema_columns and col not in ("roster_id", "created_at")
+        ]
+        if not available_cols:
+            return 0
+
+        column_sql = ", ".join(available_cols)
+        placeholders = ", ".join("?" for _ in available_cols)
+        update_sql = ", ".join(
+            f"{col}=excluded.{col}"
+            for col in available_cols
+            if col not in ("season", "athlete_id", "team_id")
+        )
+        cursor.executemany(
+            f"""INSERT INTO cfb_rosters ({column_sql})
+                VALUES ({placeholders})
+                ON CONFLICT(season, athlete_id, team_id) DO UPDATE SET {update_sql}""",
+            _sqlite_records(df[available_cols]),
+        )
+        self.conn.commit()
+        return max(cursor.rowcount, 0)
+
+    def get_cfb_rosters(
+        self,
+        season: Optional[int] = None,
+        team_abbreviation: Optional[str] = None,
+        full_name: Optional[str] = None,
+        athlete_id: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Retrieve college football roster data."""
+        conditions: list[str] = []
+        params: list = []
+        if season is not None:
+            conditions.append("season = ?")
+            params.append(season)
+        if team_abbreviation is not None:
+            conditions.append("team_abbreviation = ?")
+            params.append(team_abbreviation)
+        if full_name is not None:
+            conditions.append("full_name = ?")
+            params.append(full_name)
+        if athlete_id is not None:
+            conditions.append("athlete_id = ?")
+            params.append(athlete_id)
+
+        where_sql = " AND ".join(conditions) if conditions else "1"
+        query = f"SELECT * FROM cfb_rosters WHERE {where_sql} ORDER BY team_abbreviation, full_name"
+        return pd.read_sql(query, self.conn, params=params)
+
+    def store_cfb_plays(self, plays_df: pd.DataFrame, show_progress: bool = True) -> int:
+        """Store curated college football play-by-play rows."""
+        from tqdm import tqdm
+
+        if plays_df.empty:
+            return 0
+
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA table_info(cfb_plays)")
+        schema_columns = {row[1] for row in cursor.fetchall()}
+        available_cols = [col for col in plays_df.columns if col in schema_columns and col != "created_at"]
+        subset = plays_df[available_cols].copy()
+
+        batch_size = 1000
+        total_rows = len(subset)
+        inserted = 0
+
+        cursor.execute("PRAGMA synchronous = OFF")
+        cursor.execute("PRAGMA journal_mode = MEMORY")
+        cursor.fetchone()
+
+        pbar = tqdm(total=total_rows, desc="Storing CFB plays", disable=not show_progress, unit=" plays")
+        try:
+            for start_idx in range(0, total_rows, batch_size):
+                batch = subset.iloc[start_idx : start_idx + batch_size]
+                inserted += _insert_or_ignore_dataframe(self.conn, "cfb_plays", batch, available_cols)
+                pbar.update(len(batch))
+            self.conn.commit()
+        finally:
+            cursor.execute("PRAGMA synchronous = FULL")
+            cursor.execute("PRAGMA journal_mode = DELETE")
+            cursor.fetchone()
+            pbar.close()
+
+        return inserted
+
+    def get_cfb_plays(
+        self,
+        season: int,
+        week: Optional[int] = None,
+        team: Optional[str] = None,
+        player_name: Optional[str] = None,
+        play_type: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Query college football play-by-play data."""
+        conditions = ["season = ?"]
+        params: list = [season]
+
+        if week is not None:
+            conditions.append("week = ?")
+            params.append(week)
+        if team is not None:
+            conditions.append("(pos_team = ? OR def_pos_team = ? OR home_team = ? OR away_team = ?)")
+            params.extend([team, team, team, team])
+        if player_name is not None:
+            conditions.append(
+                "(passer_player_name = ? OR rusher_player_name = ? OR receiver_player_name = ?)"
+            )
+            params.extend([player_name, player_name, player_name])
+        if play_type is not None:
+            conditions.append("play_type = ?")
+            params.append(play_type)
+
+        query = f"SELECT * FROM cfb_plays WHERE {' AND '.join(conditions)} ORDER BY game_id, play_id"
+        if limit is not None:
+            query += f" LIMIT {int(limit)}"
+        return pd.read_sql(query, self.conn, params=params)
+
+    def get_cfb_data_coverage(self) -> pd.DataFrame:
+        """Summarize loaded CFB data by season."""
+        query = """
+            SELECT
+                g.season,
+                COUNT(DISTINCT g.game_id) AS n_games,
+                COUNT(DISTINCT r.athlete_id) AS n_roster_players,
+                (SELECT COUNT(*) FROM cfb_plays p WHERE p.season = g.season) AS n_plays
+            FROM cfb_games g
+            LEFT JOIN cfb_rosters r ON r.season = g.season
+            GROUP BY g.season
+            ORDER BY g.season
+        """
+        try:
+            return pd.read_sql(query, self.conn)
+        except Exception:
+            return pd.DataFrame(columns=["season", "n_games", "n_roster_players", "n_plays"])
+
     # ==================== VEGAS IMPLIED TEAM TOTALS ====================
 
     def get_implied_team_totals(
@@ -2115,6 +2347,9 @@ class FFPyDatabase:
             "adp",
             "depth_charts",
             "player_rosters",
+            "cfb_games",
+            "cfb_rosters",
+            "cfb_plays",
         ]
         for table in tables:
             try:

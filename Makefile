@@ -8,6 +8,7 @@
         precommit precommit-install precommit-update \
         db.prepare db.migrate db.load db.update db.stats db.mock \
         db.compute-stats db.ngs db.injuries db.audit db.dfs db.adp db.depth-chart db.weather \
+        db.cfb db.cfb-games db.cfb-rosters db.cfb-pbp \
         supabase.check fly.app fly.volume fly.secrets fly.secrets-list \
         fly.deploy fly.status fly.logs fly.token clean clean-all
 
@@ -158,6 +159,18 @@ db.depth-chart: ## Load depth charts (SEASON=2024)
 
 db.weather: ## Add historical weather data (SEASON=2024)
 	$(UV) run ffpy-db add-weather --season $(SEASON)
+
+db.cfb: ## Load CFB games + rosters (SEASON=2024; add CFB_PBP=1 for play-by-play)
+	$(UV) run ffpy-db load-cfb --season $(SEASON) $(if $(CFB_PBP),--pbp,)
+
+db.cfb-games: ## Load college football game schedules (SEASON=2024)
+	$(UV) run ffpy-db load-cfb-games --season $(SEASON)
+
+db.cfb-rosters: ## Load college football rosters (SEASON=2024)
+	$(UV) run ffpy-db load-cfb-rosters --season $(SEASON)
+
+db.cfb-pbp: ## Load college football play-by-play (SEASON=2024, large download)
+	$(UV) run ffpy-db load-cfb-pbp --season $(SEASON)
 
 # ---- Fly.io -------------------------------------------------------
 
