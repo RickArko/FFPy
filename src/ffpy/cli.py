@@ -724,6 +724,101 @@ def cmd_compute_cfb_projections(args: argparse.Namespace) -> int:
         db.close()
 
 
+def cmd_build_cfb_dst_players(args: argparse.Namespace) -> int:
+    from ffpy.database import FFPyDatabase
+
+    confs = _parse_cfb_conferences(args.conferences)
+    db = FFPyDatabase(args.db_path)
+    try:
+        count = db.seed_cfb_dst_players(args.season, conferences=confs)
+        skipped = getattr(db, "_last_dst_seed_skipped", 0)
+        if not args.quiet:
+            if count:
+                print(f"Seeded {count} team DST players for season {args.season}")
+            elif skipped:
+                print(
+                    f"No new DST rows for season {args.season} "
+                    f"({skipped} teams already have team DST entries)"
+                )
+            else:
+                print(
+                    f"No DST rows seeded for season {args.season}. "
+                    "Run load-cfb-teams first (make db.cfb-teams)."
+                )
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_build_cfb_game_locks(args: argparse.Namespace) -> int:
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        count = db.build_cfb_game_locks(args.season)
+        if not args.quiet:
+            print(f"Built {count} game lock rows for season {args.season}")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_run_cfb_waivers(args: argparse.Namespace) -> int:
+    from ffpy.cfb_waivers import CfbWaiverService
+    from ffpy.database import FFPyDatabase
+
+    db = FFPyDatabase(args.db_path)
+    try:
+        result = CfbWaiverService(db).run_waivers(args.league_id, args.week)
+        if not args.quiet:
+            print(f"Processed {result['processed']} claims, {result['failed']} failed")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_cfb_live_refresh(args: argparse.Namespace) -> int:
+    from ffpy.cfb_scoring_live import CfbLiveScoringService
+    from ffpy.database import FFPyDatabase
+
+    confs = _parse_cfb_conferences(args.conferences)
+    db = FFPyDatabase(args.db_path)
+    try:
+        svc = CfbLiveScoringService(db)
+        stats = svc.refresh_week_stats(args.season, args.week, conferences=confs)
+        if args.league_id:
+            svc.score_league_week_live(args.league_id, args.week)
+        if not args.quiet:
+            print(f"Live refresh: {stats}")
+        return 0
+    finally:
+        db.close()
+
+
+def cmd_compute_cfb_adp(args: argparse.Namespace) -> int:
+    from ffpy.cfb_draft_strategy import compute_cfb_adp_from_projections
+    from ffpy.database import FFPyDatabase
+
+    confs = _parse_cfb_conferences(args.conferences)
+    db = FFPyDatabase(args.db_path)
+    try:
+        count = compute_cfb_adp_from_projections(
+            db, args.season, week=args.week, model=args.model, conferences=confs
+        )
+        if not args.quiet:
+            if count:
+                print(f"Stored {count} CFB ADP rows for season {args.season}")
+            else:
+                print(
+                    f"Stored 0 CFB ADP rows for season {args.season}. "
+                    "Ensure projections exist (make db.cfb-projections-v2); "
+                    "try --week 2 if week 1 is empty."
+                )
+        return 0
+    finally:
+        db.close()
+
+
 def cmd_audit_cfb(args: argparse.Namespace) -> int:
     from ffpy.database import FFPyDatabase
 
@@ -1126,6 +1221,47 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--season", type=int, default=None)
     p.add_argument("--db-path", help="Custom database path")
     p.set_defaults(func=cmd_audit_cfb)
+
+    p = sub.add_parser("build-cfb-dst-players", help="Seed DST player rows from cfb_teams")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--conferences", default="SEC,Big Ten,ACC")
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_build_cfb_dst_players)
+
+    p = sub.add_parser("build-cfb-game-locks", help="Populate cfb_game_locks from schedules")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_build_cfb_game_locks)
+
+    p = sub.add_parser("run-cfb-waivers", help="Process pending FAAB waiver claims")
+    p.add_argument("--league-id", required=True)
+    p.add_argument("--week", type=int, required=True)
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_run_cfb_waivers)
+
+    p = sub.add_parser("cfb-live-refresh", help="Refresh CFB stats and optionally score a league week")
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--week", type=int, required=True)
+    p.add_argument("--league-id", default=None)
+    p.add_argument("--conferences", default="SEC,Big Ten,ACC")
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_cfb_live_refresh)
+
+    p = sub.add_parser(
+        "compute-cfb-adp-from-projections",
+        help="Rank CFB ADP from projection output",
+    )
+    p.add_argument("--season", type=int, required=True)
+    p.add_argument("--week", type=int, default=None, help="Projection week (default: earliest available)")
+    p.add_argument("--model", default="historical")
+    p.add_argument("--conferences", default="SEC,Big Ten,ACC")
+    p.add_argument("--db-path", help="Custom database path")
+    p.add_argument("--quiet", action="store_true")
+    p.set_defaults(func=cmd_compute_cfb_adp)
 
     p = sub.add_parser(
         "compute-ol-stats",

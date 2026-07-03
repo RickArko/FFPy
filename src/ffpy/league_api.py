@@ -411,6 +411,11 @@ def create_league_app(
     def frontend() -> FileResponse:
         return FileResponse(static_dir / "index.html")
 
+    @app.get("/cfb/", include_in_schema=False)
+    @app.get("/cfb/{rest:path}", include_in_schema=False)
+    def cfb_frontend(rest: str = "") -> FileResponse:
+        return FileResponse(static_dir / "cfb.html")
+
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> FileResponse:
         return FileResponse(static_dir / "favicon.ico")
