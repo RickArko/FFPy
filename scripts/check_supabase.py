@@ -104,6 +104,26 @@ def main() -> int:
     except requests.RequestException as exc:
         failures += not _check("GET /auth/v1/settings (browser key)", False, str(exc))
 
+    # JWKS endpoint used by the backend for RS256 token verification (no apikey required)
+    try:
+        r = requests.get(f"{url}/auth/v1/.well-known/jwks.json", timeout=5)
+        if r.status_code == 200:
+            key_count = len(r.json().get("keys", []))
+            _check(
+                "GET /auth/v1/.well-known/jwks.json",
+                key_count > 0,
+                f"{key_count} signing key(s)",
+            )
+            failures += key_count == 0
+        else:
+            failures += not _check(
+                "GET /auth/v1/.well-known/jwks.json",
+                False,
+                f"HTTP {r.status_code} {r.text[:120]}",
+            )
+    except requests.RequestException as exc:
+        failures += not _check("GET /auth/v1/.well-known/jwks.json", False, str(exc))
+
     if args.token:
         print()
         print("Token checks:")
