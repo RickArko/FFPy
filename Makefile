@@ -201,9 +201,15 @@ cfb-full-data: ## Full CFB fantasy pipeline for SEC/B1G/ACC (SEASON=2024, requir
 	-$(UV) run ffpy-db load-cfb-rosters --season $(SEASON)
 	$(UV) run ffpy-db load-cfb-stats --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
 	$(UV) run ffpy-db build-cfb-players --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+	$(UV) run ffpy-db build-cfb-dst-players --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+	$(UV) run ffpy-db build-cfb-game-locks --season $(SEASON)
 	$(UV) run ffpy-db compute-cfb-fantasy --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
 	$(UV) run ffpy-db compute-cfb-projections --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
+	$(UV) run ffpy-db compute-cfb-adp-from-projections --season $(SEASON) --conferences "$(CFB_CONFERENCES)"
 	$(UV) run ffpy-db audit-cfb --season $(SEASON)
+
+cfb-live-refresh: ## Refresh CFB stats during game days (SEASON=2024 WEEK=N LEAGUE_ID=optional)
+	$(UV) run ffpy-db cfb-live-refresh --season $(SEASON) --week $(WEEK) $(if $(LEAGUE_ID),--league-id $(LEAGUE_ID),) --conferences "$(CFB_CONFERENCES)"
 	@echo ""
 	@echo "CFB fantasy pipeline complete for $(SEASON) ($(CFB_CONFERENCES))."
 

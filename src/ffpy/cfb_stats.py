@@ -101,7 +101,9 @@ def compute_cfb_fantasy_points(
 
     # DST rows from team defense stats
     def_stats = db.get_cfb_team_defense_stats(season=season)
-    dst_players = players[players["position"] == "DST"]
+    dst_players = players[
+        (players["position"] == "DST") & (players["full_name"].str.endswith(" DST", na=False))
+    ]
     if not def_stats.empty and not dst_players.empty:
         for _, ds in def_stats.iterrows():
             dst = dst_players[dst_players["team_key"] == ds["team_key"]]

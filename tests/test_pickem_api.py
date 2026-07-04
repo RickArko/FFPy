@@ -76,7 +76,7 @@ def test_supabase_verifier_defaults_to_current_jwks_endpoint():
     )
 
     assert verifier._jwks_client is not None
-    assert verifier._jwks_client.uri == "https://demo.supabase.co/auth/v1/jwks"
+    assert verifier._jwks_client.uri == "https://demo.supabase.co/auth/v1/.well-known/jwks.json"
 
 
 @pytest.fixture

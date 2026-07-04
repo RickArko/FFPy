@@ -9,6 +9,7 @@ createApp({
           <a href="#" class="nav-link" :class="{ active: page === 'dashboard' }" @click.prevent="page='dashboard'; loadLeagues()">Dashboard</a>
           <a href="#" class="nav-link" :class="{ active: page === 'import' }" @click.prevent="page='import'; importStep=1">Import</a>
           <a href="/pickem/" class="nav-link" target="_blank">Pick'em</a>
+          <a href="/cfb/" class="nav-link">College</a>
           <template v-if="isAuthenticated">
             <span class="small">{{ authUser?.email || 'User' }}</span>
             <button class="btn-ghost" @click="signOut">Sign Out</button>

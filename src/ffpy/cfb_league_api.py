@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ffpy.auth import AuthenticatedUser
@@ -60,7 +62,57 @@ class CfbTransactionCreateRequest(BaseModel):
     league_team_id: str
     tx_type: str = Field(..., pattern="^(add|drop|trade)$")
     player_id: int
+    drop_player_id: Optional[int] = None
     faab_bid: Optional[float] = None
+    week: Optional[int] = Field(None, ge=1, le=16)
+
+
+class CfbLeagueSettingsPatch(BaseModel):
+    waiver_type: Optional[str] = Field(None, pattern="^(none|faab|rolling)$")
+    faab_budget: Optional[float] = Field(None, ge=0)
+    waiver_run_day: Optional[int] = Field(None, ge=0, le=6)
+    waiver_run_hour_utc: Optional[int] = Field(None, ge=0, le=23)
+    trade_deadline_week: Optional[int] = Field(None, ge=1, le=16)
+    trade_review_hours: Optional[int] = Field(None, ge=0)
+    veto_threshold: Optional[int] = Field(None, ge=0)
+    playoff_teams: Optional[int] = Field(None, ge=2, le=16)
+    playoff_start_week: Optional[int] = Field(None, ge=1, le=16)
+    regular_season_weeks: Optional[int] = Field(None, ge=1, le=16)
+    lineup_lock: Optional[str] = Field(None, pattern="^(individual_game|weekly)$")
+
+
+class CfbDraftPickRequest(BaseModel):
+    player_id: int
+
+
+class CfbWaiverRunRequest(BaseModel):
+    week: int = Field(..., ge=1, le=16)
+
+
+class CfbTradeProposeRequest(BaseModel):
+    proposer_team_id: str
+    recipient_team_id: str
+    items: List[Dict[str, Any]]
+    week: int = Field(1, ge=1, le=16)
+
+
+class CfbTradeAcceptRequest(BaseModel):
+    accepting_team_id: str
+
+
+class CfbTradeVetoRequest(BaseModel):
+    team_id: str
+
+
+class CfbDraftHelpRequest(BaseModel):
+    team_id: str
+    num_players: int = Field(50, ge=1, le=200)
+    model: str = "historical"
+    week: int = Field(1, ge=1, le=16)
+
+
+# In-memory draft event subscribers (Phase I)
+_draft_subscribers: dict[str, list[asyncio.Queue]] = {}
 
 
 def _load_college_roster_constraints(preset: str = "college_standard") -> RosterConstraints:
@@ -125,6 +177,29 @@ def register_cfb_league_router(
     ) -> List[Dict[str, Any]]:
         uid = _user_or_default(user)
         return db.list_cfb_leagues(uid)
+
+    @router.get("/leagues/{league_id}")
+    def get_cfb_league_detail(
+        league_id: str,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        league = db.get_cfb_league(league_id)
+        if not league:
+            raise HTTPException(status_code=404, detail="League not found")
+        settings = db.get_cfb_league_settings(league_id)
+        return {**league, "settings": settings}
+
+    @router.patch("/leagues/{league_id}")
+    def patch_cfb_league(
+        league_id: str,
+        payload: CfbLeagueSettingsPatch,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        if not db.get_cfb_league(league_id):
+            raise HTTPException(status_code=404, detail="League not found")
+        updates = payload.model_dump(exclude_none=True)
+        settings = db.update_cfb_league_settings(league_id, updates)
+        return {"league_id": league_id, "settings": settings}
 
     @router.get("/leagues/{league_id}/player-pool")
     def cfb_player_pool(
@@ -260,6 +335,12 @@ def register_cfb_league_router(
     ) -> Dict[str, str]:
         if not db.get_cfb_league(league_id):
             raise HTTPException(status_code=404, detail="League not found")
+        for entry in payload.entries:
+            if db.is_player_locked(league_id, entry.player_id, payload.season, payload.week):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Player {entry.player_id} is locked for week {payload.week}",
+                )
         db.set_cfb_lineup(
             team_id,
             payload.season,
@@ -390,8 +471,23 @@ def register_cfb_league_router(
         payload: CfbTransactionCreateRequest,
         db: FFPyDatabase = Depends(get_db),
     ) -> Dict[str, Any]:
+        from ffpy.cfb_waivers import CfbWaiverError, CfbWaiverService
+
         if not db.get_cfb_league(league_id):
             raise HTTPException(status_code=404, detail="League not found")
+        if payload.tx_type == "add":
+            try:
+                tx_id = CfbWaiverService(db).submit_claim(
+                    league_id,
+                    payload.league_team_id,
+                    payload.player_id,
+                    drop_player_id=payload.drop_player_id,
+                    faab_bid=payload.faab_bid,
+                    week=payload.week,
+                )
+                return {"transaction_id": tx_id, "status": "pending"}
+            except CfbWaiverError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         tx_id = db.create_cfb_transaction(
             {
                 "league_id": league_id,
@@ -400,20 +496,276 @@ def register_cfb_league_router(
                 "player_id": payload.player_id,
                 "faab_bid": payload.faab_bid,
                 "status": "pending",
+                "week": payload.week,
             }
         )
         return {"transaction_id": tx_id, "status": "pending"}
+
+    @router.post("/leagues/{league_id}/waiver-run")
+    def run_cfb_waivers(
+        league_id: str,
+        payload: CfbWaiverRunRequest,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_waivers import CfbWaiverError, CfbWaiverService
+
+        if not db.get_cfb_league(league_id):
+            raise HTTPException(status_code=404, detail="League not found")
+        try:
+            return CfbWaiverService(db).run_waivers(league_id, payload.week)
+        except CfbWaiverError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.get("/leagues/{league_id}/transactions")
     def list_cfb_transactions(
         league_id: str,
         status: Optional[str] = None,
+        week: Optional[int] = None,
         db: FFPyDatabase = Depends(get_db),
     ) -> Dict[str, Any]:
         if not db.get_cfb_league(league_id):
             raise HTTPException(status_code=404, detail="League not found")
-        txs = db.list_cfb_transactions(league_id, status=status)
+        txs = db.list_cfb_transactions(league_id, status=status, week=week)
         return {"league_id": league_id, "transactions": txs}
+
+    @router.post("/leagues/{league_id}/draft/start")
+    def start_cfb_draft(
+        league_id: str,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_draft import CfbDraftError, CfbDraftService
+
+        try:
+            board = CfbDraftService(db).start_draft(league_id)
+            draft_id = board.get("draft_id")
+            if draft_id:
+                for q in _draft_subscribers.get(draft_id, []):
+                    q.put_nowait({"event": "draft_started", "board": board})
+            return board
+        except CfbDraftError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/leagues/{league_id}/draft")
+    def get_cfb_draft_board(
+        league_id: str,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_draft import CfbDraftService
+
+        board = CfbDraftService(db).get_board(league_id)
+        if board.get("status") == "none":
+            raise HTTPException(status_code=404, detail="No draft found")
+        return board
+
+    @router.post("/leagues/{league_id}/draft/pick")
+    def cfb_draft_pick(
+        league_id: str,
+        payload: CfbDraftPickRequest,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_draft import CfbDraftError, CfbDraftService
+
+        svc = CfbDraftService(db)
+        team_id = svc.on_the_clock(league_id)
+        if not team_id:
+            raise HTTPException(status_code=400, detail="No team on the clock")
+        try:
+            board = svc.make_pick(league_id, team_id, payload.player_id)
+            draft_id = board.get("draft_id")
+            if draft_id:
+                for q in _draft_subscribers.get(draft_id, []):
+                    q.put_nowait({"event": "pick_made", "board": board})
+            return board
+        except CfbDraftError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/leagues/{league_id}/draft/autopick")
+    def cfb_draft_autopick(
+        league_id: str,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_draft import CfbDraftError, CfbDraftService
+
+        try:
+            board = CfbDraftService(db).autopick(league_id)
+            draft_id = board.get("draft_id")
+            if draft_id:
+                for q in _draft_subscribers.get(draft_id, []):
+                    q.put_nowait({"event": "pick_made", "board": board})
+            return board
+        except CfbDraftError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/leagues/{league_id}/draft/events")
+    async def cfb_draft_events(
+        league_id: str,
+        db: FFPyDatabase = Depends(get_db),
+    ):
+        draft = db.get_cfb_draft(league_id)
+        if not draft:
+            raise HTTPException(status_code=404, detail="No draft found")
+        draft_id = draft["draft_id"]
+        queue: asyncio.Queue = asyncio.Queue()
+        _draft_subscribers.setdefault(draft_id, []).append(queue)
+
+        async def event_stream():
+            from ffpy.cfb_draft import CfbDraftService
+
+            try:
+                initial = CfbDraftService(db).get_board(league_id)
+                yield f"data: {json.dumps({'event': 'connected', 'board': initial})}\n\n"
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(queue.get(), timeout=30.0)
+                        yield f"data: {json.dumps(msg)}\n\n"
+                        if msg.get("board", {}).get("status") == "complete":
+                            break
+                    except TimeoutError:
+                        yield f"data: {json.dumps({'event': 'heartbeat'})}\n\n"
+            finally:
+                subs = _draft_subscribers.get(draft_id, [])
+                if queue in subs:
+                    subs.remove(queue)
+                if not subs:
+                    _draft_subscribers.pop(draft_id, None)
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @router.post("/leagues/{league_id}/trades")
+    def propose_cfb_trade(
+        league_id: str,
+        payload: CfbTradeProposeRequest,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_trades import CfbTradeError, CfbTradeService
+
+        try:
+            return CfbTradeService(db).propose(
+                league_id,
+                payload.proposer_team_id,
+                payload.recipient_team_id,
+                payload.items,
+                week=payload.week,
+            )
+        except CfbTradeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/leagues/{league_id}/trades/{trade_id}/accept")
+    def accept_cfb_trade(
+        league_id: str,
+        trade_id: str,
+        payload: CfbTradeAcceptRequest,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_trades import CfbTradeError, CfbTradeService
+
+        try:
+            return CfbTradeService(db).accept(league_id, trade_id, payload.accepting_team_id)
+        except CfbTradeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/leagues/{league_id}/trades/{trade_id}/veto")
+    def veto_cfb_trade(
+        league_id: str,
+        trade_id: str,
+        payload: CfbTradeVetoRequest,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_trades import CfbTradeError, CfbTradeService
+
+        try:
+            return CfbTradeService(db).veto(league_id, trade_id, payload.team_id)
+        except CfbTradeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/leagues/{league_id}/trades")
+    def list_cfb_trades(
+        league_id: str,
+        status: Optional[str] = None,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_trades import CfbTradeService
+
+        if not db.get_cfb_league(league_id):
+            raise HTTPException(status_code=404, detail="League not found")
+        return {"league_id": league_id, "trades": CfbTradeService(db).list_trades(league_id, status)}
+
+    @router.get("/leagues/{league_id}/weeks/{week}/live")
+    async def cfb_live_scores_sse(
+        league_id: str,
+        week: int,
+        db: FFPyDatabase = Depends(get_db),
+    ):
+        from ffpy.cfb_scoring_live import CfbLiveScoringService
+
+        if not db.get_cfb_league(league_id):
+            raise HTTPException(status_code=404, detail="League not found")
+
+        async def score_stream():
+            svc = CfbLiveScoringService(db)
+            for _ in range(3):
+                payload = svc.get_live_scores(league_id, week)
+                yield f"data: {json.dumps(payload)}\n\n"
+                await asyncio.sleep(0.1)
+            yield f"data: {json.dumps({'event': 'done'})}\n\n"
+
+        return StreamingResponse(score_stream(), media_type="text/event-stream")
+
+    @router.post("/leagues/{league_id}/playoffs/seed")
+    def seed_cfb_playoffs(
+        league_id: str,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_playoffs import CfbPlayoffService
+
+        try:
+            return CfbPlayoffService(db).seed_playoffs(league_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/leagues/{league_id}/playoffs/bracket")
+    def get_cfb_playoff_bracket(
+        league_id: str,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_playoffs import CfbPlayoffService
+
+        try:
+            return CfbPlayoffService(db).get_bracket(league_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/leagues/{league_id}/draft-help")
+    def cfb_draft_help(
+        league_id: str,
+        payload: CfbDraftHelpRequest,
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_draft_strategy import CfbDraftStrategyConfig, CfbDraftStrategyEngine
+
+        config = CfbDraftStrategyConfig(model=payload.model, week=payload.week)
+        engine = CfbDraftStrategyEngine(db, config)
+        try:
+            return engine.generate(league_id, payload.team_id, num_players=payload.num_players)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/players/{player_id}/outlook")
+    def cfb_player_outlook(
+        player_id: int,
+        season: int,
+        week: int = 1,
+        model: str = "historical",
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        from ffpy.cfb_draft_strategy import CfbDraftStrategyConfig, CfbDraftStrategyEngine
+
+        config = CfbDraftStrategyConfig(model=model, week=week)
+        engine = CfbDraftStrategyEngine(db, config)
+        try:
+            return engine.player_outlook(player_id, season, week)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.get("/seasons/{season}/coverage")
     def cfb_season_coverage(season: int, db: FFPyDatabase = Depends(get_db)) -> Dict[str, Any]:

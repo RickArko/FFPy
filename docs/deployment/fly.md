@@ -70,7 +70,7 @@ Legacy fallback:
 
 Optional:
 
-- `SUPABASE_JWKS_URL`: override for the signing-key discovery endpoint. Usually leave blank; the app defaults to `<SUPABASE_URL>/auth/v1/jwks`.
+- `SUPABASE_JWKS_URL`: override for the signing-key discovery endpoint. Usually leave blank; the app defaults to `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`.
 - `SUPABASE_JWT_SECRET`: legacy/local HS256 support only. Set this if your Supabase project still uses legacy JWT-secret verification or if you want to mint local dev tokens. If you leave it empty, the backend verifies Supabase access tokens with the project's JWT signing keys through JWKS.
 
 Then push the required runtime secrets to Fly:

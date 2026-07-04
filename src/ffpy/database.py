@@ -102,6 +102,11 @@ class FFPyDatabase:
             "015_cfb_schema.sql",
             "016_cfb_fantasy_schema.sql",
             "017_cfb_transactions.sql",
+            "018_cfb_league_settings.sql",
+            "019_cfb_draft.sql",
+            "020_cfb_waivers.sql",
+            "021_cfb_trades.sql",
+            "022_cfb_adp.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
@@ -115,6 +120,11 @@ class FFPyDatabase:
             "ALTER TABLE cfb_rosters ADD COLUMN position TEXT",
             "ALTER TABLE cfb_rosters ADD COLUMN cfbd_athlete_id INTEGER",
             "ALTER TABLE cfb_player_game_stats ADD COLUMN full_name TEXT",
+            "ALTER TABLE cfb_transactions ADD COLUMN drop_player_id INTEGER",
+            "ALTER TABLE cfb_transactions ADD COLUMN priority INTEGER DEFAULT 0",
+            "ALTER TABLE cfb_transactions ADD COLUMN week INTEGER",
+            "ALTER TABLE cfb_transactions ADD COLUMN processed_at TIMESTAMP",
+            "ALTER TABLE cfb_transactions ADD COLUMN failure_reason TEXT",
         ]
         for stmt in alters:
             try:
@@ -2290,6 +2300,7 @@ class FFPyDatabase:
             ),
         )
         self.conn.commit()
+        self.seed_cfb_league_settings(league["league_id"])
 
     def get_cfb_league(self, league_id: str) -> Optional[dict]:
         cursor = self.conn.execute("SELECT * FROM cfb_leagues WHERE league_id = ?", (league_id,))
@@ -2613,34 +2624,478 @@ class FFPyDatabase:
         self.conn.commit()
         return results
 
+    # ==================== CFB LEAGUE SETTINGS & LOCKS ====================
+
+    DEFAULT_CFB_LEAGUE_SETTINGS: dict = {
+        "waiver_type": "faab",
+        "faab_budget": 100.0,
+        "waiver_run_day": 3,
+        "waiver_run_hour_utc": 8,
+        "trade_deadline_week": 12,
+        "trade_review_hours": 24,
+        "veto_threshold": 0,
+        "playoff_teams": 4,
+        "playoff_start_week": 15,
+        "regular_season_weeks": 14,
+        "lineup_lock": "individual_game",
+    }
+
+    def seed_cfb_league_settings(self, league_id: str) -> None:
+        defaults = self.DEFAULT_CFB_LEAGUE_SETTINGS
+        self.conn.execute(
+            """
+            INSERT INTO cfb_league_settings (
+                league_id, waiver_type, faab_budget, waiver_run_day, waiver_run_hour_utc,
+                trade_deadline_week, trade_review_hours, veto_threshold,
+                playoff_teams, playoff_start_week, regular_season_weeks, lineup_lock
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(league_id) DO NOTHING
+            """,
+            (
+                league_id,
+                defaults["waiver_type"],
+                defaults["faab_budget"],
+                defaults["waiver_run_day"],
+                defaults["waiver_run_hour_utc"],
+                defaults["trade_deadline_week"],
+                defaults["trade_review_hours"],
+                defaults["veto_threshold"],
+                defaults["playoff_teams"],
+                defaults["playoff_start_week"],
+                defaults["regular_season_weeks"],
+                defaults["lineup_lock"],
+            ),
+        )
+        self.conn.commit()
+
+    def get_cfb_league_settings(self, league_id: str) -> dict:
+        row = self.conn.execute(
+            "SELECT * FROM cfb_league_settings WHERE league_id = ?",
+            (league_id,),
+        ).fetchone()
+        if row:
+            return dict(row)
+        return {"league_id": league_id, **self.DEFAULT_CFB_LEAGUE_SETTINGS}
+
+    def update_cfb_league_settings(self, league_id: str, updates: dict) -> dict:
+        allowed = set(self.DEFAULT_CFB_LEAGUE_SETTINGS.keys())
+        fields = {k: v for k, v in updates.items() if k in allowed}
+        if not fields:
+            return self.get_cfb_league_settings(league_id)
+        self.seed_cfb_league_settings(league_id)
+        set_sql = ", ".join(f"{k} = ?" for k in fields)
+        self.conn.execute(
+            f"UPDATE cfb_league_settings SET {set_sql}, updated_at = CURRENT_TIMESTAMP WHERE league_id = ?",
+            (*fields.values(), league_id),
+        )
+        self.conn.commit()
+        return self.get_cfb_league_settings(league_id)
+
+    def build_cfb_game_locks(self, season: int) -> int:
+        """Populate cfb_game_locks from cfb_games + cfb_teams."""
+        games = self.get_cfb_games(season=season, finished_only=False)
+        teams = self.get_cfb_teams(season=season)
+        if games.empty or teams.empty:
+            return 0
+        abbr_to_key: dict[str, str] = {}
+        for _, t in teams.iterrows():
+            abbr = t.get("abbreviation") or t.get("team_key")
+            if abbr:
+                abbr_to_key[str(abbr).upper()] = t["team_key"]
+            abbr_to_key[str(t["team_key"]).upper()] = t["team_key"]
+        count = 0
+        for _, g in games.iterrows():
+            game_id = g["game_id"]
+            week = g.get("week")
+            lock_time = g.get("game_date") or ""
+            if not lock_time or week is None:
+                continue
+            for col, abbr_col in (("home", "home_abbreviation"), ("away", "away_abbreviation")):
+                abbr = g.get(abbr_col) or g.get(f"{col}_team")
+                if not abbr:
+                    continue
+                team_key = abbr_to_key.get(str(abbr).upper())
+                if not team_key:
+                    continue
+                self.conn.execute(
+                    """
+                    INSERT INTO cfb_game_locks (game_id, season, week, team_key, lock_time_utc)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(game_id, team_key) DO UPDATE SET lock_time_utc = excluded.lock_time_utc
+                    """,
+                    (game_id, season, int(week), team_key, str(lock_time)),
+                )
+                count += 1
+        self.conn.commit()
+        return count
+
+    def is_player_locked(self, league_id: str, player_id: int, season: int, week: int) -> bool:
+        """Return True if the player cannot be moved into/out of lineup."""
+        from datetime import datetime, timezone
+
+        settings = self.get_cfb_league_settings(league_id)
+        lock_mode = settings.get("lineup_lock", "individual_game")
+        player = pd.read_sql(
+            "SELECT team_key FROM cfb_players WHERE player_id = ? AND season = ?",
+            self.conn,
+            params=[player_id, season],
+        )
+        if player.empty:
+            return False
+        team_key = player.iloc[0]["team_key"]
+        now = datetime.now(timezone.utc)
+
+        if lock_mode == "weekly":
+            locks = pd.read_sql(
+                """
+                SELECT MIN(lock_time_utc) AS first_lock
+                FROM cfb_game_locks
+                WHERE season = ? AND week = ? AND team_key = ?
+                """,
+                self.conn,
+                params=[season, week, team_key],
+            )
+            if locks.empty or locks.iloc[0]["first_lock"] is None:
+                return False
+            try:
+                lock_dt = datetime.fromisoformat(str(locks.iloc[0]["first_lock"]).replace("Z", "+00:00"))
+                if lock_dt.tzinfo is None:
+                    lock_dt = lock_dt.replace(tzinfo=timezone.utc)
+                return now >= lock_dt
+            except ValueError:
+                return False
+
+        row = self.conn.execute(
+            """
+            SELECT lock_time_utc FROM cfb_game_locks
+            WHERE season = ? AND week = ? AND team_key = ?
+            ORDER BY lock_time_utc LIMIT 1
+            """,
+            (season, week, team_key),
+        ).fetchone()
+        if not row or not row[0]:
+            return False
+        try:
+            lock_dt = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+            if lock_dt.tzinfo is None:
+                lock_dt = lock_dt.replace(tzinfo=timezone.utc)
+            return now >= lock_dt
+        except ValueError:
+            return False
+
+    def seed_cfb_dst_players(self, season: int, conferences: Optional[list[str]] = None) -> int:
+        """Create one rosterable team DST row per eligible team."""
+        from ffpy.integrations.cfbd import DEFAULT_CONFERENCES
+
+        confs = conferences or list(DEFAULT_CONFERENCES)
+        teams = self.get_cfb_teams(season=season)
+        if teams.empty:
+            return 0
+        eligible = teams[teams["conference"].isin(confs)] if "conference" in teams.columns else teams
+
+        self.conn.execute(
+            """
+            UPDATE cfb_players
+            SET position = 'DEF', fantasy_eligible = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE season = ? AND position = 'DST' AND full_name NOT LIKE '% DST'
+            """,
+            (season,),
+        )
+
+        count = 0
+        skipped = 0
+        for _, t in eligible.iterrows():
+            school = t.get("school") or t["team_key"]
+            full_name = f"{school} DST"
+            existing = self.conn.execute(
+                """
+                SELECT player_id FROM cfb_players
+                WHERE season = ? AND team_key = ? AND full_name = ?
+                """,
+                (season, t["team_key"], full_name),
+            ).fetchone()
+            if existing:
+                skipped += 1
+                continue
+            self.conn.execute(
+                """
+                INSERT INTO cfb_players (
+                    season, full_name, position, team_key, conference,
+                    conference_eligible, fantasy_eligible
+                ) VALUES (?, ?, 'DST', ?, ?, 1, 1)
+                """,
+                (season, full_name, t["team_key"], t.get("conference")),
+            )
+            count += 1
+        self.conn.commit()
+        self._last_dst_seed_skipped = skipped
+        return count
+
+    # ==================== CFB DRAFT ====================
+
+    def create_cfb_draft(self, draft: dict) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO cfb_drafts (
+                draft_id, league_id, status, draft_type, current_pick, order_json, settings_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                draft["draft_id"],
+                draft["league_id"],
+                draft.get("status", "active"),
+                draft.get("draft_type", "snake"),
+                draft.get("current_pick", 1),
+                draft["order_json"],
+                draft.get("settings_json"),
+            ),
+        )
+        self.conn.commit()
+
+    def get_cfb_draft(self, league_id: str) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM cfb_drafts WHERE league_id = ?",
+            (league_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_cfb_draft_by_id(self, draft_id: str) -> Optional[dict]:
+        row = self.conn.execute("SELECT * FROM cfb_drafts WHERE draft_id = ?", (draft_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_cfb_draft(self, draft_id: str, updates: dict) -> None:
+        allowed = {"status", "current_pick", "order_json", "settings_json"}
+        fields = {k: v for k, v in updates.items() if k in allowed}
+        if not fields:
+            return
+        set_sql = ", ".join(f"{k} = ?" for k in fields)
+        self.conn.execute(
+            f"UPDATE cfb_drafts SET {set_sql}, updated_at = CURRENT_TIMESTAMP WHERE draft_id = ?",
+            (*fields.values(), draft_id),
+        )
+        self.conn.commit()
+
+    def add_cfb_draft_pick(self, pick: dict) -> int:
+        cursor = self.conn.execute(
+            """
+            INSERT INTO cfb_draft_picks (
+                draft_id, pick_number, round, team_id, player_id, picked_at, is_autopick
+            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+            """,
+            (
+                pick["draft_id"],
+                pick["pick_number"],
+                pick["round"],
+                pick["team_id"],
+                pick["player_id"],
+                pick.get("is_autopick", 0),
+            ),
+        )
+        self.conn.commit()
+        return int(cursor.lastrowid)
+
+    def get_cfb_draft_picks(self, draft_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT p.*, pl.full_name, pl.position, pl.team_key
+            FROM cfb_draft_picks p
+            LEFT JOIN cfb_players pl ON p.player_id = pl.player_id
+            WHERE p.draft_id = ?
+            ORDER BY p.pick_number
+            """,
+            (draft_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ==================== CFB ADP ====================
+
+    def store_cfb_adp(self, df: pd.DataFrame) -> int:
+        if df.empty:
+            return 0
+        count = 0
+        for _, row in df.iterrows():
+            self.conn.execute(
+                """
+                INSERT INTO cfb_adp (season, player_id, rank, source, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(season, player_id, source) DO UPDATE SET
+                    rank = excluded.rank,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(row["season"]),
+                    int(row["player_id"]),
+                    int(row["rank"]),
+                    row.get("source", "projections"),
+                ),
+            )
+            count += 1
+        self.conn.commit()
+        return count
+
+    def get_cfb_adp(self, season: int, source: str = "projections") -> pd.DataFrame:
+        return pd.read_sql(
+            """
+            SELECT a.*, p.full_name, p.position, p.team_key, p.conference
+            FROM cfb_adp a
+            JOIN cfb_players p ON a.player_id = p.player_id AND a.season = p.season
+            WHERE a.season = ? AND a.source = ?
+            ORDER BY a.rank
+            """,
+            self.conn,
+            params=[season, source],
+        )
+
     def create_cfb_transaction(self, tx: dict) -> int:
         cursor = self.conn.execute(
             """
             INSERT INTO cfb_transactions (
-                league_id, league_team_id, tx_type, player_id, faab_bid, status
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                league_id, league_team_id, tx_type, player_id, drop_player_id,
+                faab_bid, status, week, priority
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 tx["league_id"],
                 tx["league_team_id"],
                 tx["tx_type"],
                 tx["player_id"],
+                tx.get("drop_player_id"),
                 tx.get("faab_bid"),
                 tx.get("status", "pending"),
+                tx.get("week"),
+                tx.get("priority", 0),
             ),
         )
         self.conn.commit()
         return int(cursor.lastrowid)
 
-    def list_cfb_transactions(self, league_id: str, status: Optional[str] = None) -> list[dict]:
+    def update_cfb_transaction(self, transaction_id: int, updates: dict) -> None:
+        allowed = {"status", "processed_at", "failure_reason", "priority"}
+        fields = {k: v for k, v in updates.items() if k in allowed}
+        if not fields:
+            return
+        set_sql = ", ".join(f"{k} = ?" for k in fields)
+        self.conn.execute(
+            f"UPDATE cfb_transactions SET {set_sql} WHERE transaction_id = ?",
+            (*fields.values(), transaction_id),
+        )
+        self.conn.commit()
+
+    def list_cfb_transactions(
+        self,
+        league_id: str,
+        status: Optional[str] = None,
+        week: Optional[int] = None,
+    ) -> list[dict]:
         query = "SELECT * FROM cfb_transactions WHERE league_id = ?"
         params: list = [league_id]
         if status:
             query += " AND status = ?"
             params.append(status)
+        if week is not None:
+            query += " AND week = ?"
+            params.append(week)
         query += " ORDER BY created_at DESC"
         cursor = self.conn.execute(query, params)
         return [dict(r) for r in cursor.fetchall()]
+
+    def log_cfb_waiver_run(self, league_id: str, season: int, week: int, processed: int, failed: int) -> int:
+        cursor = self.conn.execute(
+            """
+            INSERT INTO cfb_waiver_runs (league_id, season, week, claims_processed, claims_failed)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (league_id, season, week, processed, failed),
+        )
+        self.conn.commit()
+        return int(cursor.lastrowid)
+
+    def decrement_cfb_faab(self, league_team_id: str, amount: float) -> None:
+        self.conn.execute(
+            "UPDATE cfb_league_teams SET faab_budget = faab_budget - ? WHERE league_team_id = ?",
+            (amount, league_team_id),
+        )
+        self.conn.commit()
+
+    # ==================== CFB TRADES ====================
+
+    def create_cfb_trade(self, trade: dict) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO cfb_trades (
+                trade_id, league_id, status, proposer_team_id, recipient_team_id, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trade["trade_id"],
+                trade["league_id"],
+                trade.get("status", "proposed"),
+                trade["proposer_team_id"],
+                trade["recipient_team_id"],
+                trade.get("expires_at"),
+            ),
+        )
+        self.conn.commit()
+
+    def add_cfb_trade_item(self, item: dict) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO cfb_trade_items (trade_id, player_id, from_team_id, to_team_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (item["trade_id"], item["player_id"], item["from_team_id"], item["to_team_id"]),
+        )
+        self.conn.commit()
+
+    def get_cfb_trade(self, trade_id: str) -> Optional[dict]:
+        row = self.conn.execute("SELECT * FROM cfb_trades WHERE trade_id = ?", (trade_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_cfb_trades(self, league_id: str, status: Optional[str] = None) -> list[dict]:
+        query = "SELECT * FROM cfb_trades WHERE league_id = ?"
+        params: list = [league_id]
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC"
+        return [dict(r) for r in self.conn.execute(query, params).fetchall()]
+
+    def get_cfb_trade_items(self, trade_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            """
+            SELECT ti.*, p.full_name, p.position
+            FROM cfb_trade_items ti
+            LEFT JOIN cfb_players p ON ti.player_id = p.player_id
+            WHERE ti.trade_id = ?
+            """,
+            (trade_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_cfb_trade_status(self, trade_id: str, status: str) -> None:
+        self.conn.execute(
+            "UPDATE cfb_trades SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE trade_id = ?",
+            (status, trade_id),
+        )
+        self.conn.commit()
+
+    def add_cfb_trade_vote(self, trade_id: str, team_id: str, vote: str) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO cfb_trade_votes (trade_id, team_id, vote)
+            VALUES (?, ?, ?)
+            ON CONFLICT(trade_id, team_id) DO UPDATE SET vote = excluded.vote
+            """,
+            (trade_id, team_id, vote),
+        )
+        self.conn.commit()
+
+    def count_cfb_trade_vetoes(self, trade_id: str) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM cfb_trade_votes WHERE trade_id = ? AND vote = 'veto'",
+            (trade_id,),
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     def audit_cfb_data(self, season: Optional[int] = None) -> dict:
         cursor = self.conn.cursor()
