@@ -177,5 +177,6 @@ def _category_to_position(category: str) -> str | None:
         "kicking": "K",
         "puntreturns": "WR",
         "kickreturns": "WR",
+        "defensive": "DST",
     }
     return mapping.get(cat)
