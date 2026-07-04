@@ -27,6 +27,9 @@ class CfbWaiverService:
         faab_bid: Optional[float] = None,
         week: Optional[int] = None,
     ) -> int:
+        if week is None:
+            raise CfbWaiverError("week is required for waiver claims")
+
         league = self.db.get_cfb_league(league_id)
         if not league:
             raise CfbWaiverError("League not found")
@@ -52,8 +55,15 @@ class CfbWaiverService:
             (t for t in self.db.get_cfb_league_teams(league_id) if t["league_team_id"] == team_id),
             None,
         )
-        if team and float(team.get("faab_budget") or 0) < bid:
-            raise CfbWaiverError("Insufficient FAAB budget")
+        if team:
+            budget = float(team.get("faab_budget") or 0)
+            pending_bids = sum(
+                float(c.get("faab_bid") or 0)
+                for c in self.db.list_cfb_transactions(league_id, status="pending", week=week)
+                if c.get("league_team_id") == team_id and c.get("tx_type") == "add"
+            )
+            if budget < pending_bids + bid:
+                raise CfbWaiverError("Insufficient FAAB budget")
 
         return self.db.create_cfb_transaction(
             {
@@ -96,6 +106,11 @@ class CfbWaiverService:
         failed = 0
         results: list[dict] = []
         awarded: set[int] = set()
+        team_spend: dict[str, float] = {}
+        team_budgets = {
+            t["league_team_id"]: float(t.get("faab_budget") or 0)
+            for t in self.db.get_cfb_league_teams(league_id)
+        }
 
         for claim in add_claims:
             tx_id = claim["transaction_id"]
@@ -133,7 +148,12 @@ class CfbWaiverService:
 
                 bid = float(claim.get("faab_bid") or 0)
                 if settings.get("waiver_type") == "faab" and bid > 0:
+                    spent = team_spend.get(team_id, 0.0)
+                    remaining = team_budgets.get(team_id, 0.0) - spent
+                    if bid > remaining:
+                        raise CfbWaiverError("Insufficient FAAB budget at processing time")
                     self.db.decrement_cfb_faab(team_id, bid)
+                    team_spend[team_id] = spent + bid
 
                 self.db.update_cfb_transaction(
                     tx_id,

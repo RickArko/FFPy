@@ -44,6 +44,23 @@ class CfbTradeService:
         expires = datetime.now(timezone.utc) + timedelta(hours=review_hours)
         trade_id = f"trade:{uuid.uuid4().hex[:12]}"
 
+        validated_items: list[dict] = []
+        for item in items:
+            player_id = int(item["player_id"])
+            from_team = item["from_team_id"]
+            to_team = item["to_team_id"]
+            roster = self.db.get_cfb_league_roster(from_team)
+            if player_id not in set(roster["player_id"].tolist()):
+                raise CfbTradeError(f"Player {player_id} not on roster {from_team}")
+            validated_items.append(
+                {
+                    "trade_id": trade_id,
+                    "player_id": player_id,
+                    "from_team_id": from_team,
+                    "to_team_id": to_team,
+                }
+            )
+
         self.db.create_cfb_trade(
             {
                 "trade_id": trade_id,
@@ -53,21 +70,8 @@ class CfbTradeService:
                 "expires_at": expires.isoformat(),
             }
         )
-        for item in items:
-            player_id = int(item["player_id"])
-            from_team = item["from_team_id"]
-            to_team = item["to_team_id"]
-            roster = self.db.get_cfb_league_roster(from_team)
-            if player_id not in set(roster["player_id"].tolist()):
-                raise CfbTradeError(f"Player {player_id} not on roster {from_team}")
-            self.db.add_cfb_trade_item(
-                {
-                    "trade_id": trade_id,
-                    "player_id": player_id,
-                    "from_team_id": from_team,
-                    "to_team_id": to_team,
-                }
-            )
+        for item in validated_items:
+            self.db.add_cfb_trade_item(item)
         return self.get_trade(league_id, trade_id)
 
     def accept(self, league_id: str, trade_id: str, accepting_team_id: str) -> dict[str, Any]:

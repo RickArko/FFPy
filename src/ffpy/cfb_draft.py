@@ -127,7 +127,10 @@ class CfbDraftService:
 
         next_pick = pick_num + 1
         if next_pick > len(order):
-            self.db.update_cfb_draft(draft["draft_id"], {"status": "complete", "current_pick": next_pick})
+            self.db.update_cfb_draft(
+                draft["draft_id"],
+                {"status": "complete", "current_pick": len(order)},
+            )
         else:
             self.db.update_cfb_draft(draft["draft_id"], {"current_pick": next_pick})
 
@@ -177,6 +180,8 @@ class CfbDraftService:
         order: list[str] = json.loads(draft.get("order_json") or "[]")
         picks = self.db.get_cfb_draft_picks(draft["draft_id"])
         pick_num = int(draft.get("current_pick") or 1)
+        if draft.get("status") == "complete":
+            pick_num = len(order)
         on_clock = order[pick_num - 1] if draft.get("status") == "active" and pick_num <= len(order) else None
 
         picked_ids = {p["player_id"] for p in picks if p.get("player_id")}

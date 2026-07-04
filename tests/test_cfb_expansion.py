@@ -136,6 +136,7 @@ def _create_teams(client, league_id, names):
     ids = []
     for name in names:
         r = client.post(f"/api/cfb/leagues/{league_id}/teams", json={"team_name": name})
+        assert r.status_code == 200, r.text
         ids.append(r.json()["league_team_id"])
     return ids
 

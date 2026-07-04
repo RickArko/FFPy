@@ -626,6 +626,8 @@ def register_cfb_league_router(
                 subs = _draft_subscribers.get(draft_id, [])
                 if queue in subs:
                     subs.remove(queue)
+                if not subs:
+                    _draft_subscribers.pop(draft_id, None)
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 

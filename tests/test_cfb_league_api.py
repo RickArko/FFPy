@@ -337,6 +337,7 @@ def test_cfb_transaction_stub(cfb_client, cfb_api_db):
             "tx_type": "add",
             "player_id": pids["Jalen Milroe"],
             "faab_bid": 5.0,
+            "week": 1,
         },
     )
     assert create.status_code == 200
