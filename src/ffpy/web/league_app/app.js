@@ -12,6 +12,7 @@ createApp({
           <a href="/cfb/" class="nav-link">College</a>
           <template v-if="isAuthenticated">
             <span class="small">{{ authUser?.email || 'User' }}</span>
+            <button class="btn-ghost" @click="page='account'">Password</button>
             <button class="btn-ghost" @click="signOut">Sign Out</button>
           </template>
           <template v-else-if="browserAuthAvailable">
@@ -24,23 +25,57 @@ createApp({
       <div v-if="status" class="message success">{{ status }}</div>
 
       <!-- LOGIN -->
-      <div v-if="page === 'login'">
-        <div v-if="browserAuthAvailable" class="card auth-card">
+      <div v-if="page === 'login' || page === 'account'">
+        <div v-if="page === 'account' && isAuthenticated" class="card auth-card">
+          <h2>Set password</h2>
+          <p class="small">Use this after magic-link sign-in, or to change your password.</p>
+          <label>New password</label>
+          <input type="password" v-model="authForm.password" placeholder="At least 8 characters" autocomplete="new-password" />
+          <label>Confirm password</label>
+          <input type="password" v-model="authForm.confirmPassword" placeholder="Repeat password" autocomplete="new-password" />
+          <button style="margin-top:10px;width:100%" :disabled="authSubmitting" @click="setPassword()">
+            {{ authSubmitting ? 'Saving…' : 'Save password' }}
+          </button>
+          <button class="btn-ghost" style="margin-top:8px;width:100%" @click="page='dashboard'">Back to dashboard</button>
+        </div>
+        <div v-else-if="showPasswordRecovery && browserAuthAvailable" class="card auth-card">
+          <h2>Choose a new password</h2>
+          <p class="small">You opened a password reset link. Set a new password below.</p>
+          <label>New password</label>
+          <input type="password" v-model="authForm.password" placeholder="At least 8 characters" autocomplete="new-password" />
+          <label>Confirm password</label>
+          <input type="password" v-model="authForm.confirmPassword" placeholder="Repeat password" autocomplete="new-password" />
+          <button style="margin-top:10px;width:100%" :disabled="authSubmitting" @click="completePasswordRecovery()">
+            {{ authSubmitting ? 'Saving…' : 'Update password' }}
+          </button>
+        </div>
+        <div v-else-if="browserAuthAvailable" class="card auth-card">
           <div class="auth-toggle">
             <button :class="{ active: authForm.mode === 'signin' }" @click="authForm.mode='signin'">Sign In</button>
             <button :class="{ active: authForm.mode === 'signup' }" @click="authForm.mode='signup'">Create Account</button>
           </div>
           <label>Email</label>
-          <input type="email" v-model="authForm.email" placeholder="you@example.com" />
-          <template v-if="authForm.mode === 'signin'">
-            <label>Password</label>
-            <input type="password" v-model="authForm.password" placeholder="••••••••" />
+          <input type="email" v-model="authForm.email" placeholder="you@example.com" autocomplete="email" />
+          <label>Password</label>
+          <input type="password" v-model="authForm.password" placeholder="At least 8 characters" autocomplete="new-password" />
+          <template v-if="authForm.mode === 'signup'">
+            <label>Confirm password</label>
+            <input type="password" v-model="authForm.confirmPassword" placeholder="Repeat password" autocomplete="new-password" />
           </template>
           <button style="margin-top:10px;width:100%" :disabled="authSubmitting" @click="authForm.mode==='signup' ? signUp() : signIn()">
-            {{ authSubmitting ? 'Working…' : (authForm.mode==='signup' ? 'Send Email Link' : 'Sign In') }}
+            {{ authSubmitting ? 'Working…' : (authForm.mode==='signup' ? 'Create Account' : 'Sign In') }}
+          </button>
+          <button
+            v-if="authForm.mode === 'signin'"
+            class="btn-ghost"
+            style="margin-top:8px;width:100%"
+            :disabled="authSubmitting || !authForm.email"
+            @click="forgotPassword()"
+          >
+            Forgot password?
           </button>
           <p v-if="pendingVerificationEmail" class="small" style="margin-top:8px">
-            Email link sent to {{ pendingVerificationEmail }}. Open it to finish signing in.
+            Confirmation email sent to {{ pendingVerificationEmail }}. Open the link, then sign in with your password.
           </p>
         </div>
         <div v-else-if="authRequired" class="card auth-card">
@@ -412,10 +447,12 @@ createApp({
         mode: "signin",
         email: "",
         password: "",
+        confirmPassword: "",
       },
       authSession: null,
       authUser: null,
       pendingVerificationEmail: null,
+      showPasswordRecovery: false,
       devToken: "",
       supabaseClient: null,
       error: null,
@@ -515,9 +552,18 @@ createApp({
       if (sessionResult.error) throw sessionResult.error;
       this.authSession = sessionResult.data.session;
       await this.refreshCurrentUser();
-      this.supabaseClient.auth.onAuthStateChange((_, session) => {
+      this.supabaseClient.auth.onAuthStateChange((event, session) => {
         this.authSession = session;
-        if (!session) { this.authUser = null; return; }
+        if (event === "PASSWORD_RECOVERY") {
+          this.showPasswordRecovery = true;
+          this.page = "login";
+          this.authForm.password = "";
+          this.authForm.confirmPassword = "";
+        }
+        if (!session) {
+          this.authUser = null;
+          return;
+        }
         Promise.resolve().then(() => this.refreshCurrentUser()).catch(() => {});
       });
     },
@@ -539,11 +585,25 @@ createApp({
         throw new Error("Supabase client not initialized. Wait a moment and try again.");
       }
     },
+    _validatePasswordPair() {
+      const password = (this.authForm.password || "").trim();
+      const confirm = (this.authForm.confirmPassword || "").trim();
+      if (password.length < 8) {
+        throw new Error("Password must be at least 8 characters.");
+      }
+      if (password !== confirm) {
+        throw new Error("Passwords do not match.");
+      }
+      return password;
+    },
     async signIn() {
       this.clearMessages();
       this.authSubmitting = true;
       try {
         this._ensureSupabase();
+        if (!(this.authForm.password || "").trim()) {
+          throw new Error("Enter your password.");
+        }
         const { data, error } = await this.supabaseClient.auth.signInWithPassword({
           email: this.authForm.email,
           password: this.authForm.password,
@@ -571,20 +631,87 @@ createApp({
       this.authSubmitting = true;
       try {
         this._ensureSupabase();
-        const { data, error } = await this.supabaseClient.auth.signInWithOtp({
-          email: this.authForm.email,
+        const password = this._validatePasswordPair();
+        const { data, error } = await this.supabaseClient.auth.signUp({
+          email: this.authForm.email.trim(),
+          password,
           options: {
             emailRedirectTo: this._authRedirectUrl(),
-            shouldCreateUser: true,
           },
         });
         if (error) throw error;
         this.authSession = data.session || null;
-        this.pendingVerificationEmail = this.authForm.email;
+        this.pendingVerificationEmail = this.authForm.email.trim();
         this.authForm.password = "";
-        this.status = "Email link sent. Open it to finish signing in.";
+        this.authForm.confirmPassword = "";
+        if (data.session) {
+          await this.refreshCurrentUser();
+          await this.loadLeagues();
+          this.page = "dashboard";
+          this.status = "Account created. You are signed in.";
+          this.pendingVerificationEmail = null;
+          return;
+        }
+        this.status = "Account created. Confirm your email, then sign in with your password.";
       } catch (e) {
-        this.error = e.message || "Could not send email link";
+        this.error = e.message || "Could not create account";
+      } finally {
+        this.authSubmitting = false;
+      }
+    },
+    async forgotPassword() {
+      this.clearMessages();
+      this.authSubmitting = true;
+      try {
+        this._ensureSupabase();
+        const email = (this.authForm.email || "").trim();
+        if (!email) throw new Error("Enter your email first.");
+        const { error } = await this.supabaseClient.auth.resetPasswordForEmail(email, {
+          redirectTo: this._authRedirectUrl(),
+        });
+        if (error) throw error;
+        this.status = `Password reset email sent to ${email}. Open the link to choose a new password.`;
+      } catch (e) {
+        this.error = e.message || "Could not send reset email";
+      } finally {
+        this.authSubmitting = false;
+      }
+    },
+    async setPassword() {
+      this.clearMessages();
+      this.authSubmitting = true;
+      try {
+        this._ensureSupabase();
+        const password = this._validatePasswordPair();
+        const { error } = await this.supabaseClient.auth.updateUser({ password });
+        if (error) throw error;
+        this.authForm.password = "";
+        this.authForm.confirmPassword = "";
+        this.status = "Password saved. You can sign in with email and password next time.";
+        this.page = "dashboard";
+      } catch (e) {
+        this.error = e.message || "Could not save password";
+      } finally {
+        this.authSubmitting = false;
+      }
+    },
+    async completePasswordRecovery() {
+      this.clearMessages();
+      this.authSubmitting = true;
+      try {
+        this._ensureSupabase();
+        const password = this._validatePasswordPair();
+        const { error } = await this.supabaseClient.auth.updateUser({ password });
+        if (error) throw error;
+        this.showPasswordRecovery = false;
+        this.authForm.password = "";
+        this.authForm.confirmPassword = "";
+        await this.refreshCurrentUser();
+        await this.loadLeagues();
+        this.page = "dashboard";
+        this.status = "Password updated. You are signed in.";
+      } catch (e) {
+        this.error = e.message || "Could not update password";
       } finally {
         this.authSubmitting = false;
       }
