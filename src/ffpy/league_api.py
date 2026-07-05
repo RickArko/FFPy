@@ -516,7 +516,7 @@ def create_league_app(
             raise HTTPException(status_code=502, detail=f"Sleeper API error: {exc}") from exc
         return [
             {
-                "league_id": lg.get("league_id"),
+                "league_id": str(lg.get("league_id") or ""),
                 "name": lg.get("name"),
                 "season": lg.get("season"),
                 "status": lg.get("status"),
@@ -541,14 +541,25 @@ def create_league_app(
         else:
             creds = {}
 
-        if payload.provider == "espn":
-            data = _import_from_espn(payload.league_id, payload.season, creds)
-        elif payload.provider == "yahoo":
-            data = _import_from_yahoo(payload.league_id, payload.season, creds)
-        elif payload.provider == "sleeper":
-            data = _import_from_sleeper(payload.league_id, payload.season)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported provider")
+        try:
+            if payload.provider == "espn":
+                data = _import_from_espn(payload.league_id, payload.season, creds)
+            elif payload.provider == "yahoo":
+                data = _import_from_yahoo(payload.league_id, payload.season, creds)
+            elif payload.provider == "sleeper":
+                data = _import_from_sleeper(payload.league_id, payload.season)
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported provider")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "League import failed provider=%s league_id=%s season=%s",
+                payload.provider,
+                payload.league_id,
+                payload.season,
+            )
+            raise HTTPException(status_code=502, detail=f"Import failed: {exc}") from exc
 
         store_user_id = user.user_id
         if payload.provider == "sleeper" and payload.sleeper_username:

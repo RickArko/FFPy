@@ -230,7 +230,7 @@ def test_sleeper_discover(client: TestClient, monkeypatch: pytest.MonkeyPatch):
         def get_user_leagues(user_id: str, season: int) -> list[dict]:
             return [
                 {
-                    "league_id": "lg1",
+                    "league_id": "1312118348556828672",
                     "name": "Tight ends and loose lips",
                     "season": season,
                     "status": "pre_draft",
@@ -243,7 +243,8 @@ def test_sleeper_discover(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     assert res.status_code == 200
     data = res.json()
     assert len(data) == 1
-    assert data[0]["league_id"] == "lg1"
+    assert data[0]["league_id"] == "1312118348556828672"
+    assert isinstance(data[0]["league_id"], str)
     assert data[0]["name"] == "Tight ends and loose lips"
 
 

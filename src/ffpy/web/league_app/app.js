@@ -522,7 +522,7 @@ createApp({
             ? detail.map((d) => d.msg || JSON.stringify(d)).join("; ")
             : res.status === 401
               ? "Sign in required — use Sign In in the header"
-              : "Request failed";
+              : `Request failed (HTTP ${res.status})`;
         throw new Error(message);
       }
       return payload;
