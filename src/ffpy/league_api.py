@@ -272,8 +272,13 @@ def _import_from_sleeper(league_id: str, season: int) -> dict:
 
     teams = []
     for idx, r in enumerate(rosters):
-        roster_id = r.get("roster_id")
+        players_list = r.get("players") or []
         owner_id = r.get("owner_id") or ""
+        # Skip unclaimed roster slots — no owner and no players means a
+        # placeholder that Sleeper returns for unused / future slots.
+        if not owner_id and not players_list:
+            continue
+        roster_id = r.get("roster_id")
         user = user_by_id.get(owner_id, {})
         metadata = user.get("metadata") or {}
         fallback_id = str(roster_id) if roster_id is not None else owner_id or str(idx + 1)
@@ -340,7 +345,7 @@ def _import_from_sleeper(league_id: str, season: int) -> dict:
             "season": league.get("season", season),
             "scoring_type": "custom",
             "roster_size": None,
-            "num_teams": league.get("total_rosters"),
+            "num_teams": len(teams),
             "playoff_teams": league.get("settings", {}).get("playoff_teams"),
         },
         "teams": teams,
