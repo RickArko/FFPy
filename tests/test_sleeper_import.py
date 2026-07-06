@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from ffpy.integrations.sleeper import SleeperIntegration
-from ffpy.league_api import _import_from_sleeper
+from ffpy.sleeper_import import import_from_sleeper as _import_from_sleeper
 
 
 def test_player_display_name_defense():
@@ -25,11 +25,11 @@ def test_enrich_roster_resolves_names():
     assert roster[1]["position"] == "DEF"
 
 
-@patch("ffpy.draft_strategy.load_sleeper_players")
-@patch("ffpy.league_api.SleeperIntegration.get_matchups")
-@patch("ffpy.league_api.SleeperIntegration.get_league_users")
-@patch("ffpy.league_api.SleeperIntegration.get_rosters")
-@patch("ffpy.league_api.SleeperIntegration.get_league")
+@patch("ffpy.sleeper_import.load_sleeper_players")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_matchups")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_league_users")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_rosters")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_league")
 def test_import_from_sleeper_loads_player_db_and_resolves_names(
     mock_get_league,
     mock_get_rosters,
@@ -55,11 +55,11 @@ def test_import_from_sleeper_loads_player_db_and_resolves_names(
     assert data["teams"][0]["roster"][0]["team"] == "KC"
 
 
-@patch("ffpy.draft_strategy.load_sleeper_players")
-@patch("ffpy.league_api.SleeperIntegration.get_matchups")
-@patch("ffpy.league_api.SleeperIntegration.get_league_users")
-@patch("ffpy.league_api.SleeperIntegration.get_rosters")
-@patch("ffpy.league_api.SleeperIntegration.get_league")
+@patch("ffpy.sleeper_import.load_sleeper_players")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_matchups")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_league_users")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_rosters")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_league")
 def test_import_from_sleeper_uses_league_users(
     mock_get_league,
     mock_get_rosters,
@@ -116,11 +116,11 @@ def test_import_from_sleeper_uses_league_users(
     assert data["teams"][1]["name"] == "Bob's Bunch"
 
 
-@patch("ffpy.draft_strategy.load_sleeper_players")
-@patch("ffpy.league_api.SleeperIntegration.get_matchups")
-@patch("ffpy.league_api.SleeperIntegration.get_league_users")
-@patch("ffpy.league_api.SleeperIntegration.get_rosters")
-@patch("ffpy.league_api.SleeperIntegration.get_league")
+@patch("ffpy.sleeper_import.load_sleeper_players")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_matchups")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_league_users")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_rosters")
+@patch("ffpy.sleeper_import.SleeperIntegration.get_league")
 def test_import_from_sleeper_pairs_matchups(
     mock_get_league,
     mock_get_rosters,

@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 .PHONY: help bootstrap install data full-data run dev pickem-web pickem-web-auth-local \
-        pickem-web-auth-supabase pickem-auth-token notebook test cov lint fmt check \
+        pickem-web-auth-supabase pickem-auth-token sleeper-web notebook test cov lint fmt check \
         precommit precommit-install precommit-update \
         db.prepare db.migrate db.load db.update db.stats db.mock \
         db.compute-stats db.ngs db.injuries db.audit db.dfs db.adp db.depth-chart db.weather \
@@ -82,6 +82,9 @@ pickem-web-auth-supabase: ## Start the pick'em tester with auth enabled using Su
 
 pickem-auth-token: ## Mint a local bearer token for pickem-web-auth-local
 	.venv/bin/python -m ffpy.dev_auth_token --secret "$(AUTH_JWT_SECRET)" --email "$(AUTH_EMAIL)" $(TOKEN_ARGS)
+
+sleeper-web: ## Start the FastAPI + Vue Sleeper manager (PORT=8002 recommended)
+	DATABASE_PATH="$(PICKEM_DB_PATH)" .venv/bin/python -m ffpy.sleeper_web.main --port $(or $(PORT),8002)
 
 notebook: ## Launch Jupyter Lab (analysis dep group)
 	$(UV) run --group analysis jupyter lab

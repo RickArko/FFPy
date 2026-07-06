@@ -108,11 +108,27 @@ class FFPyDatabase:
             "020_cfb_waivers.sql",
             "021_cfb_trades.sql",
             "022_cfb_adp.sql",
+            "023_sleeper_franchises.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
         self._upgrade_cfb_columns()
+        self._upgrade_sleeper_franchise_columns()
         self.conn.commit()
+
+    def _upgrade_sleeper_franchise_columns(self) -> None:
+        """Idempotent column adds for Sleeper franchise tracking on user_leagues."""
+        alters = [
+            "ALTER TABLE user_leagues ADD COLUMN franchise_id TEXT",
+            "ALTER TABLE user_leagues ADD COLUMN sleeper_league_id TEXT",
+            "ALTER TABLE user_leagues ADD COLUMN previous_league_id TEXT",
+            "ALTER TABLE user_leagues ADD COLUMN status TEXT",
+        ]
+        for stmt in alters:
+            try:
+                self.conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
 
     def _upgrade_cfb_columns(self) -> None:
         """Idempotent column adds for CFB tables upgraded from 015."""
@@ -3608,18 +3624,24 @@ class FFPyDatabase:
 
     # ==================== USER LEAGUES (League Import) ====================
 
-    def store_user_league(self, user_id: str, data: dict) -> str:
+    def store_user_league(self, user_id: str, data: dict, *, franchise_id: str | None = None) -> str:
         """Store league metadata, teams, and matchups from an import."""
         league = data["league"]
+        resolved_franchise_id = franchise_id or league.get("franchise_id")
         self.conn.execute(
             """
             INSERT INTO user_leagues
                 (league_id, user_id, provider, league_name, season,
-                 scoring_type, roster_size, num_teams, playoff_teams, league_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 scoring_type, roster_size, num_teams, playoff_teams, league_json,
+                 franchise_id, sleeper_league_id, previous_league_id, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(league_id) DO UPDATE SET
                 league_name = excluded.league_name,
                 league_json = excluded.league_json,
+                franchise_id = COALESCE(excluded.franchise_id, user_leagues.franchise_id),
+                sleeper_league_id = COALESCE(excluded.sleeper_league_id, user_leagues.sleeper_league_id),
+                previous_league_id = COALESCE(excluded.previous_league_id, user_leagues.previous_league_id),
+                status = COALESCE(excluded.status, user_leagues.status),
                 refreshed_at = CURRENT_TIMESTAMP
         """,
             (
@@ -3633,6 +3655,10 @@ class FFPyDatabase:
                 league.get("num_teams"),
                 league.get("playoff_teams"),
                 json.dumps(league),
+                resolved_franchise_id,
+                league.get("sleeper_league_id"),
+                league.get("previous_league_id"),
+                league.get("status"),
             ),
         )
         for team in data.get("teams", []):
@@ -3783,3 +3809,122 @@ class FFPyDatabase:
         )
         if cursor.rowcount:
             self.conn.commit()
+
+    # ==================== SLEEPER PROFILES & FRANCHISES ====================
+
+    def upsert_sleeper_profile(
+        self,
+        user_id: str,
+        *,
+        sleeper_user_id: str,
+        sleeper_username: str,
+    ) -> dict:
+        """Link or update the Sleeper profile for a Supabase user."""
+        self.conn.execute(
+            """
+            INSERT INTO user_sleeper_profiles (user_id, sleeper_user_id, sleeper_username, linked_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                sleeper_user_id = excluded.sleeper_user_id,
+                sleeper_username = excluded.sleeper_username,
+                linked_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, sleeper_user_id, sleeper_username),
+        )
+        self.conn.commit()
+        profile = self.get_sleeper_profile(user_id)
+        assert profile is not None
+        return profile
+
+    def get_sleeper_profile(self, user_id: str) -> dict | None:
+        """Return the linked Sleeper profile for a user, if any."""
+        cursor = self.conn.execute(
+            "SELECT * FROM user_sleeper_profiles WHERE user_id = ?",
+            (user_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_sleeper_profile_by_sleeper_user_id(self, sleeper_user_id: str) -> dict | None:
+        """Return a profile row by Sleeper user id (for uniqueness checks)."""
+        cursor = self.conn.execute(
+            "SELECT * FROM user_sleeper_profiles WHERE sleeper_user_id = ?",
+            (sleeper_user_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def delete_sleeper_profile(self, user_id: str) -> None:
+        """Remove a user's Sleeper profile link."""
+        self.conn.execute("DELETE FROM user_sleeper_profiles WHERE user_id = ?", (user_id,))
+        self.conn.commit()
+
+    def upsert_franchise(
+        self,
+        franchise_id: str,
+        user_id: str,
+        *,
+        display_name: str,
+        canonical_sleeper_id: str | None = None,
+    ) -> dict:
+        """Create or update a franchise row."""
+        self.conn.execute(
+            """
+            INSERT INTO league_franchises (franchise_id, user_id, display_name, canonical_sleeper_id)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(franchise_id) DO UPDATE SET
+                display_name = excluded.display_name,
+                canonical_sleeper_id = COALESCE(excluded.canonical_sleeper_id, league_franchises.canonical_sleeper_id)
+            """,
+            (franchise_id, user_id, display_name, canonical_sleeper_id),
+        )
+        self.conn.commit()
+        franchise = self.get_franchise(franchise_id, user_id)
+        assert franchise is not None
+        return franchise
+
+    def get_franchise(self, franchise_id: str, user_id: str) -> dict | None:
+        """Fetch a franchise owned by ``user_id``."""
+        cursor = self.conn.execute(
+            "SELECT * FROM league_franchises WHERE franchise_id = ? AND user_id = ?",
+            (franchise_id, user_id),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def list_franchises(self, user_id: str) -> list[dict]:
+        """List franchises with nested season leagues for a user."""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM league_franchises
+            WHERE user_id = ?
+            ORDER BY display_name, created_at DESC
+            """,
+            (user_id,),
+        )
+        franchises = [dict(row) for row in cursor.fetchall()]
+        for franchise in franchises:
+            league_cursor = self.conn.execute(
+                """
+                SELECT league_id, league_name, season, status, imported_at, refreshed_at,
+                       sleeper_league_id, previous_league_id
+                FROM user_leagues
+                WHERE franchise_id = ? AND user_id = ?
+                ORDER BY season DESC
+                """,
+                (franchise["franchise_id"], user_id),
+            )
+            franchise["seasons"] = [dict(row) for row in league_cursor.fetchall()]
+        return franchises
+
+    def get_franchise_leagues(self, franchise_id: str, user_id: str) -> list[dict]:
+        """Return imported seasons for a franchise."""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM user_leagues
+            WHERE franchise_id = ? AND user_id = ?
+            ORDER BY season DESC
+            """,
+            (franchise_id, user_id),
+        )
+        return [dict(row) for row in cursor.fetchall()]

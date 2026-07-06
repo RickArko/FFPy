@@ -29,6 +29,13 @@ from ffpy.integrations.espn_league import ESPNLeagueIntegration
 from ffpy.integrations.sleeper import SleeperIntegration
 from ffpy.integrations.yahoo import YahooIntegration
 from ffpy.league_crypto import decrypt_credentials, encrypt_credentials
+from ffpy.sleeper_import import (
+    DraftHelpRequest,
+    run_draft_help,
+)
+from ffpy.sleeper_import import (
+    import_from_sleeper as _import_from_sleeper,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,23 +64,7 @@ class OptimizeRequest(BaseModel):
     week: int = Field(..., ge=1, le=25)
 
 
-class DraftHelpRequest(BaseModel):
-    team_id: str
-    num_players: int = Field(100, ge=1, le=200)
-    pick_slots: Optional[List[int]] = None
-    num_teams: int = Field(10, ge=4, le=20)
-    draft_order: Optional[List[str]] = None  # team_ids in 1st-round pick order
-
-
-def _compute_snake_pick_slots(position: int, num_teams: int, num_rounds: int = 3) -> List[int]:
-    """Return snake-draft pick numbers for the team at ``position`` (1-indexed)."""
-    slots = []
-    for r in range(1, num_rounds + 1):
-        if r % 2 == 1:
-            slots.append((r - 1) * num_teams + position)
-        else:
-            slots.append(r * num_teams - position + 1)
-    return slots
+# DraftHelpRequest and snake/import helpers live in ffpy.sleeper_import
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +100,7 @@ def _require_user(
 
 
 # ---------------------------------------------------------------------------
-# Import helpers
+# Import helpers (ESPN/Yahoo only; Sleeper import is in ffpy.sleeper_import)
 # ---------------------------------------------------------------------------
 
 
@@ -256,101 +247,7 @@ def _import_from_yahoo(league_id: str, season: int, creds: dict) -> dict:
     }
 
 
-def _import_from_sleeper(league_id: str, season: int) -> dict:
-    from collections import defaultdict
-
-    league = SleeperIntegration.get_league(league_id)
-    rosters = SleeperIntegration.get_rosters(league_id)
-    users = SleeperIntegration.get_league_users(league_id)
-    user_by_id = {u.get("user_id"): u for u in users}
-    # Load the Sleeper player map to resolve names/positions/teams immediately.
-    # The map is cached in memory and on disk (6-hour TTL) by load_sleeper_players(),
-    # so the ~15 MB payload is fetched at most once per session.
-    from ffpy.draft_strategy import load_sleeper_players
-
-    players_map = load_sleeper_players()
-
-    teams = []
-    for idx, r in enumerate(rosters):
-        players_list = r.get("players") or []
-        owner_id = r.get("owner_id") or ""
-        # Skip unclaimed roster slots — no owner and no players means a
-        # placeholder that Sleeper returns for unused / future slots.
-        if not owner_id and not players_list:
-            continue
-        roster_id = r.get("roster_id")
-        user = user_by_id.get(owner_id, {})
-        metadata = user.get("metadata") or {}
-        fallback_id = str(roster_id) if roster_id is not None else owner_id or str(idx + 1)
-        team_name = (
-            metadata.get("team_name")
-            or user.get("display_name")
-            or (f"Team {fallback_id}" if fallback_id else "Unknown")
-        )
-        owner_display = user.get("display_name") or owner_id or "Unknown"
-
-        team_id_suffix = str(roster_id) if roster_id is not None else owner_id or str(idx + 1)
-        teams.append(
-            {
-                "team_id": f"sleeper:{league_id}:{team_id_suffix}",
-                "name": team_name,
-                "owner": owner_display,
-                "wins": r.get("settings", {}).get("wins", 0),
-                "losses": r.get("settings", {}).get("losses", 0),
-                "ties": r.get("settings", {}).get("ties", 0),
-                "points_for": r.get("settings", {}).get("fpts", 0),
-                "points_against": r.get("settings", {}).get("fpts_against", 0),
-                "rank": None,
-                "roster": SleeperIntegration.enrich_roster(r.get("players", []), players_map),
-            }
-        )
-
-    teams.sort(key=lambda t: (-(t.get("wins") or 0), -(t.get("points_for") or 0)))
-
-    matchups: List[dict] = []
-    for week in range(1, 18):
-        try:
-            week_matchups = SleeperIntegration.get_matchups(league_id, week)
-        except Exception:
-            break
-        if not week_matchups:
-            break
-        by_matchup: dict = defaultdict(list)
-        for m in week_matchups:
-            matchup_id = m.get("matchup_id")
-            roster_id = m.get("roster_id")
-            if matchup_id is None or roster_id is None:
-                continue
-            by_matchup[matchup_id].append(m)
-        for group in by_matchup.values():
-            if len(group) < 2:
-                continue
-            home, away = group[0], group[1]
-            matchups.append(
-                {
-                    "week": week,
-                    "home_team_id": f"sleeper:{league_id}:{home.get('roster_id')}",
-                    "away_team_id": f"sleeper:{league_id}:{away.get('roster_id')}",
-                    "home_score": home.get("points"),
-                    "away_score": away.get("points"),
-                    "is_playoff": 0,
-                    "is_consolation": 0,
-                }
-            )
-    return {
-        "league": {
-            "league_id": f"sleeper:{league_id}",
-            "provider": "sleeper",
-            "name": league.get("name", "Unknown"),
-            "season": league.get("season", season),
-            "scoring_type": "custom",
-            "roster_size": None,
-            "num_teams": len(teams),
-            "playoff_teams": league.get("settings", {}).get("playoff_teams"),
-        },
-        "teams": teams,
-        "matchups": matchups,
-    }
+# _import_from_sleeper is imported from ffpy.sleeper_import (see module imports).
 
 
 # ---------------------------------------------------------------------------
@@ -656,43 +553,17 @@ def create_league_app(
         db: FFPyDatabase = Depends(get_db),
     ) -> Dict[str, Any]:
         """Return a ranked draft board with reasons for the requesting team."""
-        from ffpy.draft_strategy import DraftStrategyConfig, DraftStrategyEngine, load_sleeper_players
-
         league = _get_league_or_404(db, league_id, user)
         teams = _get_teams(db, league_id, user)
-        team = next((t for t in teams if t["team_id"] == payload.team_id), None)
-        if not team:
-            raise HTTPException(status_code=404, detail="Team not found")
-
-        num_teams = payload.num_teams or int(league.get("num_teams") or 10)
-        pick_slots = payload.pick_slots
-
-        # If a full draft order is provided, compute snake pick slots from the
-        # user's position in the order.  Explicit pick_slots still take precedence.
-        if not pick_slots and payload.draft_order:
-            try:
-                pos = payload.draft_order.index(payload.team_id) + 1
-                pick_slots = _compute_snake_pick_slots(pos, num_teams)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Your team is not in the draft order")
-
-        if not pick_slots and num_teams:
-            # Fallback: default snake turn for pick #1 in a 3-round draft.
-            pick_slots = [1, 2 * num_teams, 2 * num_teams + 1]
-
-        config = DraftStrategyConfig(num_teams=num_teams, pick_slots=pick_slots)
-        engine = DraftStrategyEngine(db, config)
-        provider = (league.get("provider") or "").lower()
-        sleeper_players = load_sleeper_players() if provider == "sleeper" else None
-
         try:
-            return engine.generate(
+            return run_draft_help(
+                db,
                 league=league,
                 teams=teams,
-                my_team_id=payload.team_id,
-                num_players=payload.num_players,
-                sleeper_players=sleeper_players,
+                payload=payload,
             )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
