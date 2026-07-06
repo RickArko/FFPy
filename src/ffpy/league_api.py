@@ -62,6 +62,18 @@ class DraftHelpRequest(BaseModel):
     num_players: int = Field(100, ge=1, le=200)
     pick_slots: Optional[List[int]] = None
     num_teams: int = Field(10, ge=4, le=20)
+    draft_order: Optional[List[str]] = None  # team_ids in 1st-round pick order
+
+
+def _compute_snake_pick_slots(position: int, num_teams: int, num_rounds: int = 3) -> List[int]:
+    """Return snake-draft pick numbers for the team at ``position`` (1-indexed)."""
+    slots = []
+    for r in range(1, num_rounds + 1):
+        if r % 2 == 1:
+            slots.append((r - 1) * num_teams + position)
+        else:
+            slots.append(r * num_teams - position + 1)
+    return slots
 
 
 # ---------------------------------------------------------------------------
@@ -646,8 +658,18 @@ def create_league_app(
 
         num_teams = payload.num_teams or int(league.get("num_teams") or 10)
         pick_slots = payload.pick_slots
+
+        # If a full draft order is provided, compute snake pick slots from the
+        # user's position in the order.  Explicit pick_slots still take precedence.
+        if not pick_slots and payload.draft_order:
+            try:
+                pos = payload.draft_order.index(payload.team_id) + 1
+                pick_slots = _compute_snake_pick_slots(pos, num_teams)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Your team is not in the draft order")
+
         if not pick_slots and num_teams:
-            # Default snake turn for pick #1 in a 3-round draft.
+            # Fallback: default snake turn for pick #1 in a 3-round draft.
             pick_slots = [1, 2 * num_teams, 2 * num_teams + 1]
 
         config = DraftStrategyConfig(num_teams=num_teams, pick_slots=pick_slots)

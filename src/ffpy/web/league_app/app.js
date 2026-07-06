@@ -326,13 +326,35 @@ createApp({
               </select>
             </div>
             <div>
-              <label>Pick slots (comma-separated)</label>
+              <label>Pick slots (comma-separated, overrides draft order)</label>
               <input v-model="draftHelpPayload.pick_slots_text" placeholder="1, 20, 21" />
             </div>
             <div>
               <label>Board size</label>
               <input type="number" v-model.number="draftHelpPayload.num_players" min="10" max="200" />
             </div>
+          </div>
+
+          <div v-if="draftOrderTeams.length" class="draft-order-section">
+            <h4 style="margin-bottom:4px">Draft Order <span class="small">(1st round)</span></h4>
+            <div class="draft-order-actions">
+              <button class="btn-sm" @click="orderByInverseStandings">Inverse Standings</button>
+              <button class="btn-sm" @click="randomizeOrder">Randomize</button>
+              <button class="btn-sm" @click="resetDraftOrder">Reset</button>
+            </div>
+            <table class="draft-order-table">
+              <tbody>
+                <tr v-for="(t, i) in draftOrderTeams" :key="t.team_id">
+                  <td class="pick-num">{{ i + 1 }}.</td>
+                  <td class="pick-team">{{ t.team_name }}</td>
+                  <td class="pick-record">{{ t.wins }}-{{ t.losses }}{{ t.ties ? '-' + t.ties : '' }}</td>
+                  <td class="pick-actions">
+                    <button class="btn-icon" @click="moveUp(i)" :disabled="i === 0" title="Move up">▲</button>
+                    <button class="btn-icon" @click="moveDown(i)" :disabled="i >= draftOrder.length - 1" title="Move down">▼</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           <button style="margin-top:12px" :disabled="draftHelpLoading || !draftHelpPayload.team_id" @click="loadDraftHelp">
@@ -434,6 +456,8 @@ createApp({
       draftHelpPayload: { team_id: "", pick_slots_text: "1, 20, 21", num_players: 100 },
       draftHelp: null,
       draftHelpLoading: false,
+      draftOrder: [],
+      savedDraftOrder: [],
       authLoading: true,
       authSubmitting: false,
       authConfig: {
@@ -484,6 +508,11 @@ createApp({
     selectedTeamRoster() {
       const team = this.leagueTeams.find((t) => t.team_id === this.draftHelpPayload.team_id);
       return team ? team.roster_json : "[]";
+    },
+    draftOrderTeams() {
+      return this.draftOrder
+        .map((tid) => this.leagueTeams.find((t) => t.team_id === tid))
+        .filter(Boolean);
     },
   },
   async mounted() {
@@ -923,6 +952,43 @@ createApp({
       if (!this.draftHelpPayload.team_id && this.optimizePayload.team_id) {
         this.draftHelpPayload.team_id = this.optimizePayload.team_id;
       }
+      if (!this.draftOrder.length && this.leagueTeams.length) {
+        this.draftOrder = this.leagueTeams.map((t) => t.team_id);
+        this.savedDraftOrder = [...this.draftOrder];
+      }
+    },
+    moveUp(i) {
+      if (i <= 0) return;
+      const a = this.draftOrder[i];
+      this.draftOrder[i] = this.draftOrder[i - 1];
+      this.draftOrder[i - 1] = a;
+      this.draftOrder = [...this.draftOrder];
+    },
+    moveDown(i) {
+      if (i >= this.draftOrder.length - 1) return;
+      const a = this.draftOrder[i];
+      this.draftOrder[i] = this.draftOrder[i + 1];
+      this.draftOrder[i + 1] = a;
+      this.draftOrder = [...this.draftOrder];
+    },
+    orderByInverseStandings() {
+      const sorted = [...this.leagueTeams].sort((a, b) => {
+        const wA = a.wins || 0, wB = b.wins || 0;
+        if (wA !== wB) return wA - wB;
+        return (a.points_for || 0) - (b.points_for || 0);
+      });
+      this.draftOrder = sorted.map((t) => t.team_id);
+    },
+    randomizeOrder() {
+      const arr = [...this.draftOrder];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      this.draftOrder = arr;
+    },
+    resetDraftOrder() {
+      this.draftOrder = [...this.savedDraftOrder];
     },
     parsePickSlots(text) {
       if (!text || !text.trim()) return null;
@@ -959,8 +1025,13 @@ createApp({
         const body = {
           team_id: this.draftHelpPayload.team_id,
           num_players: this.draftHelpPayload.num_players || 100,
+          num_teams: this.leagueTeams.length,
         };
-        if (pickSlots) body.pick_slots = pickSlots;
+        if (pickSlots) {
+          body.pick_slots = pickSlots;
+        } else if (this.draftOrder.length) {
+          body.draft_order = this.draftOrder;
+        }
         const result = await this.fetchJson(
           `api/leagues/${this.selectedLeague.league_id}/draft-help`,
           { method: "POST", body: JSON.stringify(body) },
