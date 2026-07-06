@@ -28,6 +28,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -86,19 +87,41 @@ def _map_position(pos: Optional[str]) -> str:
     return pos
 
 
-def load_sleeper_players(force: bool = False) -> Dict[str, Any]:
-    """Return the Sleeper player map, cached at module level.
+def _sleeper_players_cache_path() -> Path:
+    from ffpy.config import Config
 
-    The Sleeper ``/players/nfl`` payload is large (~5 MB); caching avoids
-    refetching on every request.
+    cache_dir = Path(Config.DATABASE_PATH).expanduser().parent / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / "sleeper_players.json"
+
+
+def load_sleeper_players(force: bool = False) -> Dict[str, Any]:
+    """Return the Sleeper player map, cached in memory and on disk.
+
+    The Sleeper ``/players/nfl`` payload is large (~15 MB); caching avoids
+    refetching on every request. Callers that only need a few IDs (e.g. league
+    import) should not use this helper — it can exceed memory on small hosts.
     """
     now = time.time()
     cached = _SLEEPER_PLAYERS_CACHE.get("data")
     if not force and cached is not None and (now - _SLEEPER_PLAYERS_CACHE["fetched_at"]) < _SLEEPER_CACHE_TTL:
         return cached
+
+    cache_path = _sleeper_players_cache_path()
+    if not force and cache_path.exists():
+        age = now - cache_path.stat().st_mtime
+        if age < _SLEEPER_CACHE_TTL:
+            with cache_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            _SLEEPER_PLAYERS_CACHE["data"] = data
+            _SLEEPER_PLAYERS_CACHE["fetched_at"] = now
+            return data
+
     from ffpy.integrations.sleeper import SleeperIntegration
 
     data = SleeperIntegration.get_players()
+    with cache_path.open("w", encoding="utf-8") as handle:
+        json.dump(data, handle)
     _SLEEPER_PLAYERS_CACHE["data"] = data
     _SLEEPER_PLAYERS_CACHE["fetched_at"] = now
     return data

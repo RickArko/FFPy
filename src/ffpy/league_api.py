@@ -247,13 +247,13 @@ def _import_from_yahoo(league_id: str, season: int, creds: dict) -> dict:
 def _import_from_sleeper(league_id: str, season: int) -> dict:
     from collections import defaultdict
 
-    from ffpy.draft_strategy import load_sleeper_players
-
     league = SleeperIntegration.get_league(league_id)
     rosters = SleeperIntegration.get_rosters(league_id)
     users = SleeperIntegration.get_league_users(league_id)
     user_by_id = {u.get("user_id"): u for u in users}
-    players_map = load_sleeper_players()
+    # Do not load the full Sleeper /players/nfl map here (~15 MB JSON, ~150 MB RSS).
+    # Import stores player IDs; draft-help and roster views resolve names on demand.
+    players_map: dict = {}
 
     teams = []
     for r in rosters:
