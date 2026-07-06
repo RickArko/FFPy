@@ -8,7 +8,21 @@ Three commands get you running with database-backed app data. Works on Linux, ma
 make bootstrap
 ```
 
-This installs `uv`, syncs Python dependencies, seeds `.env` from the template, and creates the SQLite database. Safe to re-run any time.
+This installs `uv`, syncs Python dependencies, seeds `.env` from `.env.example`, and creates the SQLite database. Safe to re-run any time.
+
+To create `.env` manually instead: `cp .env.example .env`. Open `.env.example` for **required keys by workflow** (Streamlit vs web auth vs CFB vs Fly deploy).
+
+### Web app auth (League Manager / Pick'em)
+
+```bash
+cp .env.example .env          # skip if make bootstrap already created .env
+# Edit .env: SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, WEB_AUTH_ENABLED=true
+make supabase.check           # verify keys before deploying
+make fly.secrets              # push Supabase vars to Fly (production)
+make fly.deploy               # or merge to main for CI auto-deploy
+```
+
+`FLY_API_TOKEN` goes in GitHub (not `.env`) — see [docs/deployment/fly.md](docs/deployment/fly.md).
 
 ## Generate app data
 
@@ -137,4 +151,4 @@ Run all commands from **WSL** (Ubuntu recommended). `make` and `bash` need to be
 - **`command not found: uv` right after bootstrap** — open a new shell, or `source ~/.local/bin/env`, then re-run `make bootstrap`.
 - **Port 8501 already in use** — `make run PORT=8502`.
 - **Browser doesn't open** — navigate to `http://localhost:8501` manually.
-- **Need API keys** — edit `.env` (see `.env.example` for the list).
+- **Need API keys** — `cp .env.example .env` if missing, then edit `.env` (required keys are documented at the top of `.env.example`).

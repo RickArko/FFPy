@@ -73,13 +73,24 @@ All database targets wrap the `ffpy-db` CLI — `uv run ffpy-db --help` for the 
 
 ## Configuration
 
-Copy and edit `.env`:
+First-time setup copies the template automatically (`make bootstrap`). To create or reset it manually:
 
 ```bash
 cp .env.example .env
 ```
 
-Key settings: `API_PROVIDER` (espn/sportsdata), `NFL_SEASON`, `DATABASE_PATH`.
+Then edit `.env` for the workflows you use. The template lists **required keys by workflow** at the top.
+
+| Workflow | Required in `.env` |
+|----------|-------------------|
+| Streamlit only (`make run`) | Nothing — defaults work |
+| League / Pick'em web apps with auth | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` |
+| CFB fantasy pipeline | `CFBD_API_KEY` |
+| Fly production deploy | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, then `make fly.secrets` |
+
+**Where secrets go:** `.env` for local dev (and as the source for `make fly.secrets`); Fly app secrets for production runtime; `FLY_API_TOKEN` in GitHub only (not `.env`) for CI auto-deploy. See [docs/deployment/fly.md](docs/deployment/fly.md).
+
+Verify Supabase before deploying: `make supabase.check`
 
 ## Features
 
