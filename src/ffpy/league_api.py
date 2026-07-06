@@ -251,9 +251,12 @@ def _import_from_sleeper(league_id: str, season: int) -> dict:
     rosters = SleeperIntegration.get_rosters(league_id)
     users = SleeperIntegration.get_league_users(league_id)
     user_by_id = {u.get("user_id"): u for u in users}
-    # Do not load the full Sleeper /players/nfl map here (~15 MB JSON, ~150 MB RSS).
-    # Import stores player IDs; draft-help and roster views resolve names on demand.
-    players_map: dict = {}
+    # Load the Sleeper player map to resolve names/positions/teams immediately.
+    # The map is cached in memory and on disk (6-hour TTL) by load_sleeper_players(),
+    # so the ~15 MB payload is fetched at most once per session.
+    from ffpy.draft_strategy import load_sleeper_players
+
+    players_map = load_sleeper_players()
 
     teams = []
     for r in rosters:
