@@ -485,6 +485,84 @@ tr:hover td {
   font-size: 12px;
 }
 
+.draft-order-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.draft-order-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-sm {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  cursor: pointer;
+}
+
+.btn-sm:hover {
+  background: var(--surface-2);
+}
+
+.draft-order-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.draft-order-table td {
+  padding: 4px 6px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pick-num {
+  width: 30px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.pick-team {
+  font-weight: 500;
+}
+
+.pick-record {
+  width: 80px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pick-actions {
+  width: 60px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  color: var(--accent);
+  border-radius: 4px;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.btn-icon:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .muted { color: var(--muted); }
 
 /* Misc */

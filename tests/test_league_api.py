@@ -230,7 +230,7 @@ def test_sleeper_discover(client: TestClient, monkeypatch: pytest.MonkeyPatch):
         def get_user_leagues(user_id: str, season: int) -> list[dict]:
             return [
                 {
-                    "league_id": "lg1",
+                    "league_id": "1312118348556828672",
                     "name": "Tight ends and loose lips",
                     "season": season,
                     "status": "pre_draft",
@@ -243,7 +243,8 @@ def test_sleeper_discover(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     assert res.status_code == 200
     data = res.json()
     assert len(data) == 1
-    assert data[0]["league_id"] == "lg1"
+    assert data[0]["league_id"] == "1312118348556828672"
+    assert isinstance(data[0]["league_id"], str)
     assert data[0]["name"] == "Tight ends and loose lips"
 
 
@@ -356,3 +357,45 @@ def test_draft_help_endpoint(client: TestClient, api_db: FFPyDatabase, monkeypat
     assert all("reasons" in r and r["reasons"] for r in payload["rankings"])
     assert len(payload["picks"]) == 3
     assert payload["picks"][0]["pick_slot"] == 1
+
+
+def test_delete_user_league_wrong_owner_preserves_data(api_db: FFPyDatabase):
+    league_data = {
+        "league": {
+            "league_id": "sleeper:delete_test",
+            "provider": "sleeper",
+            "name": "Delete Test",
+            "season": 2026,
+        },
+        "teams": [
+            {
+                "team_id": "sleeper:delete_test:t1",
+                "name": "Team One",
+                "owner": "alice",
+                "roster": [],
+            },
+        ],
+        "matchups": [],
+    }
+    api_db.store_user_league("owner_a", league_data)
+    league_id = league_data["league"]["league_id"]
+
+    teams_before = api_db.conn.execute(
+        "SELECT COUNT(*) AS n FROM league_teams WHERE league_id = ?",
+        (league_id,),
+    ).fetchone()["n"]
+
+    api_db.delete_user_league(league_id, "owner_b")
+
+    still_owned = api_db.conn.execute(
+        "SELECT user_id FROM user_leagues WHERE league_id = ?",
+        (league_id,),
+    ).fetchone()
+    teams_after = api_db.conn.execute(
+        "SELECT COUNT(*) AS n FROM league_teams WHERE league_id = ?",
+        (league_id,),
+    ).fetchone()["n"]
+
+    assert still_owned is not None
+    assert still_owned["user_id"] == "owner_a"
+    assert teams_after == teams_before

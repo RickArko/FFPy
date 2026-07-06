@@ -53,27 +53,41 @@ Do not create extra volumes expecting SQLite data to replicate automatically. Mu
 - add a real SQLite replication layer such as LiteFS
 - run separate regional apps with an explicit data sync/restore process
 
-Set the runtime secrets after the app exists. First create a local `.env` file; it is ignored by git:
+## Environment happy path
+
+`make bootstrap` seeds `.env` from `.env.example` on first run. To do it manually:
 
 ```bash
 cp .env.example .env
 ```
 
-Populate these values in `.env` from your Supabase dashboard:
+### 1. Fill required keys in `.env`
 
-- `SUPABASE_URL`: Project Settings -> API -> Project URL. It looks like `https://<project-ref>.supabase.co`.
-- `SUPABASE_PUBLISHABLE_KEY`: Project Settings -> API Keys -> Publishable key. This is preferred for new Supabase projects.
+From your Supabase dashboard (Project Settings → API):
 
-Legacy fallback:
+| Variable | Where to find it | Required |
+|----------|------------------|----------|
+| `SUPABASE_URL` | Project URL — `https://<project-ref>.supabase.co` | Yes |
+| `SUPABASE_PUBLISHABLE_KEY` | API Keys → Publishable key | Yes (preferred) |
+| `SUPABASE_ANON_KEY` | Legacy API Keys → anon key | Only if no publishable key |
+| `PUBLIC_APP_URL` | Set to `https://ffpy-pickem.fly.dev` for production secrets | Yes for prod |
 
-- `SUPABASE_ANON_KEY`: Project Settings -> API Keys -> Legacy API Keys -> anon key. Use this only if your project has not moved to publishable keys yet.
+Optional in `.env` (usually leave blank):
 
-Optional:
+- `SUPABASE_JWKS_URL` — defaults to `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`
+- `SUPABASE_JWT_SECRET` — local HS256 dev tokens only; production uses JWKS
 
-- `SUPABASE_JWKS_URL`: override for the signing-key discovery endpoint. Usually leave blank; the app defaults to `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`.
-- `SUPABASE_JWT_SECRET`: legacy/local HS256 support only. Set this if your Supabase project still uses legacy JWT-secret verification or if you want to mint local dev tokens. If you leave it empty, the backend verifies Supabase access tokens with the project's JWT signing keys through JWKS.
+Do **not** put `FLY_API_TOKEN` in `.env` — that token is for GitHub Actions only (see [Deploy via CI](#deploy-via-ci) below).
 
-Then push the required runtime secrets to Fly:
+### 2. Verify locally
+
+```bash
+make supabase.check
+```
+
+### 3. Push runtime secrets to Fly
+
+After the Fly app exists:
 
 ```bash
 make fly.secrets
@@ -105,13 +119,19 @@ make fly.logs
 
 The GitHub Actions workflow in [.github/workflows/ci-cd.yml](../../.github/workflows/ci-cd.yml) runs lint + tests + Docker build on every PR and push to `main`, then deploys to Fly only on `main`.
 
-Create a deploy token for GitHub Actions:
+### Deploy via CI
+
+Merges to `main` auto-deploy when CI passes. Create a deploy token once:
 
 ```bash
 make fly.token
 ```
 
-Add the token to the GitHub repository secret named `FLY_API_TOKEN`.
+Add the printed token to GitHub → **Settings** → **Environments** → **production** → **Environment secrets** → `FLY_API_TOKEN`.
+
+(Repo-level **Actions secrets** also works; the workflow uses the `production` environment.)
+
+Manual deploy from your machine does not need this token — use `fly auth login` and `make fly.deploy`.
 
 ## Supabase auth redirects (production)
 

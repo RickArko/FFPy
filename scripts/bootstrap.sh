@@ -46,7 +46,10 @@ uv run ffpy-db migrate
 
 echo
 info "Bootstrap complete."
-echo "  Start the app:           make run"
+echo "  Start Streamlit:         make run"
 echo "  Generate app data:       make data"
+echo "  Configure secrets:       edit .env (seeded from .env.example — see REQUIRED notes in that file)"
+echo "  Verify Supabase:         make supabase.check"
+echo "  Deploy to Fly:           docs/deployment/fly.md"
 echo "  Lint before pushing:     make precommit   (also runs on git commit)"
 echo "  See all make targets:    make help"

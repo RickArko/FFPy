@@ -62,6 +62,18 @@ class DraftHelpRequest(BaseModel):
     num_players: int = Field(100, ge=1, le=200)
     pick_slots: Optional[List[int]] = None
     num_teams: int = Field(10, ge=4, le=20)
+    draft_order: Optional[List[str]] = None  # team_ids in 1st-round pick order
+
+
+def _compute_snake_pick_slots(position: int, num_teams: int, num_rounds: int = 3) -> List[int]:
+    """Return snake-draft pick numbers for the team at ``position`` (1-indexed)."""
+    slots = []
+    for r in range(1, num_rounds + 1):
+        if r % 2 == 1:
+            slots.append((r - 1) * num_teams + position)
+        else:
+            slots.append(r * num_teams - position + 1)
+    return slots
 
 
 # ---------------------------------------------------------------------------
@@ -247,30 +259,40 @@ def _import_from_yahoo(league_id: str, season: int, creds: dict) -> dict:
 def _import_from_sleeper(league_id: str, season: int) -> dict:
     from collections import defaultdict
 
-    from ffpy.draft_strategy import load_sleeper_players
-
     league = SleeperIntegration.get_league(league_id)
     rosters = SleeperIntegration.get_rosters(league_id)
     users = SleeperIntegration.get_league_users(league_id)
     user_by_id = {u.get("user_id"): u for u in users}
+    # Load the Sleeper player map to resolve names/positions/teams immediately.
+    # The map is cached in memory and on disk (6-hour TTL) by load_sleeper_players(),
+    # so the ~15 MB payload is fetched at most once per session.
+    from ffpy.draft_strategy import load_sleeper_players
+
     players_map = load_sleeper_players()
 
     teams = []
-    for r in rosters:
-        roster_id = r.get("roster_id")
+    for idx, r in enumerate(rosters):
+        players_list = r.get("players") or []
         owner_id = r.get("owner_id") or ""
+        # Skip unclaimed roster slots — no owner and no players means a
+        # placeholder that Sleeper returns for unused / future slots.
+        if not owner_id and not players_list:
+            continue
+        roster_id = r.get("roster_id")
         user = user_by_id.get(owner_id, {})
         metadata = user.get("metadata") or {}
+        fallback_id = str(roster_id) if roster_id is not None else owner_id or str(idx + 1)
         team_name = (
             metadata.get("team_name")
             or user.get("display_name")
-            or (f"Team {roster_id}" if roster_id is not None else "Unknown")
+            or (f"Team {fallback_id}" if fallback_id else "Unknown")
         )
-        owner_display = user.get("display_name") or owner_id
+        owner_display = user.get("display_name") or owner_id or "Unknown"
 
+        team_id_suffix = str(roster_id) if roster_id is not None else owner_id or str(idx + 1)
         teams.append(
             {
-                "team_id": f"sleeper:{league_id}:{roster_id}",
+                "team_id": f"sleeper:{league_id}:{team_id_suffix}",
                 "name": team_name,
                 "owner": owner_display,
                 "wins": r.get("settings", {}).get("wins", 0),
@@ -323,7 +345,7 @@ def _import_from_sleeper(league_id: str, season: int) -> dict:
             "season": league.get("season", season),
             "scoring_type": "custom",
             "roster_size": None,
-            "num_teams": league.get("total_rosters"),
+            "num_teams": len(teams),
             "playoff_teams": league.get("settings", {}).get("playoff_teams"),
         },
         "teams": teams,
@@ -516,7 +538,7 @@ def create_league_app(
             raise HTTPException(status_code=502, detail=f"Sleeper API error: {exc}") from exc
         return [
             {
-                "league_id": lg.get("league_id"),
+                "league_id": str(lg.get("league_id") or ""),
                 "name": lg.get("name"),
                 "season": lg.get("season"),
                 "status": lg.get("status"),
@@ -541,14 +563,28 @@ def create_league_app(
         else:
             creds = {}
 
-        if payload.provider == "espn":
-            data = _import_from_espn(payload.league_id, payload.season, creds)
-        elif payload.provider == "yahoo":
-            data = _import_from_yahoo(payload.league_id, payload.season, creds)
-        elif payload.provider == "sleeper":
-            data = _import_from_sleeper(payload.league_id, payload.season)
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported provider")
+        try:
+            if payload.provider == "espn":
+                data = _import_from_espn(payload.league_id, payload.season, creds)
+            elif payload.provider == "yahoo":
+                data = _import_from_yahoo(payload.league_id, payload.season, creds)
+            elif payload.provider == "sleeper":
+                data = _import_from_sleeper(payload.league_id, payload.season)
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported provider")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "League import failed provider=%s league_id=%s season=%s",
+                payload.provider,
+                payload.league_id,
+                payload.season,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="Import failed. Check the league ID and provider credentials, then try again.",
+            ) from exc
 
         store_user_id = user.user_id
         if payload.provider == "sleeper" and payload.sleeper_username:
@@ -630,8 +666,18 @@ def create_league_app(
 
         num_teams = payload.num_teams or int(league.get("num_teams") or 10)
         pick_slots = payload.pick_slots
+
+        # If a full draft order is provided, compute snake pick slots from the
+        # user's position in the order.  Explicit pick_slots still take precedence.
+        if not pick_slots and payload.draft_order:
+            try:
+                pos = payload.draft_order.index(payload.team_id) + 1
+                pick_slots = _compute_snake_pick_slots(pos, num_teams)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Your team is not in the draft order")
+
         if not pick_slots and num_teams:
-            # Default snake turn for pick #1 in a 3-round draft.
+            # Fallback: default snake turn for pick #1 in a 3-round draft.
             pick_slots = [1, 2 * num_teams, 2 * num_teams + 1]
 
         config = DraftStrategyConfig(num_teams=num_teams, pick_slots=pick_slots)

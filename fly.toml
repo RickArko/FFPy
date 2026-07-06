@@ -1,6 +1,11 @@
 app = "ffpy-pickem"
 primary_region = "iad"
 
+[vm]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
 [build]
   dockerfile = "Dockerfile"
 

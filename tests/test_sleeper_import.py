@@ -30,6 +30,36 @@ def test_enrich_roster_resolves_names():
 @patch("ffpy.league_api.SleeperIntegration.get_league_users")
 @patch("ffpy.league_api.SleeperIntegration.get_rosters")
 @patch("ffpy.league_api.SleeperIntegration.get_league")
+def test_import_from_sleeper_loads_player_db_and_resolves_names(
+    mock_get_league,
+    mock_get_rosters,
+    mock_get_users,
+    mock_get_matchups,
+    mock_load_players,
+):
+    mock_get_league.return_value = {"name": "Test", "season": 2026, "total_rosters": 1}
+    mock_get_rosters.return_value = [
+        {"roster_id": 1, "owner_id": "owner_a", "players": ["99"], "settings": {}},
+    ]
+    mock_get_users.return_value = [{"user_id": "owner_a", "display_name": "alice", "metadata": {}}]
+    mock_get_matchups.return_value = []
+    mock_load_players.return_value = {
+        "99": {"full_name": "Patrick Mahomes", "position": "QB", "team": "KC"},
+    }
+
+    data = _import_from_sleeper("league123", 2026)
+
+    mock_load_players.assert_called_once()
+    assert data["teams"][0]["roster"][0]["player"] == "Patrick Mahomes"
+    assert data["teams"][0]["roster"][0]["position"] == "QB"
+    assert data["teams"][0]["roster"][0]["team"] == "KC"
+
+
+@patch("ffpy.draft_strategy.load_sleeper_players")
+@patch("ffpy.league_api.SleeperIntegration.get_matchups")
+@patch("ffpy.league_api.SleeperIntegration.get_league_users")
+@patch("ffpy.league_api.SleeperIntegration.get_rosters")
+@patch("ffpy.league_api.SleeperIntegration.get_league")
 def test_import_from_sleeper_uses_league_users(
     mock_get_league,
     mock_get_rosters,
@@ -71,8 +101,8 @@ def test_import_from_sleeper_uses_league_users(
     ]
     mock_get_matchups.return_value = []
     mock_load_players.return_value = {
-        "99": {"full_name": "Player A", "position": "RB", "team": "KC"},
-        "88": {"full_name": "Player B", "position": "WR", "team": "MIA"},
+        "99": {"full_name": "Patrick Mahomes", "position": "QB", "team": "KC"},
+        "88": {"full_name": "Travis Kelce", "position": "TE", "team": "KC"},
     }
 
     data = _import_from_sleeper("league123", 2026)
@@ -81,7 +111,8 @@ def test_import_from_sleeper_uses_league_users(
     assert data["teams"][0]["name"] == "Alice's Army"
     assert data["teams"][0]["owner"] == "alice"
     assert data["teams"][0]["team_id"] == "sleeper:league123:1"
-    assert data["teams"][0]["roster"][0]["player"] == "Player A"
+    assert data["teams"][0]["roster"][0]["player"] == "Patrick Mahomes"
+    assert data["teams"][0]["roster"][0]["position"] == "QB"
     assert data["teams"][1]["name"] == "Bob's Bunch"
 
 

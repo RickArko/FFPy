@@ -12,6 +12,7 @@ createApp({
           <a href="/cfb/" class="nav-link">College</a>
           <template v-if="isAuthenticated">
             <span class="small">{{ authUser?.email || 'User' }}</span>
+            <button class="btn-ghost" @click="page='account'">Password</button>
             <button class="btn-ghost" @click="signOut">Sign Out</button>
           </template>
           <template v-else-if="browserAuthAvailable">
@@ -24,23 +25,62 @@ createApp({
       <div v-if="status" class="message success">{{ status }}</div>
 
       <!-- LOGIN -->
-      <div v-if="page === 'login'">
-        <div v-if="browserAuthAvailable" class="card auth-card">
+      <div v-if="page === 'login' || page === 'account'">
+        <div v-if="page === 'account' && isAuthenticated" class="card auth-card">
+          <h2>Set password</h2>
+          <p class="small">Set or change your account password.</p>
+          <label>New password</label>
+          <input type="password" v-model="authForm.password" placeholder="At least 8 characters" autocomplete="new-password" />
+          <label>Confirm password</label>
+          <input type="password" v-model="authForm.confirmPassword" placeholder="Repeat password" autocomplete="new-password" />
+          <button style="margin-top:10px;width:100%" :disabled="authSubmitting" @click="setPassword()">
+            {{ authSubmitting ? 'Saving…' : 'Save password' }}
+          </button>
+          <button class="btn-ghost" style="margin-top:8px;width:100%" @click="page='dashboard'">Back to dashboard</button>
+        </div>
+        <div v-else-if="showPasswordRecovery && browserAuthAvailable" class="card auth-card">
+          <h2>Choose a new password</h2>
+          <p class="small">You opened a password reset link. Set a new password below.</p>
+          <label>New password</label>
+          <input type="password" v-model="authForm.password" placeholder="At least 8 characters" autocomplete="new-password" />
+          <label>Confirm password</label>
+          <input type="password" v-model="authForm.confirmPassword" placeholder="Repeat password" autocomplete="new-password" />
+          <button style="margin-top:10px;width:100%" :disabled="authSubmitting" @click="completePasswordRecovery()">
+            {{ authSubmitting ? 'Saving…' : 'Update password' }}
+          </button>
+        </div>
+        <div v-else-if="browserAuthAvailable" class="card auth-card">
           <div class="auth-toggle">
             <button :class="{ active: authForm.mode === 'signin' }" @click="authForm.mode='signin'">Sign In</button>
             <button :class="{ active: authForm.mode === 'signup' }" @click="authForm.mode='signup'">Create Account</button>
           </div>
           <label>Email</label>
-          <input type="email" v-model="authForm.email" placeholder="you@example.com" />
-          <template v-if="authForm.mode === 'signin'">
-            <label>Password</label>
-            <input type="password" v-model="authForm.password" placeholder="••••••••" />
+          <input type="email" v-model="authForm.email" placeholder="you@example.com" autocomplete="email" />
+          <label>Password</label>
+          <input
+            type="password"
+            v-model="authForm.password"
+            :placeholder="authForm.mode === 'signup' ? 'At least 8 characters' : 'Your password'"
+            :autocomplete="authForm.mode === 'signup' ? 'new-password' : 'current-password'"
+          />
+          <template v-if="authForm.mode === 'signup'">
+            <label>Confirm password</label>
+            <input type="password" v-model="authForm.confirmPassword" placeholder="Repeat password" autocomplete="new-password" />
           </template>
           <button style="margin-top:10px;width:100%" :disabled="authSubmitting" @click="authForm.mode==='signup' ? signUp() : signIn()">
-            {{ authSubmitting ? 'Working…' : (authForm.mode==='signup' ? 'Send Email Link' : 'Sign In') }}
+            {{ authSubmitting ? 'Working…' : (authForm.mode==='signup' ? 'Create Account' : 'Sign In') }}
+          </button>
+          <button
+            v-if="authForm.mode === 'signin'"
+            class="btn-ghost"
+            style="margin-top:8px;width:100%"
+            :disabled="authSubmitting || !authForm.email"
+            @click="forgotPassword()"
+          >
+            Forgot password?
           </button>
           <p v-if="pendingVerificationEmail" class="small" style="margin-top:8px">
-            Email link sent to {{ pendingVerificationEmail }}. Open it to finish signing in.
+            Confirmation email sent to {{ pendingVerificationEmail }}. Open the link, then sign in with your password.
           </p>
         </div>
         <div v-else-if="authRequired" class="card auth-card">
@@ -291,13 +331,35 @@ createApp({
               </select>
             </div>
             <div>
-              <label>Pick slots (comma-separated)</label>
+              <label>Pick slots (comma-separated, overrides draft order)</label>
               <input v-model="draftHelpPayload.pick_slots_text" placeholder="1, 20, 21" />
             </div>
             <div>
               <label>Board size</label>
               <input type="number" v-model.number="draftHelpPayload.num_players" min="10" max="200" />
             </div>
+          </div>
+
+          <div v-if="draftOrderTeams.length" class="draft-order-section">
+            <h4 style="margin-bottom:4px">Draft Order <span class="small">(1st round)</span></h4>
+            <div class="draft-order-actions">
+              <button class="btn-sm" @click="orderByInverseStandings">Inverse Standings</button>
+              <button class="btn-sm" @click="randomizeOrder">Randomize</button>
+              <button class="btn-sm" @click="resetDraftOrder">Reset</button>
+            </div>
+            <table class="draft-order-table">
+              <tbody>
+                <tr v-for="(t, i) in draftOrderTeams" :key="t.team_id">
+                  <td class="pick-num">{{ i + 1 }}.</td>
+                  <td class="pick-team">{{ t.team_name }}</td>
+                  <td class="pick-record">{{ t.wins }}-{{ t.losses }}{{ t.ties ? '-' + t.ties : '' }}</td>
+                  <td class="pick-actions">
+                    <button class="btn-icon" @click="moveUp(i)" :disabled="i === 0" title="Move up">▲</button>
+                    <button class="btn-icon" @click="moveDown(i)" :disabled="i >= draftOrder.length - 1" title="Move down">▼</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           <button style="margin-top:12px" :disabled="draftHelpLoading || !draftHelpPayload.team_id" @click="loadDraftHelp">
@@ -399,6 +461,8 @@ createApp({
       draftHelpPayload: { team_id: "", pick_slots_text: "1, 20, 21", num_players: 100 },
       draftHelp: null,
       draftHelpLoading: false,
+      draftOrder: [],
+      savedDraftOrder: [],
       authLoading: true,
       authSubmitting: false,
       authConfig: {
@@ -412,10 +476,12 @@ createApp({
         mode: "signin",
         email: "",
         password: "",
+        confirmPassword: "",
       },
       authSession: null,
       authUser: null,
       pendingVerificationEmail: null,
+      showPasswordRecovery: false,
       devToken: "",
       supabaseClient: null,
       error: null,
@@ -447,6 +513,11 @@ createApp({
     selectedTeamRoster() {
       const team = this.leagueTeams.find((t) => t.team_id === this.draftHelpPayload.team_id);
       return team ? team.roster_json : "[]";
+    },
+    draftOrderTeams() {
+      return this.draftOrder
+        .map((tid) => this.leagueTeams.find((t) => t.team_id === tid))
+        .filter(Boolean);
     },
   },
   async mounted() {
@@ -485,7 +556,7 @@ createApp({
             ? detail.map((d) => d.msg || JSON.stringify(d)).join("; ")
             : res.status === 401
               ? "Sign in required — use Sign In in the header"
-              : "Request failed";
+              : `Request failed (HTTP ${res.status})`;
         throw new Error(message);
       }
       return payload;
@@ -515,9 +586,18 @@ createApp({
       if (sessionResult.error) throw sessionResult.error;
       this.authSession = sessionResult.data.session;
       await this.refreshCurrentUser();
-      this.supabaseClient.auth.onAuthStateChange((_, session) => {
+      this.supabaseClient.auth.onAuthStateChange((event, session) => {
         this.authSession = session;
-        if (!session) { this.authUser = null; return; }
+        if (event === "PASSWORD_RECOVERY") {
+          this.showPasswordRecovery = true;
+          this.page = "login";
+          this.authForm.password = "";
+          this.authForm.confirmPassword = "";
+        }
+        if (!session) {
+          this.authUser = null;
+          return;
+        }
         Promise.resolve().then(() => this.refreshCurrentUser()).catch(() => {});
       });
     },
@@ -539,14 +619,30 @@ createApp({
         throw new Error("Supabase client not initialized. Wait a moment and try again.");
       }
     },
+    _validatePasswordPair() {
+      const password = (this.authForm.password || "").trim();
+      const confirm = (this.authForm.confirmPassword || "").trim();
+      if (password.length < 8) {
+        throw new Error("Password must be at least 8 characters.");
+      }
+      if (password !== confirm) {
+        throw new Error("Passwords do not match.");
+      }
+      return password;
+    },
     async signIn() {
       this.clearMessages();
       this.authSubmitting = true;
       try {
         this._ensureSupabase();
+        if (!(this.authForm.password || "").trim()) {
+          throw new Error("Enter your password.");
+        }
+        const email = (this.authForm.email || "").trim();
+        const password = (this.authForm.password || "").trim();
         const { data, error } = await this.supabaseClient.auth.signInWithPassword({
-          email: this.authForm.email,
-          password: this.authForm.password,
+          email,
+          password,
         });
         if (error) throw error;
         this.authSession = data.session;
@@ -571,20 +667,87 @@ createApp({
       this.authSubmitting = true;
       try {
         this._ensureSupabase();
-        const { data, error } = await this.supabaseClient.auth.signInWithOtp({
-          email: this.authForm.email,
+        const password = this._validatePasswordPair();
+        const { data, error } = await this.supabaseClient.auth.signUp({
+          email: this.authForm.email.trim(),
+          password,
           options: {
             emailRedirectTo: this._authRedirectUrl(),
-            shouldCreateUser: true,
           },
         });
         if (error) throw error;
         this.authSession = data.session || null;
-        this.pendingVerificationEmail = this.authForm.email;
+        this.pendingVerificationEmail = this.authForm.email.trim();
         this.authForm.password = "";
-        this.status = "Email link sent. Open it to finish signing in.";
+        this.authForm.confirmPassword = "";
+        if (data.session) {
+          await this.refreshCurrentUser();
+          await this.loadLeagues();
+          this.page = "dashboard";
+          this.status = "Account created. You are signed in.";
+          this.pendingVerificationEmail = null;
+          return;
+        }
+        this.status = "Account created. Confirm your email, then sign in with your password.";
       } catch (e) {
-        this.error = e.message || "Could not send email link";
+        this.error = e.message || "Could not create account";
+      } finally {
+        this.authSubmitting = false;
+      }
+    },
+    async forgotPassword() {
+      this.clearMessages();
+      this.authSubmitting = true;
+      try {
+        this._ensureSupabase();
+        const email = (this.authForm.email || "").trim();
+        if (!email) throw new Error("Enter your email first.");
+        const { error } = await this.supabaseClient.auth.resetPasswordForEmail(email, {
+          redirectTo: this._authRedirectUrl(),
+        });
+        if (error) throw error;
+        this.status = `Password reset email sent to ${email}. Open the link to choose a new password.`;
+      } catch (e) {
+        this.error = e.message || "Could not send reset email";
+      } finally {
+        this.authSubmitting = false;
+      }
+    },
+    async setPassword() {
+      this.clearMessages();
+      this.authSubmitting = true;
+      try {
+        this._ensureSupabase();
+        const password = this._validatePasswordPair();
+        const { error } = await this.supabaseClient.auth.updateUser({ password });
+        if (error) throw error;
+        this.authForm.password = "";
+        this.authForm.confirmPassword = "";
+        this.status = "Password saved. You can sign in with email and password next time.";
+        this.page = "dashboard";
+      } catch (e) {
+        this.error = e.message || "Could not save password";
+      } finally {
+        this.authSubmitting = false;
+      }
+    },
+    async completePasswordRecovery() {
+      this.clearMessages();
+      this.authSubmitting = true;
+      try {
+        this._ensureSupabase();
+        const password = this._validatePasswordPair();
+        const { error } = await this.supabaseClient.auth.updateUser({ password });
+        if (error) throw error;
+        this.showPasswordRecovery = false;
+        this.authForm.password = "";
+        this.authForm.confirmPassword = "";
+        await this.refreshCurrentUser();
+        await this.loadLeagues();
+        this.page = "dashboard";
+        this.status = "Password updated. You are signed in.";
+      } catch (e) {
+        this.error = e.message || "Could not update password";
       } finally {
         this.authSubmitting = false;
       }
@@ -796,6 +959,43 @@ createApp({
       if (!this.draftHelpPayload.team_id && this.optimizePayload.team_id) {
         this.draftHelpPayload.team_id = this.optimizePayload.team_id;
       }
+      if (!this.draftOrder.length && this.leagueTeams.length) {
+        this.draftOrder = this.leagueTeams.map((t) => t.team_id);
+        this.savedDraftOrder = [...this.draftOrder];
+      }
+    },
+    moveUp(i) {
+      if (i <= 0) return;
+      const a = this.draftOrder[i];
+      this.draftOrder[i] = this.draftOrder[i - 1];
+      this.draftOrder[i - 1] = a;
+      this.draftOrder = [...this.draftOrder];
+    },
+    moveDown(i) {
+      if (i >= this.draftOrder.length - 1) return;
+      const a = this.draftOrder[i];
+      this.draftOrder[i] = this.draftOrder[i + 1];
+      this.draftOrder[i + 1] = a;
+      this.draftOrder = [...this.draftOrder];
+    },
+    orderByInverseStandings() {
+      const sorted = [...this.leagueTeams].sort((a, b) => {
+        const wA = a.wins || 0, wB = b.wins || 0;
+        if (wA !== wB) return wA - wB;
+        return (a.points_for || 0) - (b.points_for || 0);
+      });
+      this.draftOrder = sorted.map((t) => t.team_id);
+    },
+    randomizeOrder() {
+      const arr = [...this.draftOrder];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      this.draftOrder = arr;
+    },
+    resetDraftOrder() {
+      this.draftOrder = [...this.savedDraftOrder];
     },
     parsePickSlots(text) {
       if (!text || !text.trim()) return null;
@@ -832,8 +1032,13 @@ createApp({
         const body = {
           team_id: this.draftHelpPayload.team_id,
           num_players: this.draftHelpPayload.num_players || 100,
+          num_teams: this.leagueTeams.length,
         };
-        if (pickSlots) body.pick_slots = pickSlots;
+        if (pickSlots) {
+          body.pick_slots = pickSlots;
+        } else if (this.draftOrder.length) {
+          body.draft_order = this.draftOrder;
+        }
         const result = await this.fetchJson(
           `api/leagues/${this.selectedLeague.league_id}/draft-help`,
           { method: "POST", body: JSON.stringify(body) },
