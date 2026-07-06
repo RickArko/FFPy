@@ -259,21 +259,23 @@ def _import_from_sleeper(league_id: str, season: int) -> dict:
     players_map = load_sleeper_players()
 
     teams = []
-    for r in rosters:
+    for idx, r in enumerate(rosters):
         roster_id = r.get("roster_id")
         owner_id = r.get("owner_id") or ""
         user = user_by_id.get(owner_id, {})
         metadata = user.get("metadata") or {}
+        fallback_id = str(roster_id) if roster_id is not None else owner_id or str(idx + 1)
         team_name = (
             metadata.get("team_name")
             or user.get("display_name")
-            or (f"Team {roster_id}" if roster_id is not None else "Unknown")
+            or (f"Team {fallback_id}" if fallback_id else "Unknown")
         )
-        owner_display = user.get("display_name") or owner_id
+        owner_display = user.get("display_name") or owner_id or "Unknown"
 
+        team_id_suffix = str(roster_id) if roster_id is not None else owner_id or str(idx + 1)
         teams.append(
             {
-                "team_id": f"sleeper:{league_id}:{roster_id}",
+                "team_id": f"sleeper:{league_id}:{team_id_suffix}",
                 "name": team_name,
                 "owner": owner_display,
                 "wins": r.get("settings", {}).get("wins", 0),
