@@ -28,7 +28,7 @@ createApp({
       <div v-if="page === 'login' || page === 'account'">
         <div v-if="page === 'account' && isAuthenticated" class="card auth-card">
           <h2>Set password</h2>
-          <p class="small">Use this after magic-link sign-in, or to change your password.</p>
+          <p class="small">Set or change your account password.</p>
           <label>New password</label>
           <input type="password" v-model="authForm.password" placeholder="At least 8 characters" autocomplete="new-password" />
           <label>Confirm password</label>
@@ -57,7 +57,12 @@ createApp({
           <label>Email</label>
           <input type="email" v-model="authForm.email" placeholder="you@example.com" autocomplete="email" />
           <label>Password</label>
-          <input type="password" v-model="authForm.password" placeholder="At least 8 characters" autocomplete="new-password" />
+          <input
+            type="password"
+            v-model="authForm.password"
+            :placeholder="authForm.mode === 'signup' ? 'At least 8 characters' : 'Your password'"
+            :autocomplete="authForm.mode === 'signup' ? 'new-password' : 'current-password'"
+          />
           <template v-if="authForm.mode === 'signup'">
             <label>Confirm password</label>
             <input type="password" v-model="authForm.confirmPassword" placeholder="Repeat password" autocomplete="new-password" />
@@ -633,9 +638,11 @@ createApp({
         if (!(this.authForm.password || "").trim()) {
           throw new Error("Enter your password.");
         }
+        const email = (this.authForm.email || "").trim();
+        const password = (this.authForm.password || "").trim();
         const { data, error } = await this.supabaseClient.auth.signInWithPassword({
-          email: this.authForm.email,
-          password: this.authForm.password,
+          email,
+          password,
         });
         if (error) throw error;
         this.authSession = data.session;

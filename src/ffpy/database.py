@@ -3776,11 +3776,10 @@ class FFPyDatabase:
         return [dict(row) for row in cursor.fetchall()]
 
     def delete_user_league(self, league_id: str, user_id: str) -> None:
-        """Delete a league and its teams/matchups."""
-        self.conn.execute("DELETE FROM league_matchups WHERE league_id = ?", (league_id,))
-        self.conn.execute("DELETE FROM league_teams WHERE league_id = ?", (league_id,))
-        self.conn.execute(
+        """Delete a league owned by ``user_id``; teams/matchups cascade."""
+        cursor = self.conn.execute(
             "DELETE FROM user_leagues WHERE league_id = ? AND user_id = ?",
             (league_id, user_id),
         )
-        self.conn.commit()
+        if cursor.rowcount:
+            self.conn.commit()

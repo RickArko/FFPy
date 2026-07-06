@@ -581,7 +581,10 @@ def create_league_app(
                 payload.league_id,
                 payload.season,
             )
-            raise HTTPException(status_code=502, detail=f"Import failed: {exc}") from exc
+            raise HTTPException(
+                status_code=502,
+                detail="Import failed. Check the league ID and provider credentials, then try again.",
+            ) from exc
 
         store_user_id = user.user_id
         if payload.provider == "sleeper" and payload.sleeper_username:

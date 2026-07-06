@@ -98,9 +98,9 @@ def _sleeper_players_cache_path() -> Path:
 def load_sleeper_players(force: bool = False) -> Dict[str, Any]:
     """Return the Sleeper player map, cached in memory and on disk.
 
-    The Sleeper ``/players/nfl`` payload is large (~15 MB); caching avoids
-    refetching on every request. Callers that only need a few IDs (e.g. league
-    import) should not use this helper — it can exceed memory on small hosts.
+    The Sleeper ``/players/nfl`` payload is large (~15 MB). League import and
+    draft-help call this to resolve player names; the disk cache (6-hour TTL)
+    limits refetches. Hosts below ~512 MB RAM may still struggle on a cold load.
     """
     now = time.time()
     cached = _SLEEPER_PLAYERS_CACHE.get("data")
