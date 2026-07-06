@@ -209,7 +209,10 @@ class DraftStrategyEngine:
                 "roster_needs": roster_needs,
                 "rankings": [],
                 "picks": [],
-                "notes": ["No ADP data available. Run `ffpy-db load-adp --season <year>`."],
+                "notes": [
+                    "No ADP data available. Run `ffpy-db load-adp --season <year>` "
+                    "or retry once the server can reach nflreadpy."
+                ],
             }
 
         candidates = self._build_candidate_pool(adp_df, rostered_names)
@@ -301,11 +304,42 @@ class DraftStrategyEngine:
     # ------------------------------------------------------------------
     # ADP / candidate pool
     # ------------------------------------------------------------------
+    def _fetch_and_store_adp(self, season: int, platform: str) -> bool:
+        """Fetch ADP from nflreadpy when the DB has no rows for this season."""
+        from ffpy.integrations.adp import fetch_fantasypros_adp, fetch_underdog_adp
+
+        fetchers = {
+            "fantasypros": fetch_fantasypros_adp,
+            "underdog": fetch_underdog_adp,
+        }
+        fetcher = fetchers.get(platform)
+        if fetcher is None:
+            return False
+        try:
+            df = fetcher(season)
+            if df.empty:
+                return False
+            return self.db.store_adp(df, season) > 0
+        except Exception:
+            logger.warning(
+                "Failed to fetch ADP for season=%s platform=%s",
+                season,
+                platform,
+                exc_info=True,
+            )
+            return False
+
     def _load_adp(self, season: int):
         cfg = self.config
         adp = self.db.get_adp(season=season, platform=cfg.adp_platform)
         used = season
         if adp.empty:
+            adp = self.db.get_adp(season=season - 1, platform=cfg.adp_platform)
+            used = season - 1
+        if adp.empty and self._fetch_and_store_adp(season, cfg.adp_platform):
+            adp = self.db.get_adp(season=season, platform=cfg.adp_platform)
+            used = season
+        if adp.empty and self._fetch_and_store_adp(season - 1, cfg.adp_platform):
             adp = self.db.get_adp(season=season - 1, platform=cfg.adp_platform)
             used = season - 1
         if adp.empty:
