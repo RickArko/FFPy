@@ -150,6 +150,76 @@ def test_sync_franchises_imports_multiple_seasons(
     assert len(res2.json()["franchises"]) == 1
 
 
+def test_sync_reclaims_leagues_imported_under_sleeper_username(
+    sleeper_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch, auth_secret: str, client: TestClient
+):
+    """Franchise sync must own leagues previously stored under a Sleeper username key."""
+    from ffpy.sleeper_import import import_from_sleeper
+
+    supabase_user = "045c28a4-9566-4d3c-a4c1-6166cf55dce3"
+    sleeper_db.upsert_sleeper_profile(
+        supabase_user, sleeper_user_id="1263503584687833088", sleeper_username="macker1477"
+    )
+
+    monkeypatch.setattr(
+        "ffpy.sleeper_web.import_service.import_from_sleeper",
+        lambda league_id, season: {
+            "league": {
+                "league_id": f"sleeper:{league_id}",
+                "provider": "sleeper",
+                "name": "Tight ends and loose lips",
+                "season": season,
+                "sleeper_league_id": str(league_id),
+                "status": "pre_draft",
+            },
+            "teams": [
+                {
+                    "team_id": f"sleeper:{league_id}:1",
+                    "name": "Team One",
+                    "owner": "macker1477",
+                }
+            ],
+            "matchups": [],
+        },
+    )
+
+    legacy = import_from_sleeper("1312118348556828672", 2026)
+    sleeper_db.store_user_league("macker1477", legacy)
+    assert sleeper_db.get_user_league("sleeper:1312118348556828672", supabase_user) is None
+
+    def fake_user_leagues(user_id: str, season: int):
+        if season == 2026:
+            return [{"league_id": "1312118348556828672", "name": "Tight ends and loose lips", "season": 2026}]
+        return []
+
+    league_payloads = {
+        "1312118348556828672": {
+            "league_id": "1312118348556828672",
+            "season": 2026,
+            "name": "Tight ends and loose lips",
+            "previous_league_id": None,
+        },
+    }
+
+    monkeypatch.setattr(
+        "ffpy.sleeper_web.franchise.SleeperIntegration.get_user_leagues",
+        fake_user_leagues,
+    )
+    monkeypatch.setattr(
+        "ffpy.sleeper_web.franchise.SleeperIntegration.get_league",
+        lambda league_id: league_payloads[str(league_id)],
+    )
+
+    headers = {"Authorization": f"Bearer {_token(supabase_user, auth_secret)}"}
+    sync = client.post("/api/franchises/sync", headers=headers)
+    assert sync.status_code == 200
+
+    teams = client.get("/api/leagues/sleeper%3A1312118348556828672/teams", headers=headers)
+    assert teams.status_code == 200
+    assert teams.json()
+    assert sleeper_db.get_user_league("sleeper:1312118348556828672", supabase_user) is not None
+
+
 @pytest.mark.skip(reason="Optional live Sleeper API check")
 def test_franchise_chain_real_sleeper_user(monkeypatch: pytest.MonkeyPatch):
     """Optional live API check using the official Sleeper account."""

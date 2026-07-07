@@ -96,25 +96,17 @@ class FranchiseService:
                 display_name=chain.display_name,
                 canonical_sleeper_id=chain.root_league_id,
             )
-            imported_seasons: List[dict] = []
             for league_payload in chain.leagues:
                 sleeper_league_id = str(league_payload.get("league_id"))
                 season = int(league_payload.get("season") or datetime.now().year)
-                league_id = self.import_service.import_league(
+                self.import_service.import_league(
                     user_id,
                     sleeper_league_id,
                     season,
                     franchise_id=franchise_id,
                 )
-                imported_seasons.append(
-                    {
-                        "league_id": league_id,
-                        "season": season,
-                        "sleeper_league_id": sleeper_league_id,
-                        "status": league_payload.get("status"),
-                    }
-                )
-            franchise["seasons"] = imported_seasons
+            self.db.reassign_franchise_leagues(user_id, franchise_id)
+            franchise["seasons"] = self.db.get_franchise_leagues(franchise_id, user_id)
             results.append(franchise)
         return results
 
@@ -140,6 +132,7 @@ class FranchiseService:
                 franchise_id=franchise_id,
             )
             refreshed.append({"league_id": league_id, "season": season})
+        self.db.reassign_franchise_leagues(user_id, franchise_id)
         franchise = self.db.get_franchise(franchise_id, user_id)
         assert franchise is not None
         franchise["refreshed"] = refreshed

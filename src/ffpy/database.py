@@ -3624,6 +3624,16 @@ class FFPyDatabase:
 
     # ==================== USER LEAGUES (League Import) ====================
 
+    _LEAGUE_OWNERSHIP_SQL = """
+        (
+            ul.user_id = ?
+            OR EXISTS (
+                SELECT 1 FROM league_franchises lf
+                WHERE lf.franchise_id = ul.franchise_id AND lf.user_id = ?
+            )
+        )
+    """
+
     def store_user_league(self, user_id: str, data: dict, *, franchise_id: str | None = None) -> str:
         """Store league metadata, teams, and matchups from an import."""
         league = data["league"]
@@ -3636,6 +3646,7 @@ class FFPyDatabase:
                  franchise_id, sleeper_league_id, previous_league_id, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(league_id) DO UPDATE SET
+                user_id = excluded.user_id,
                 league_name = excluded.league_name,
                 league_json = excluded.league_json,
                 franchise_id = COALESCE(excluded.franchise_id, user_leagues.franchise_id),
@@ -3736,8 +3747,11 @@ class FFPyDatabase:
     def get_user_league(self, league_id: str, user_id: str) -> dict | None:
         """Get a single league by ID, verifying user ownership."""
         cursor = self.conn.execute(
-            "SELECT * FROM user_leagues WHERE league_id = ? AND user_id = ?",
-            (league_id, user_id),
+            f"""
+            SELECT ul.* FROM user_leagues ul
+            WHERE ul.league_id = ? AND {self._LEAGUE_OWNERSHIP_SQL}
+            """,
+            (league_id, user_id, user_id),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -3754,13 +3768,13 @@ class FFPyDatabase:
     def get_league_teams(self, league_id: str, user_id: str) -> list[dict]:
         """Get teams for a league, verifying user ownership."""
         cursor = self.conn.execute(
-            """
+            f"""
             SELECT t.* FROM league_teams t
-            JOIN user_leagues l ON t.league_id = l.league_id
-            WHERE t.league_id = ? AND l.user_id = ?
+            JOIN user_leagues ul ON t.league_id = ul.league_id
+            WHERE t.league_id = ? AND {self._LEAGUE_OWNERSHIP_SQL}
             ORDER BY t.rank, t.points_for DESC
         """,
-            (league_id, user_id),
+            (league_id, user_id, user_id),
         )
         return [dict(row) for row in cursor.fetchall()]
 
@@ -3779,13 +3793,13 @@ class FFPyDatabase:
     def get_league_matchups(self, league_id: str, week: int, user_id: str) -> list[dict]:
         """Get matchups for a league/week, verifying user ownership."""
         cursor = self.conn.execute(
-            """
+            f"""
             SELECT m.* FROM league_matchups m
-            JOIN user_leagues l ON m.league_id = l.league_id
-            WHERE m.league_id = ? AND m.week = ? AND l.user_id = ?
+            JOIN user_leagues ul ON m.league_id = ul.league_id
+            WHERE m.league_id = ? AND m.week = ? AND {self._LEAGUE_OWNERSHIP_SQL}
             ORDER BY m.matchup_id
         """,
-            (league_id, week, user_id),
+            (league_id, week, user_id, user_id),
         )
         return [dict(row) for row in cursor.fetchall()]
 
@@ -3804,11 +3818,32 @@ class FFPyDatabase:
     def delete_user_league(self, league_id: str, user_id: str) -> None:
         """Delete a league owned by ``user_id``; teams/matchups cascade."""
         cursor = self.conn.execute(
-            "DELETE FROM user_leagues WHERE league_id = ? AND user_id = ?",
-            (league_id, user_id),
+            """
+            DELETE FROM user_leagues
+            WHERE league_id = ?
+              AND (
+                user_id = ?
+                OR EXISTS (
+                    SELECT 1 FROM league_franchises lf
+                    WHERE lf.franchise_id = user_leagues.franchise_id AND lf.user_id = ?
+                )
+              )
+            """,
+            (league_id, user_id, user_id),
         )
         if cursor.rowcount:
             self.conn.commit()
+
+    def reassign_franchise_leagues(self, user_id: str, franchise_id: str) -> int:
+        """Align imported season rows with the Supabase owner after franchise sync."""
+
+        cursor = self.conn.execute(
+            "UPDATE user_leagues SET user_id = ? WHERE franchise_id = ? AND user_id != ?",
+            (user_id, franchise_id, user_id),
+        )
+        if cursor.rowcount:
+            self.conn.commit()
+        return cursor.rowcount
 
     # ==================== SLEEPER PROFILES & FRANCHISES ====================
 
@@ -3909,10 +3944,10 @@ class FFPyDatabase:
                 SELECT league_id, league_name, season, status, imported_at, refreshed_at,
                        sleeper_league_id, previous_league_id
                 FROM user_leagues
-                WHERE franchise_id = ? AND user_id = ?
+                WHERE franchise_id = ?
                 ORDER BY season DESC
                 """,
-                (franchise["franchise_id"], user_id),
+                (franchise["franchise_id"],),
             )
             franchise["seasons"] = [dict(row) for row in league_cursor.fetchall()]
         return franchises
@@ -3922,9 +3957,9 @@ class FFPyDatabase:
         cursor = self.conn.execute(
             """
             SELECT * FROM user_leagues
-            WHERE franchise_id = ? AND user_id = ?
+            WHERE franchise_id = ?
             ORDER BY season DESC
             """,
-            (franchise_id, user_id),
+            (franchise_id,),
         )
         return [dict(row) for row in cursor.fetchall()]

@@ -100,6 +100,24 @@ def test_invalid_username_rejected(client: TestClient, auth_secret: str, monkeyp
     assert res.status_code == 400
 
 
+def test_placeholder_user_cannot_link(
+    sleeper_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch, auth_secret: str
+):
+    monkeypatch.setattr(Config, "SUPABASE_URL", "")
+    monkeypatch.setattr(Config, "SUPABASE_BROWSER_KEY", "")
+    monkeypatch.setattr(Config, "SUPABASE_JWT_SECRET", auth_secret)
+    monkeypatch.setattr(Config, "WEB_AUTH_ENABLED", False)
+    app = create_sleeper_app(db_path=str(sleeper_db.db_path), require_auth=False)
+    monkeypatch.setattr(
+        "ffpy.sleeper_web.profile.SleeperIntegration.get_user",
+        lambda username: {"user_id": "uid_macker", "display_name": username},
+    )
+    with TestClient(app) as client:
+        res = client.put("/api/profile/sleeper", json={"username": "macker1477"})
+    assert res.status_code == 400
+    assert "make run" in res.json()["detail"]
+
+
 def test_profile_isolation_between_users(
     client: TestClient, auth_secret: str, sleeper_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch
 ):

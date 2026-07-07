@@ -10,6 +10,9 @@ class ProfileLinkError(ValueError):
     """Raised when a Sleeper username cannot be linked."""
 
 
+_PLACEHOLDER_USER_IDS = frozenset({"dev-user", "anon"})
+
+
 class SleeperProfileService:
     """Validate and persist Sleeper profile links."""
 
@@ -20,6 +23,11 @@ class SleeperProfileService:
         return self.db.get_sleeper_profile(user_id)
 
     def link_username(self, user_id: str, username: str) -> dict:
+        if user_id in _PLACEHOLDER_USER_IDS:
+            raise ProfileLinkError(
+                "Sign in with Supabase (make run) before linking a Sleeper account. "
+                "No-auth sessions cannot claim Sleeper profiles on the shared database."
+            )
         username = username.strip()
         if not username:
             raise ProfileLinkError("Sleeper username is required")
