@@ -73,13 +73,13 @@ def import_from_sleeper(league_id: str, season: int) -> dict:
     league = SleeperIntegration.get_league(league_id)
     rosters = SleeperIntegration.get_rosters(league_id)
     users = SleeperIntegration.get_league_users(league_id)
-    user_by_id = {u.get("user_id"): u for u in users}
+    user_by_id = {str(u.get("user_id")): u for u in users}
     players_map = load_sleeper_players()
 
     teams = []
     for idx, r in enumerate(rosters):
         players_list = r.get("players") or []
-        owner_id = r.get("owner_id") or ""
+        owner_id = str(r.get("owner_id")) if r.get("owner_id") is not None else ""
         if not owner_id and not players_list:
             continue
         roster_id = r.get("roster_id")

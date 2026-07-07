@@ -545,6 +545,51 @@ def create_league_app(
         db.delete_user_league(league_id, league["user_id"])
         return {"status": "deleted"}
 
+    @league_router.post("/{league_id}/refresh")
+    def refresh_league(
+        league_id: str,
+        user: AuthenticatedUser = Depends(get_current_user),
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        league = _get_league_or_404(db, league_id, user)
+        provider = league.get("provider", "")
+        season = league.get("season") or Config.NFL_SEASON
+
+        if provider in ("espn", "yahoo"):
+            if not MASTER_KEY:
+                raise HTTPException(status_code=500, detail="Encryption key not configured")
+            cipher = db.get_credential_ciphertext(league["user_id"], provider)
+            if not cipher:
+                raise HTTPException(status_code=400, detail=f"No stored credentials for {provider}")
+            creds = decrypt_credentials(cipher, league["user_id"], MASTER_KEY)
+        else:
+            creds = {}
+
+        raw_id = league_id
+        if ":" in raw_id:
+            raw_id = raw_id.split(":", 1)[1]
+
+        try:
+            if provider == "espn":
+                data = _import_from_espn(raw_id, season, creds)
+            elif provider == "yahoo":
+                data = _import_from_yahoo(raw_id, season, creds)
+            elif provider == "sleeper":
+                data = _import_from_sleeper(raw_id, season)
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported provider")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("League refresh failed provider=%s league_id=%s", provider, league_id)
+            raise HTTPException(
+                status_code=502,
+                detail="Refresh failed. Check the provider and try again.",
+            ) from exc
+
+        db.store_user_league(league["user_id"], data)
+        return {"status": "refreshed", "teams": len(data["teams"])}
+
     @league_router.post("/{league_id}/draft-help")
     def draft_help(
         league_id: str,

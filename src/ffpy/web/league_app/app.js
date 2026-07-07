@@ -218,6 +218,7 @@ createApp({
               <div class="small">{{ selectedLeague.provider.toUpperCase() }} · {{ selectedLeague.season }} · {{ selectedLeague.scoring_type || 'custom' }}</div>
             </div>
             <div style="display:flex;gap:8px">
+              <button class="btn-ghost" @click="refreshLeague()" :disabled="loading">Refresh</button>
               <button class="btn-danger" @click="deleteLeague(selectedLeague.league_id)">Delete</button>
               <button class="btn-ghost" @click="page='dashboard'">Back</button>
             </div>
@@ -827,6 +828,24 @@ createApp({
         this.status = "League deleted";
       } catch (e) {
         this.error = e.message || "Delete failed";
+      }
+    },
+    async refreshLeague() {
+      if (!confirm("Refresh league data from the provider?")) return;
+      this.loading = true;
+      this.status = "";
+      this.error = "";
+      try {
+        const result = await this.fetchJson(
+          `api/leagues/${this.selectedLeague.league_id}/refresh`,
+          { method: "POST" },
+        );
+        this.status = `League refreshed — ${result.teams} teams`;
+        await this.loadLeagueTeams();
+      } catch (e) {
+        this.error = e.message || "Refresh failed";
+      } finally {
+        this.loading = false;
       }
     },
     selectProvider(p) {

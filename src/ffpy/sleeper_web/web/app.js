@@ -308,15 +308,15 @@ createApp({
               <h3>Recommended picks</h3>
               <div v-for="p in draftResult.picks" :key="p.pick_slot" class="rank-row">
                 <strong>#{{ p.pick_slot }}</strong>
-                <div>{{ p.player_name }} <span class="muted">({{ p.position }})</span></div>
+                <div>{{ p.player || p.player_name }} <span class="muted">({{ p.position }})</span></div>
               </div>
             </div>
             <div>
               <h3>Top board</h3>
-              <div v-for="(r, idx) in draftResult.rankings.slice(0, 15)" :key="r.player_name" class="rank-row">
+              <div v-for="(r, idx) in draftResult.rankings.slice(0, 15)" :key="r.player || r.player_name || idx" class="rank-row">
                 <strong>{{ idx + 1 }}</strong>
                 <div>
-                  {{ r.player_name }} ({{ r.position }})
+                  {{ r.player || r.player_name }} ({{ r.position }})
                   <div class="reason">{{ (r.reasons || []).join(' · ') }}</div>
                 </div>
               </div>
