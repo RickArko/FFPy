@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 from ffpy.database import FFPyDatabase
+from ffpy.rookie_projections import project as project_rookie
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class DraftStrategyConfig:
     corr_seasons: List[int] = field(default_factory=lambda: [2023, 2024, 2025])
     season_weights: Dict[int, float] = field(default_factory=lambda: {2023: 0.15, 2024: 0.30, 2025: 0.55})
     ceiling_z: float = 1.28  # ~90th percentile lineup outcome
+    risk_tolerance: float = 0.5  # 0 = floor-focused, 1 = ceiling-focused
     min_weeks_for_corr: int = 8
 
     # Candidate pool.
@@ -217,7 +219,7 @@ class DraftStrategyEngine:
 
         candidates = self._build_candidate_pool(adp_df, rostered_names)
         weekly = self._load_weekly_points(cfg.corr_seasons)
-        candidates = self._add_projections(candidates, weekly, adp_df)
+        candidates = self._add_projections(candidates, weekly, adp_df, season=season)
         candidates = self._add_correlation(candidates, weekly, my_roster)
         candidates = self._score(candidates, need_map)
 
@@ -397,6 +399,48 @@ class DraftStrategyEngine:
             std = 8.0
         return ppg, std, int(len(sub))
 
+    def _history_stats_by_player(self, weekly: pd.DataFrame) -> Dict[str, tuple[float, float, int]]:
+        """Precompute recency-weighted PPG per player (avoids O(n*m) rescans)."""
+        if weekly.empty:
+            return {}
+        stats: Dict[str, tuple[float, float, int]] = {}
+        for player, grp in weekly.groupby("player", sort=False):
+            w = grp["season"].map(self.config.season_weights).fillna(0.1)
+            ppg = float(np.average(grp["actual_points"], weights=w))
+            std = float(grp["actual_points"].std(ddof=0)) if len(grp) > 1 else 8.0
+            if not np.isfinite(std):
+                std = 8.0
+            stats[str(player)] = (ppg, std, int(len(grp)))
+        return stats
+
+    def _draft_capital_map(self, player_names: List[str]) -> Dict[str, Dict[str, int]]:
+        if not player_names:
+            return {}
+        placeholders = ",".join("?" for _ in player_names)
+        try:
+            df = pd.read_sql(
+                f"""
+                SELECT player_name, season, draft_round, draft_pick
+                FROM player_rosters
+                WHERE player_name IN ({placeholders}) AND draft_round IS NOT NULL
+                """,
+                self.db.conn,
+                params=player_names,
+            )
+        except Exception:
+            return {}
+        if df.empty:
+            return {}
+        df = df.sort_values(["player_name", "season"])
+        first = df.drop_duplicates(subset=["player_name"], keep="first")
+        return {
+            str(row["player_name"]): {
+                "draft_round": int(row["draft_round"]),
+                "draft_pick": int(row["draft_pick"]) if row["draft_pick"] is not None else 999,
+            }
+            for _, row in first.iterrows()
+        }
+
     # Positional projection curve: PPG by within-position ADP rank
     # (top_ppg, floor_ppg, span-to-floor). A realistic monotonic decline so
     # deep/unknown players are not projected like startable starters.
@@ -417,13 +461,24 @@ class DraftStrategyEngine:
         return max(floor, top - (top - floor) * (pos_rank - 1) / max(1, span))
 
     def _add_projections(
-        self, candidates: pd.DataFrame, weekly: pd.DataFrame, adp_df: pd.DataFrame
+        self,
+        candidates: pd.DataFrame,
+        weekly: pd.DataFrame,
+        adp_df: pd.DataFrame,
+        *,
+        season: int,
     ) -> pd.DataFrame:
+        from ffpy.rookie_projections import BACKTEST_SEASONS, _load_rookie_outcomes
+
         candidates = candidates.copy()
         # Within-position ADP rank for the market curve.
         candidates["pos_rank"] = (candidates.sort_values("adp").groupby("position").cumcount() + 1).reindex(
             candidates.index
         )
+
+        history_stats = self._history_stats_by_player(weekly)
+        rookie_history = _load_rookie_outcomes(self.db, BACKTEST_SEASONS)
+        draft_capital = self._draft_capital_map(candidates["player_name"].tolist())
 
         rows = []
         for _, row in candidates.iterrows():
@@ -431,12 +486,27 @@ class DraftStrategyEngine:
             pos = row["position"]
             adp_rank = float(row["adp"])
             curve = self._curve_ppg(pos, int(row["pos_rank"]))
-            hist_ppg, std, n_weeks = self._recency_weighted_ppg(weekly, name)
+            hist = history_stats.get(name)
+            if hist is None:
+                hist_ppg, std, n_weeks = np.nan, 8.0, 0
+            else:
+                hist_ppg, std, n_weeks = hist
 
             if np.isnan(hist_ppg):
-                ppg = curve
-                std = std if not np.isnan(std) else 10.0
-                source = "market"
+                rookie = project_rookie(
+                    self.db,
+                    name=name,
+                    position=pos,
+                    adp_rank=int(adp_rank),
+                    pos_rank=int(row["pos_rank"]),
+                    season=season,
+                    curve_fn=self._curve_ppg,
+                    history=rookie_history,
+                    draft_capital=draft_capital.get(name),
+                )
+                ppg = rookie.ppg
+                std = rookie.std
+                source = "rookie_model"
             else:
                 # Blend season history with the market curve; more history =>
                 # trust history more (capped so the market anchors the scale).
@@ -487,9 +557,21 @@ class DraftStrategyEngine:
         z = self.config.ceiling_z
         if not players:
             return 0.0
-        mat = weekly[weekly["player"].isin(players)].pivot_table(
+        mat = self._weekly_pivot(weekly, players)
+        return self._lineup_ceiling_from_mat(mat, players, z=z)
+
+    @staticmethod
+    def _weekly_pivot(weekly: pd.DataFrame, players: List[str]) -> pd.DataFrame:
+        if weekly.empty or not players:
+            return pd.DataFrame()
+        return weekly[weekly["player"].isin(players)].pivot_table(
             index="week_key", columns="player", values="actual_points", aggfunc="mean"
         )
+
+    @staticmethod
+    def _lineup_ceiling_from_mat(mat: pd.DataFrame, players: List[str], *, z: float) -> float:
+        if mat.empty or not players:
+            return 0.0
         mat = mat.reindex(columns=[p for p in players if p in mat.columns]).dropna(how="all")
         if mat.empty:
             return 0.0
@@ -540,6 +622,11 @@ class DraftStrategyEngine:
         )
         corr_matrix = mat.corr().fillna(0) if not mat.empty else pd.DataFrame()
         base_ceiling = self._lineup_ceiling(starter_names, weekly)
+        ceiling_mat = self._weekly_pivot(
+            weekly,
+            list(dict.fromkeys(starter_names + pool["player_name"].tolist())),
+        )
+        z = cfg.ceiling_z
 
         rows = []
         for _, row in pool.iterrows():
@@ -560,7 +647,9 @@ class DraftStrategyEngine:
                     neg_player = worst
             same_team_stack = bool(team in qb_teams and pos in ("WR", "TE", "RB"))
             stack_bonus = 0.15 if same_team_stack else 0.0
-            ceiling_lift = self._lineup_ceiling(starter_names + [name], weekly) - base_ceiling
+            ceiling_lift = (
+                self._lineup_ceiling_from_mat(ceiling_mat, starter_names + [name], z=z) - base_ceiling
+            )
             rows.append(
                 {
                     "player_name": name,
@@ -608,7 +697,12 @@ class DraftStrategyEngine:
         # a mild lean rather than a flat sweep of one position above all others.
         candidates["z_need"] = self._normalize(candidates["need_score"]) * 0.5
         candidates["z_vorp"] = self._normalize(candidates["vorp"])
-        candidates["z_corr"] = self._normalize(candidates["corr_score"])
+        z_corr = self._normalize(candidates["corr_score"])
+        # Rookies lack correlation history — treat as neutral instead of bottom-ranked.
+        low_history = (
+            candidates.get("history_weeks", pd.Series(0, index=candidates.index)) < cfg.min_weeks_for_corr
+        )
+        candidates["z_corr"] = z_corr.where(~low_history, 0.5)
 
         # Provisional intrinsic value (need + projection + correlation) used to
         # judge ADP value. A player is "good value" when their ADP is later than
@@ -626,7 +720,21 @@ class DraftStrategyEngine:
         quality_gate = (candidates["z_vorp"] + 0.15).clip(0, 1)
         candidates["z_adp"] = self._normalize(candidates["adp_value"]) * quality_gate
 
-        raw_score = intrinsic + cfg.weight_adp_value * candidates["z_adp"]
+        is_rookie_proj = candidates["projection_source"].isin(["market", "rookie_model"])
+        adp_weight = np.where(is_rookie_proj, cfg.weight_adp_value * 2.0, cfg.weight_adp_value)
+        raw_score = intrinsic + adp_weight * candidates["z_adp"]
+
+        early_rookie = is_rookie_proj & (candidates["adp"] <= cfg.num_teams * 2)
+        raw_score = raw_score + early_rookie.astype(float) * 0.18
+
+        if cfg.risk_tolerance >= 0.5:
+            ceiling_bonus = (
+                (candidates["projected_ppg"] + candidates["weekly_std"] * 1.28 - candidates["projected_ppg"])
+                * 0.005
+                * is_rookie_proj.astype(float)
+            )
+            raw_score = raw_score + ceiling_bonus
+
         pos_weight = candidates["position"].map(self.POSITION_WEIGHT).fillna(1.0)
         candidates["score"] = raw_score * pos_weight
         return candidates
@@ -661,7 +769,9 @@ class DraftStrategyEngine:
         if row.get("adp_value", 0.0) > 0.5:
             reasons.append(f"ADP value — falls to ~pick {row['adp']:.0f}")
 
-        if row.get("projection_source") == "market":
+        if row.get("projection_source") == "rookie_model":
+            reasons.append("Rookie projection blends draft capital with ADP market curve")
+        elif row.get("projection_source") == "market":
             reasons.append("Limited history — projection from positional market curve")
         elif row.get("projection_source") == "blend":
             reasons.append("Projection blends recent history with market curve")
@@ -711,6 +821,9 @@ class DraftStrategyEngine:
                     "stack": bool(row.get("same_team_stack", False)),
                     "tier": self._tier_for(int(row["rank"])),
                     "score": round(float(row["score"]), 4),
+                    "projection_source": row.get("projection_source"),
+                    "history_weeks": int(row.get("history_weeks", 0)),
+                    "weekly_std": round(float(row.get("weekly_std", 10.0)), 1),
                     "reasons": self._reasons_for(row, median_vorp, median_corr),
                 }
             )

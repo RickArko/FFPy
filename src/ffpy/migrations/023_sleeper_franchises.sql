@@ -1,7 +1,7 @@
 -- Sleeper profile linking (Supabase user ↔ Sleeper account)
 CREATE TABLE IF NOT EXISTS user_sleeper_profiles (
     user_id TEXT PRIMARY KEY,
-    sleeper_user_id TEXT NOT NULL UNIQUE,
+    sleeper_user_id TEXT NOT NULL,
     sleeper_username TEXT NOT NULL,
     linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

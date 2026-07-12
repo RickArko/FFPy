@@ -17,6 +17,7 @@ from ffpy.draft_strategy import (
     load_sleeper_players,
 )
 from ffpy.integrations.sleeper import SleeperIntegration
+from ffpy.optimizer import RosterConstraints
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,33 @@ def scoring_type_from_sleeper(scoring_settings: Optional[dict]) -> str:
     if rec == 0:
         return "standard"
     return "custom"
+
+
+def constraints_from_sleeper_slots(slots: Dict[str, int]) -> RosterConstraints:
+    """Map ``starter_slots_from_sleeper`` output to ``RosterConstraints`` for the ILP optimizer."""
+
+    positions: Dict[str, int] = {}
+    flex_positions: List[str] = []
+    num_flex = 0
+
+    for slot, count in slots.items():
+        key = slot.upper()
+        if key == "FLEX":
+            num_flex = count
+            flex_positions = ["RB", "WR", "TE"]
+        elif key == "OP":
+            num_flex = count
+            flex_positions = ["QB", "RB", "WR", "TE"]
+        elif key in ("BN", "IR", "TAX", "REC", "RESERVE"):
+            continue
+        else:
+            positions[key] = count
+
+    return RosterConstraints(
+        positions=positions,
+        flex_positions=flex_positions,
+        num_flex=num_flex,
+    )
 
 
 def starter_slots_from_sleeper(league_payload: dict) -> Dict[str, int]:
@@ -232,6 +260,7 @@ def run_draft_help(
 __all__ = [
     "DraftHelpRequest",
     "compute_snake_pick_slots",
+    "constraints_from_sleeper_slots",
     "import_from_sleeper",
     "resolve_pick_slots",
     "run_draft_help",

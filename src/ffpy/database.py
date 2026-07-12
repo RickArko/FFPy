@@ -109,12 +109,63 @@ class FFPyDatabase:
             "021_cfb_trades.sql",
             "022_cfb_adp.sql",
             "023_sleeper_franchises.sql",
+            "024_rookie_intel.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
         self._upgrade_cfb_columns()
         self._upgrade_sleeper_franchise_columns()
+        self._upgrade_sleeper_profiles_shared_links()
         self.conn.commit()
+
+    def _upgrade_sleeper_profiles_shared_links(self) -> None:
+        """Allow multiple app users to link the same Sleeper account.
+
+        Older installs created ``UNIQUE(sleeper_user_id)``. Rebuild that table
+        without the uniqueness constraint when present.
+        """
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_sleeper_profiles'"
+        ).fetchone()
+        if not row or not row[0]:
+            return
+        table_sql = " ".join(row[0].split())
+        if "sleeper_user_id TEXT NOT NULL UNIQUE" not in table_sql and (
+            "sleeper_user_id TEXT UNIQUE" not in table_sql
+        ):
+            return
+        # Avoid rewriting unrelated views during RENAME (some installs have
+        # views that reference optional tables not created by default).
+        self.conn.execute("PRAGMA legacy_alter_table=ON")
+        try:
+            self.conn.execute(
+                """
+                CREATE TABLE user_sleeper_profiles_shared (
+                    user_id TEXT PRIMARY KEY,
+                    sleeper_user_id TEXT NOT NULL,
+                    sleeper_username TEXT NOT NULL,
+                    linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            self.conn.execute(
+                """
+                INSERT INTO user_sleeper_profiles_shared
+                    (user_id, sleeper_user_id, sleeper_username, linked_at)
+                SELECT user_id, sleeper_user_id, sleeper_username, linked_at
+                FROM user_sleeper_profiles
+                """
+            )
+            self.conn.execute("DROP TABLE user_sleeper_profiles")
+            self.conn.execute("ALTER TABLE user_sleeper_profiles_shared RENAME TO user_sleeper_profiles")
+            self.conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_sleeper_profiles_sleeper_user
+                    ON user_sleeper_profiles(sleeper_user_id)
+                """
+            )
+        finally:
+            self.conn.execute("PRAGMA legacy_alter_table=OFF")
 
     def _upgrade_sleeper_franchise_columns(self) -> None:
         """Idempotent column adds for Sleeper franchise tracking on user_leagues."""
@@ -3881,9 +3932,13 @@ class FFPyDatabase:
         return dict(row) if row else None
 
     def get_sleeper_profile_by_sleeper_user_id(self, sleeper_user_id: str) -> dict | None:
-        """Return a profile row by Sleeper user id (for uniqueness checks)."""
+        """Return one profile row for a Sleeper user id, if any.
+
+        Multiple app users may share the same Sleeper account; this returns an
+        arbitrary matching row (useful for existence checks / debugging).
+        """
         cursor = self.conn.execute(
-            "SELECT * FROM user_sleeper_profiles WHERE sleeper_user_id = ?",
+            "SELECT * FROM user_sleeper_profiles WHERE sleeper_user_id = ? LIMIT 1",
             (sleeper_user_id,),
         )
         row = cursor.fetchone()
@@ -3963,3 +4018,275 @@ class FFPyDatabase:
             (franchise_id,),
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    # ==================== ROOKIE INTEL ====================
+
+    def upsert_rookie_watchlist(self, entry: dict) -> dict:
+        """Insert or update a rookie watchlist row."""
+        self.conn.execute(
+            """
+            INSERT INTO rookie_watchlist (
+                season, player_name, position, rank_in_position,
+                adp, draft_round, draft_pick, team, tier, summary, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(season, player_name) DO UPDATE SET
+                position = excluded.position,
+                rank_in_position = excluded.rank_in_position,
+                adp = excluded.adp,
+                draft_round = excluded.draft_round,
+                draft_pick = excluded.draft_pick,
+                team = excluded.team,
+                tier = excluded.tier,
+                summary = excluded.summary,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                int(entry["season"]),
+                entry["player_name"],
+                entry["position"],
+                int(entry.get("rank_in_position", 1)),
+                entry.get("adp"),
+                entry.get("draft_round"),
+                entry.get("draft_pick"),
+                entry.get("team"),
+                entry.get("tier", "starter"),
+                entry.get("summary"),
+            ),
+        )
+        self.conn.commit()
+        row = self._get_rookie_watchlist_row(int(entry["season"]), entry["player_name"])
+        assert row is not None
+        return row
+
+    def _get_rookie_watchlist_row(self, season: int, player_name: str) -> dict | None:
+        cursor = self.conn.execute(
+            "SELECT * FROM rookie_watchlist WHERE season = ? AND player_name = ?",
+            (season, player_name),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_rookie_watchlist(
+        self,
+        season: int,
+        *,
+        position: str | None = None,
+    ) -> list[dict]:
+        """Return watchlist entries ordered by position and rank."""
+        if position:
+            cursor = self.conn.execute(
+                """
+                SELECT * FROM rookie_watchlist
+                WHERE season = ? AND position = ?
+                ORDER BY rank_in_position, player_name
+                """,
+                (season, position),
+            )
+        else:
+            cursor = self.conn.execute(
+                """
+                SELECT * FROM rookie_watchlist
+                WHERE season = ?
+                ORDER BY position, rank_in_position, player_name
+                """,
+                (season,),
+            )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def add_rookie_content(self, item: dict) -> dict:
+        """Insert a rookie content item (default status draft)."""
+        tags = item.get("tags")
+        if isinstance(tags, list):
+            tags = json.dumps(tags)
+        cursor = self.conn.execute(
+            """
+            INSERT INTO rookie_content_items (
+                season, player_name, content_type, title, url, source, author,
+                published_at, summary, body_excerpt, sentiment, tags, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(item["season"]),
+                item["player_name"],
+                item["content_type"],
+                item["title"],
+                item.get("url"),
+                item.get("source"),
+                item.get("author"),
+                item.get("published_at"),
+                item.get("summary"),
+                item.get("body_excerpt"),
+                item.get("sentiment", "neutral"),
+                tags,
+                item.get("status", "draft"),
+            ),
+        )
+        self.conn.commit()
+        content_id = int(cursor.lastrowid)
+        return self.get_rookie_content(content_id)
+
+    def get_rookie_content(self, content_id: int) -> dict | None:
+        cursor = self.conn.execute(
+            "SELECT * FROM rookie_content_items WHERE content_id = ?",
+            (content_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        if out.get("tags"):
+            try:
+                out["tags"] = json.loads(out["tags"])
+            except json.JSONDecodeError:
+                pass
+        return out
+
+    def list_rookie_content(
+        self,
+        player_name: str,
+        season: int,
+        *,
+        status: str = "published",
+    ) -> list[dict]:
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM rookie_content_items
+            WHERE season = ? AND player_name = ? AND status = ?
+            ORDER BY published_at DESC, fetched_at DESC
+            """,
+            (season, player_name, status),
+        )
+        rows = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            if item.get("tags"):
+                try:
+                    item["tags"] = json.loads(item["tags"])
+                except json.JSONDecodeError:
+                    pass
+            rows.append(item)
+        return rows
+
+    def list_review_queue(self, season: int) -> list[dict]:
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM rookie_content_items
+            WHERE season = ? AND status = 'draft'
+            ORDER BY fetched_at DESC
+            """,
+            (season,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def update_rookie_content(self, content_id: int, patch: dict) -> dict | None:
+        allowed = {
+            "title",
+            "url",
+            "source",
+            "author",
+            "published_at",
+            "summary",
+            "body_excerpt",
+            "sentiment",
+            "tags",
+            "status",
+            "content_type",
+        }
+        fields = []
+        values: list[Any] = []
+        for key, value in patch.items():
+            if key not in allowed:
+                continue
+            if key == "tags" and isinstance(value, list):
+                value = json.dumps(value)
+            fields.append(f"{key} = ?")
+            values.append(value)
+        if not fields:
+            return self.get_rookie_content(content_id)
+        values.append(content_id)
+        self.conn.execute(
+            f"UPDATE rookie_content_items SET {', '.join(fields)} WHERE content_id = ?",
+            values,
+        )
+        self.conn.commit()
+        return self.get_rookie_content(content_id)
+
+    def publish_rookie_content(self, content_id: int) -> dict | None:
+        return self.update_rookie_content(content_id, {"status": "published"})
+
+    def reject_rookie_content(self, content_id: int) -> dict | None:
+        return self.update_rookie_content(content_id, {"status": "archived"})
+
+    def add_rookie_expert_signal(self, signal: dict) -> dict:
+        value_json = signal.get("value_json", {})
+        if not isinstance(value_json, str):
+            value_json = json.dumps(value_json)
+        cursor = self.conn.execute(
+            """
+            INSERT INTO rookie_expert_signals (
+                season, player_name, content_id, expert_name, outlet,
+                signal_type, value_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(signal["season"]),
+                signal["player_name"],
+                signal.get("content_id"),
+                signal.get("expert_name"),
+                signal.get("outlet"),
+                signal["signal_type"],
+                value_json,
+            ),
+        )
+        self.conn.commit()
+        signal_id = int(cursor.lastrowid)
+        return self.get_rookie_expert_signal(signal_id)
+
+    def get_rookie_expert_signal(self, signal_id: int) -> dict | None:
+        cursor = self.conn.execute(
+            "SELECT * FROM rookie_expert_signals WHERE signal_id = ?",
+            (signal_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        try:
+            out["value_json"] = json.loads(out["value_json"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return out
+
+    def list_rookie_expert_signals(
+        self,
+        player_name: str,
+        season: int,
+    ) -> list[dict]:
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM rookie_expert_signals
+            WHERE season = ? AND player_name = ?
+            ORDER BY created_at DESC
+            """,
+            (season, player_name),
+        )
+        rows = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            try:
+                item["value_json"] = json.loads(item["value_json"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+            rows.append(item)
+        return rows
+
+    def get_rookie_profile(self, player_name: str, season: int) -> dict | None:
+        """Watchlist row plus published content and expert signals."""
+        watch = self._get_rookie_watchlist_row(season, player_name)
+        if watch is None:
+            return None
+        return {
+            **watch,
+            "content": self.list_rookie_content(player_name, season, status="published"),
+            "signals": self.list_rookie_expert_signals(player_name, season),
+        }

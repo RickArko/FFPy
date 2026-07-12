@@ -72,9 +72,7 @@ def test_link_and_get_profile(client: TestClient, auth_secret: str, monkeypatch:
     assert res2.json()["profile"]["sleeper_username"] == "macker1477"
 
 
-def test_duplicate_sleeper_user_rejected(
-    client: TestClient, auth_secret: str, monkeypatch: pytest.MonkeyPatch
-):
+def test_shared_sleeper_user_allowed(client: TestClient, auth_secret: str, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "ffpy.sleeper_web.profile.SleeperIntegration.get_user",
         lambda username: {"user_id": "uid_shared", "display_name": username},
@@ -86,8 +84,13 @@ def test_duplicate_sleeper_user_rejected(
         == 200
     )
     res = client.put("/api/profile/sleeper", json={"username": "macker1477"}, headers=headers_b)
-    assert res.status_code == 400
-    assert "already linked" in res.json()["detail"]
+    assert res.status_code == 200
+    assert res.json()["profile"]["sleeper_username"] == "macker1477"
+    assert res.json()["profile"]["sleeper_user_id"] == "uid_shared"
+
+    profile_a = client.get("/api/profile/sleeper", headers=headers_a).json()["profile"]
+    profile_b = client.get("/api/profile/sleeper", headers=headers_b).json()["profile"]
+    assert profile_a["sleeper_user_id"] == profile_b["sleeper_user_id"] == "uid_shared"
 
 
 def test_invalid_username_rejected(client: TestClient, auth_secret: str, monkeypatch: pytest.MonkeyPatch):

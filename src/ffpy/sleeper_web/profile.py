@@ -38,9 +38,7 @@ class SleeperProfileService:
         sleeper_user_id = str(sleeper_user.get("user_id") or "")
         if not sleeper_user_id:
             raise ProfileLinkError(f"Sleeper user '{username}' not found")
-        existing = self.db.get_sleeper_profile_by_sleeper_user_id(sleeper_user_id)
-        if existing and existing["user_id"] != user_id:
-            raise ProfileLinkError("This Sleeper account is already linked to another user")
+        # Multiple app users may link the same Sleeper account (shared viewing).
         return self.db.upsert_sleeper_profile(
             user_id,
             sleeper_user_id=sleeper_user_id,
