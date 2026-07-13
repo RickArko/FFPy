@@ -204,6 +204,32 @@ class EnhancedProjectionModel:
 
         return pd.DataFrame(rows)
 
+    def project_player(
+        self,
+        player_name: str,
+        season: int,
+        target_week: int,
+        lookback_weeks: int = 4,
+        recent_weight: float = 0.6,
+    ) -> Optional[dict]:
+        """Generate an enhanced projection for a single player."""
+        baseline = self._baseline_model.project_player(
+            player_name=player_name,
+            season=season,
+            target_week=target_week,
+            lookback_weeks=lookback_weeks,
+            recent_weight=recent_weight,
+        )
+        if not baseline:
+            return None
+        return self._project_player(
+            player_name=player_name,
+            season=season,
+            target_week=target_week,
+            baseline_row=pd.Series(baseline),
+            lookback_weeks=lookback_weeks,
+        )
+
     def _project_player(
         self,
         player_name: str,
@@ -300,7 +326,9 @@ class EnhancedProjectionModel:
         if not depth.empty:
             row = depth[depth["player_name"] == player_name]
             if not row.empty:
-                features.depth_spot = int(row.iloc[0]["depth_spot"])
+                depth_val = row.iloc[0]["depth_spot"]
+                if depth_val is not None and pd.notna(depth_val):
+                    features.depth_spot = int(depth_val)
 
         # Historical per-game volume
         hist = self.db.get_player_history(player_name, num_weeks=8)
@@ -810,3 +838,57 @@ class HistoricalProjectionModel:
         result["recent_low"] = history["actual_points"].min() if not history.empty else 0
 
         return result
+
+
+def position_fallback_projection(
+    db: FFPyDatabase,
+    position: str,
+    season: int,
+    target_week: int,
+    *,
+    lookback_seasons: int = 3,
+) -> Optional[dict]:
+    """Return a league-average weekly projection for K/DST when player history is missing."""
+    pos = position.upper()
+    if pos in ("DEF", "D/ST"):
+        pos = "DST"
+    if pos not in ("K", "DST"):
+        return None
+
+    frames = []
+    for yr in range(season - lookback_seasons, season):
+        if yr < 2018:
+            continue
+        df = db.get_actual_stats(season=yr, week=target_week)
+        if df.empty:
+            continue
+        sub = df[df["position"].str.upper().isin(["K", "DST", "DEF"])].copy()
+        if pos == "DST":
+            sub = sub[sub["position"].str.upper().isin(["DST", "DEF"])]
+        else:
+            sub = sub[sub["position"].str.upper() == "K"]
+        if not sub.empty:
+            frames.append(sub[["actual_points"]])
+
+    if not frames:
+        default = 7.5 if pos == "K" else 6.0
+        return {
+            "player": f"League avg {pos}",
+            "position": pos,
+            "projected_points": default,
+            "consistency": 4.0 if pos == "K" else 5.0,
+            "week": target_week,
+        }
+
+    import pandas as pd
+
+    combined = pd.concat(frames, ignore_index=True)
+    avg = float(combined["actual_points"].mean())
+    std = float(combined["actual_points"].std(ddof=0)) if len(combined) > 1 else 4.0
+    return {
+        "player": f"League avg {pos}",
+        "position": pos,
+        "projected_points": round(avg, 1),
+        "consistency": round(std, 1),
+        "week": target_week,
+    }

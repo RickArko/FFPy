@@ -108,11 +108,78 @@ class FFPyDatabase:
             "020_cfb_waivers.sql",
             "021_cfb_trades.sql",
             "022_cfb_adp.sql",
+            "023_sleeper_franchises.sql",
+            "024_rookie_intel.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
         self._upgrade_cfb_columns()
+        self._upgrade_sleeper_franchise_columns()
+        self._upgrade_sleeper_profiles_shared_links()
         self.conn.commit()
+
+    def _upgrade_sleeper_profiles_shared_links(self) -> None:
+        """Allow multiple app users to link the same Sleeper account.
+
+        Older installs created ``UNIQUE(sleeper_user_id)``. Rebuild that table
+        without the uniqueness constraint when present.
+        """
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_sleeper_profiles'"
+        ).fetchone()
+        if not row or not row[0]:
+            return
+        table_sql = " ".join(row[0].split())
+        if "sleeper_user_id TEXT NOT NULL UNIQUE" not in table_sql and (
+            "sleeper_user_id TEXT UNIQUE" not in table_sql
+        ):
+            return
+        # Avoid rewriting unrelated views during RENAME (some installs have
+        # views that reference optional tables not created by default).
+        self.conn.execute("PRAGMA legacy_alter_table=ON")
+        try:
+            self.conn.execute(
+                """
+                CREATE TABLE user_sleeper_profiles_shared (
+                    user_id TEXT PRIMARY KEY,
+                    sleeper_user_id TEXT NOT NULL,
+                    sleeper_username TEXT NOT NULL,
+                    linked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            self.conn.execute(
+                """
+                INSERT INTO user_sleeper_profiles_shared
+                    (user_id, sleeper_user_id, sleeper_username, linked_at)
+                SELECT user_id, sleeper_user_id, sleeper_username, linked_at
+                FROM user_sleeper_profiles
+                """
+            )
+            self.conn.execute("DROP TABLE user_sleeper_profiles")
+            self.conn.execute("ALTER TABLE user_sleeper_profiles_shared RENAME TO user_sleeper_profiles")
+            self.conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_sleeper_profiles_sleeper_user
+                    ON user_sleeper_profiles(sleeper_user_id)
+                """
+            )
+        finally:
+            self.conn.execute("PRAGMA legacy_alter_table=OFF")
+
+    def _upgrade_sleeper_franchise_columns(self) -> None:
+        """Idempotent column adds for Sleeper franchise tracking on user_leagues."""
+        alters = [
+            "ALTER TABLE user_leagues ADD COLUMN franchise_id TEXT",
+            "ALTER TABLE user_leagues ADD COLUMN sleeper_league_id TEXT",
+            "ALTER TABLE user_leagues ADD COLUMN previous_league_id TEXT",
+            "ALTER TABLE user_leagues ADD COLUMN status TEXT",
+        ]
+        for stmt in alters:
+            try:
+                self.conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
 
     def _upgrade_cfb_columns(self) -> None:
         """Idempotent column adds for CFB tables upgraded from 015."""
@@ -3608,18 +3675,35 @@ class FFPyDatabase:
 
     # ==================== USER LEAGUES (League Import) ====================
 
-    def store_user_league(self, user_id: str, data: dict) -> str:
+    _LEAGUE_OWNERSHIP_SQL = """
+        (
+            ul.user_id = ?
+            OR EXISTS (
+                SELECT 1 FROM league_franchises lf
+                WHERE lf.franchise_id = ul.franchise_id AND lf.user_id = ?
+            )
+        )
+    """
+
+    def store_user_league(self, user_id: str, data: dict, *, franchise_id: str | None = None) -> str:
         """Store league metadata, teams, and matchups from an import."""
         league = data["league"]
+        resolved_franchise_id = franchise_id or league.get("franchise_id")
         self.conn.execute(
             """
             INSERT INTO user_leagues
                 (league_id, user_id, provider, league_name, season,
-                 scoring_type, roster_size, num_teams, playoff_teams, league_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 scoring_type, roster_size, num_teams, playoff_teams, league_json,
+                 franchise_id, sleeper_league_id, previous_league_id, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(league_id) DO UPDATE SET
+                user_id = excluded.user_id,
                 league_name = excluded.league_name,
                 league_json = excluded.league_json,
+                franchise_id = COALESCE(excluded.franchise_id, user_leagues.franchise_id),
+                sleeper_league_id = COALESCE(excluded.sleeper_league_id, user_leagues.sleeper_league_id),
+                previous_league_id = COALESCE(excluded.previous_league_id, user_leagues.previous_league_id),
+                status = COALESCE(excluded.status, user_leagues.status),
                 refreshed_at = CURRENT_TIMESTAMP
         """,
             (
@@ -3633,6 +3717,10 @@ class FFPyDatabase:
                 league.get("num_teams"),
                 league.get("playoff_teams"),
                 json.dumps(league),
+                resolved_franchise_id,
+                league.get("sleeper_league_id"),
+                league.get("previous_league_id"),
+                league.get("status"),
             ),
         )
         for team in data.get("teams", []):
@@ -3710,8 +3798,11 @@ class FFPyDatabase:
     def get_user_league(self, league_id: str, user_id: str) -> dict | None:
         """Get a single league by ID, verifying user ownership."""
         cursor = self.conn.execute(
-            "SELECT * FROM user_leagues WHERE league_id = ? AND user_id = ?",
-            (league_id, user_id),
+            f"""
+            SELECT ul.* FROM user_leagues ul
+            WHERE ul.league_id = ? AND {self._LEAGUE_OWNERSHIP_SQL}
+            """,
+            (league_id, user_id, user_id),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -3728,13 +3819,13 @@ class FFPyDatabase:
     def get_league_teams(self, league_id: str, user_id: str) -> list[dict]:
         """Get teams for a league, verifying user ownership."""
         cursor = self.conn.execute(
-            """
+            f"""
             SELECT t.* FROM league_teams t
-            JOIN user_leagues l ON t.league_id = l.league_id
-            WHERE t.league_id = ? AND l.user_id = ?
+            JOIN user_leagues ul ON t.league_id = ul.league_id
+            WHERE t.league_id = ? AND {self._LEAGUE_OWNERSHIP_SQL}
             ORDER BY t.rank, t.points_for DESC
         """,
-            (league_id, user_id),
+            (league_id, user_id, user_id),
         )
         return [dict(row) for row in cursor.fetchall()]
 
@@ -3753,13 +3844,13 @@ class FFPyDatabase:
     def get_league_matchups(self, league_id: str, week: int, user_id: str) -> list[dict]:
         """Get matchups for a league/week, verifying user ownership."""
         cursor = self.conn.execute(
-            """
+            f"""
             SELECT m.* FROM league_matchups m
-            JOIN user_leagues l ON m.league_id = l.league_id
-            WHERE m.league_id = ? AND m.week = ? AND l.user_id = ?
+            JOIN user_leagues ul ON m.league_id = ul.league_id
+            WHERE m.league_id = ? AND m.week = ? AND {self._LEAGUE_OWNERSHIP_SQL}
             ORDER BY m.matchup_id
         """,
-            (league_id, week, user_id),
+            (league_id, week, user_id, user_id),
         )
         return [dict(row) for row in cursor.fetchall()]
 
@@ -3778,8 +3869,424 @@ class FFPyDatabase:
     def delete_user_league(self, league_id: str, user_id: str) -> None:
         """Delete a league owned by ``user_id``; teams/matchups cascade."""
         cursor = self.conn.execute(
-            "DELETE FROM user_leagues WHERE league_id = ? AND user_id = ?",
-            (league_id, user_id),
+            """
+            DELETE FROM user_leagues
+            WHERE league_id = ?
+              AND (
+                user_id = ?
+                OR EXISTS (
+                    SELECT 1 FROM league_franchises lf
+                    WHERE lf.franchise_id = user_leagues.franchise_id AND lf.user_id = ?
+                )
+              )
+            """,
+            (league_id, user_id, user_id),
         )
         if cursor.rowcount:
             self.conn.commit()
+
+    def reassign_franchise_leagues(self, user_id: str, franchise_id: str) -> int:
+        """Align imported season rows with the Supabase owner after franchise sync."""
+
+        cursor = self.conn.execute(
+            "UPDATE user_leagues SET user_id = ? WHERE franchise_id = ? AND user_id != ?",
+            (user_id, franchise_id, user_id),
+        )
+        if cursor.rowcount:
+            self.conn.commit()
+        return cursor.rowcount
+
+    # ==================== SLEEPER PROFILES & FRANCHISES ====================
+
+    def upsert_sleeper_profile(
+        self,
+        user_id: str,
+        *,
+        sleeper_user_id: str,
+        sleeper_username: str,
+    ) -> dict:
+        """Link or update the Sleeper profile for a Supabase user."""
+        self.conn.execute(
+            """
+            INSERT INTO user_sleeper_profiles (user_id, sleeper_user_id, sleeper_username, linked_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                sleeper_user_id = excluded.sleeper_user_id,
+                sleeper_username = excluded.sleeper_username,
+                linked_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, sleeper_user_id, sleeper_username),
+        )
+        self.conn.commit()
+        profile = self.get_sleeper_profile(user_id)
+        assert profile is not None
+        return profile
+
+    def get_sleeper_profile(self, user_id: str) -> dict | None:
+        """Return the linked Sleeper profile for a user, if any."""
+        cursor = self.conn.execute(
+            "SELECT * FROM user_sleeper_profiles WHERE user_id = ?",
+            (user_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_sleeper_profile_by_sleeper_user_id(self, sleeper_user_id: str) -> dict | None:
+        """Return one profile row for a Sleeper user id, if any.
+
+        Multiple app users may share the same Sleeper account; this returns an
+        arbitrary matching row (useful for existence checks / debugging).
+        """
+        cursor = self.conn.execute(
+            "SELECT * FROM user_sleeper_profiles WHERE sleeper_user_id = ? LIMIT 1",
+            (sleeper_user_id,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def delete_sleeper_profile(self, user_id: str) -> None:
+        """Remove a user's Sleeper profile link."""
+        self.conn.execute("DELETE FROM user_sleeper_profiles WHERE user_id = ?", (user_id,))
+        self.conn.commit()
+
+    def upsert_franchise(
+        self,
+        franchise_id: str,
+        user_id: str,
+        *,
+        display_name: str,
+        canonical_sleeper_id: str | None = None,
+    ) -> dict:
+        """Create or update a franchise row."""
+        self.conn.execute(
+            """
+            INSERT INTO league_franchises (franchise_id, user_id, display_name, canonical_sleeper_id)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(franchise_id) DO UPDATE SET
+                display_name = excluded.display_name,
+                canonical_sleeper_id = COALESCE(excluded.canonical_sleeper_id, league_franchises.canonical_sleeper_id)
+            """,
+            (franchise_id, user_id, display_name, canonical_sleeper_id),
+        )
+        self.conn.commit()
+        franchise = self.get_franchise(franchise_id, user_id)
+        assert franchise is not None
+        return franchise
+
+    def get_franchise(self, franchise_id: str, user_id: str) -> dict | None:
+        """Fetch a franchise owned by ``user_id``."""
+        cursor = self.conn.execute(
+            "SELECT * FROM league_franchises WHERE franchise_id = ? AND user_id = ?",
+            (franchise_id, user_id),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def list_franchises(self, user_id: str) -> list[dict]:
+        """List franchises with nested season leagues for a user."""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM league_franchises
+            WHERE user_id = ?
+            ORDER BY display_name, created_at DESC
+            """,
+            (user_id,),
+        )
+        franchises = [dict(row) for row in cursor.fetchall()]
+        for franchise in franchises:
+            league_cursor = self.conn.execute(
+                """
+                SELECT league_id, league_name, season, status, imported_at, refreshed_at,
+                       sleeper_league_id, previous_league_id
+                FROM user_leagues
+                WHERE franchise_id = ?
+                ORDER BY season DESC
+                """,
+                (franchise["franchise_id"],),
+            )
+            franchise["seasons"] = [dict(row) for row in league_cursor.fetchall()]
+        return franchises
+
+    def get_franchise_leagues(self, franchise_id: str, user_id: str) -> list[dict]:
+        """Return imported seasons for a franchise."""
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM user_leagues
+            WHERE franchise_id = ?
+            ORDER BY season DESC
+            """,
+            (franchise_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    # ==================== ROOKIE INTEL ====================
+
+    def upsert_rookie_watchlist(self, entry: dict) -> dict:
+        """Insert or update a rookie watchlist row."""
+        self.conn.execute(
+            """
+            INSERT INTO rookie_watchlist (
+                season, player_name, position, rank_in_position,
+                adp, draft_round, draft_pick, team, tier, summary, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(season, player_name) DO UPDATE SET
+                position = excluded.position,
+                rank_in_position = excluded.rank_in_position,
+                adp = excluded.adp,
+                draft_round = excluded.draft_round,
+                draft_pick = excluded.draft_pick,
+                team = excluded.team,
+                tier = excluded.tier,
+                summary = excluded.summary,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                int(entry["season"]),
+                entry["player_name"],
+                entry["position"],
+                int(entry.get("rank_in_position", 1)),
+                entry.get("adp"),
+                entry.get("draft_round"),
+                entry.get("draft_pick"),
+                entry.get("team"),
+                entry.get("tier", "starter"),
+                entry.get("summary"),
+            ),
+        )
+        self.conn.commit()
+        row = self._get_rookie_watchlist_row(int(entry["season"]), entry["player_name"])
+        assert row is not None
+        return row
+
+    def _get_rookie_watchlist_row(self, season: int, player_name: str) -> dict | None:
+        cursor = self.conn.execute(
+            "SELECT * FROM rookie_watchlist WHERE season = ? AND player_name = ?",
+            (season, player_name),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_rookie_watchlist(
+        self,
+        season: int,
+        *,
+        position: str | None = None,
+    ) -> list[dict]:
+        """Return watchlist entries ordered by position and rank."""
+        if position:
+            cursor = self.conn.execute(
+                """
+                SELECT * FROM rookie_watchlist
+                WHERE season = ? AND position = ?
+                ORDER BY rank_in_position, player_name
+                """,
+                (season, position),
+            )
+        else:
+            cursor = self.conn.execute(
+                """
+                SELECT * FROM rookie_watchlist
+                WHERE season = ?
+                ORDER BY position, rank_in_position, player_name
+                """,
+                (season,),
+            )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def add_rookie_content(self, item: dict) -> dict:
+        """Insert a rookie content item (default status draft)."""
+        tags = item.get("tags")
+        if isinstance(tags, list):
+            tags = json.dumps(tags)
+        cursor = self.conn.execute(
+            """
+            INSERT INTO rookie_content_items (
+                season, player_name, content_type, title, url, source, author,
+                published_at, summary, body_excerpt, sentiment, tags, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(item["season"]),
+                item["player_name"],
+                item["content_type"],
+                item["title"],
+                item.get("url"),
+                item.get("source"),
+                item.get("author"),
+                item.get("published_at"),
+                item.get("summary"),
+                item.get("body_excerpt"),
+                item.get("sentiment", "neutral"),
+                tags,
+                item.get("status", "draft"),
+            ),
+        )
+        self.conn.commit()
+        content_id = int(cursor.lastrowid)
+        return self.get_rookie_content(content_id)
+
+    def get_rookie_content(self, content_id: int) -> dict | None:
+        cursor = self.conn.execute(
+            "SELECT * FROM rookie_content_items WHERE content_id = ?",
+            (content_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        if out.get("tags"):
+            try:
+                out["tags"] = json.loads(out["tags"])
+            except json.JSONDecodeError:
+                pass
+        return out
+
+    def list_rookie_content(
+        self,
+        player_name: str,
+        season: int,
+        *,
+        status: str = "published",
+    ) -> list[dict]:
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM rookie_content_items
+            WHERE season = ? AND player_name = ? AND status = ?
+            ORDER BY published_at DESC, fetched_at DESC
+            """,
+            (season, player_name, status),
+        )
+        rows = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            if item.get("tags"):
+                try:
+                    item["tags"] = json.loads(item["tags"])
+                except json.JSONDecodeError:
+                    pass
+            rows.append(item)
+        return rows
+
+    def list_review_queue(self, season: int) -> list[dict]:
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM rookie_content_items
+            WHERE season = ? AND status = 'draft'
+            ORDER BY fetched_at DESC
+            """,
+            (season,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+    def update_rookie_content(self, content_id: int, patch: dict) -> dict | None:
+        allowed = {
+            "title",
+            "url",
+            "source",
+            "author",
+            "published_at",
+            "summary",
+            "body_excerpt",
+            "sentiment",
+            "tags",
+            "status",
+            "content_type",
+        }
+        fields = []
+        values: list[Any] = []
+        for key, value in patch.items():
+            if key not in allowed:
+                continue
+            if key == "tags" and isinstance(value, list):
+                value = json.dumps(value)
+            fields.append(f"{key} = ?")
+            values.append(value)
+        if not fields:
+            return self.get_rookie_content(content_id)
+        values.append(content_id)
+        self.conn.execute(
+            f"UPDATE rookie_content_items SET {', '.join(fields)} WHERE content_id = ?",
+            values,
+        )
+        self.conn.commit()
+        return self.get_rookie_content(content_id)
+
+    def publish_rookie_content(self, content_id: int) -> dict | None:
+        return self.update_rookie_content(content_id, {"status": "published"})
+
+    def reject_rookie_content(self, content_id: int) -> dict | None:
+        return self.update_rookie_content(content_id, {"status": "archived"})
+
+    def add_rookie_expert_signal(self, signal: dict) -> dict:
+        value_json = signal.get("value_json", {})
+        if not isinstance(value_json, str):
+            value_json = json.dumps(value_json)
+        cursor = self.conn.execute(
+            """
+            INSERT INTO rookie_expert_signals (
+                season, player_name, content_id, expert_name, outlet,
+                signal_type, value_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(signal["season"]),
+                signal["player_name"],
+                signal.get("content_id"),
+                signal.get("expert_name"),
+                signal.get("outlet"),
+                signal["signal_type"],
+                value_json,
+            ),
+        )
+        self.conn.commit()
+        signal_id = int(cursor.lastrowid)
+        return self.get_rookie_expert_signal(signal_id)
+
+    def get_rookie_expert_signal(self, signal_id: int) -> dict | None:
+        cursor = self.conn.execute(
+            "SELECT * FROM rookie_expert_signals WHERE signal_id = ?",
+            (signal_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        out = dict(row)
+        try:
+            out["value_json"] = json.loads(out["value_json"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return out
+
+    def list_rookie_expert_signals(
+        self,
+        player_name: str,
+        season: int,
+    ) -> list[dict]:
+        cursor = self.conn.execute(
+            """
+            SELECT * FROM rookie_expert_signals
+            WHERE season = ? AND player_name = ?
+            ORDER BY created_at DESC
+            """,
+            (season, player_name),
+        )
+        rows = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            try:
+                item["value_json"] = json.loads(item["value_json"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+            rows.append(item)
+        return rows
+
+    def get_rookie_profile(self, player_name: str, season: int) -> dict | None:
+        """Watchlist row plus published content and expert signals."""
+        watch = self._get_rookie_watchlist_row(season, player_name)
+        if watch is None:
+            return None
+        return {
+            **watch,
+            "content": self.list_rookie_content(player_name, season, status="published"),
+            "signals": self.list_rookie_expert_signals(player_name, season),
+        }

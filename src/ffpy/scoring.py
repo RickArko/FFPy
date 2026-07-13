@@ -81,6 +81,39 @@ class ScoringConfig:
         )
 
     @classmethod
+    def from_sleeper(cls, scoring_settings: Dict) -> "ScoringConfig":
+        """Build scoring config from Sleeper ``scoring_settings`` dict."""
+        if not scoring_settings:
+            return cls.ppr()
+
+        rec = float(scoring_settings.get("rec") or 0)
+        if rec >= 1.0:
+            base = cls.ppr()
+        elif rec >= 0.5:
+            base = cls.half_ppr()
+        elif rec == 0:
+            base = cls.standard()
+        else:
+            base = cls(name="Custom", reception_points=rec)
+
+        def _yards_per_point(key: str, default: float) -> float:
+            pts = float(scoring_settings.get(key) or 0)
+            return default if pts == 0 else 1.0 / pts
+
+        return cls(
+            name=base.name,
+            passing_yards_per_point=_yards_per_point("pass_yd", base.passing_yards_per_point),
+            passing_td_points=float(scoring_settings.get("pass_td") or base.passing_td_points),
+            interception_points=float(scoring_settings.get("pass_int") or base.interception_points),
+            rushing_yards_per_point=_yards_per_point("rush_yd", base.rushing_yards_per_point),
+            rushing_td_points=float(scoring_settings.get("rush_td") or base.rushing_td_points),
+            receiving_yards_per_point=_yards_per_point("rec_yd", base.receiving_yards_per_point),
+            receiving_td_points=float(scoring_settings.get("rec_td") or base.receiving_td_points),
+            reception_points=rec,
+            fumble_lost_points=float(scoring_settings.get("fum_lost") or base.fumble_lost_points),
+        )
+
+    @classmethod
     def from_dict(cls, config: Dict) -> "ScoringConfig":
         """
         Create ScoringConfig from dictionary.

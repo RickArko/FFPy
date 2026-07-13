@@ -131,18 +131,18 @@ def test_import_round_trip_sleeper(client: TestClient, auth_secret: str, monkeyp
     token = _generate_test_token("user_slp", auth_secret)
 
     monkeypatch.setattr(
-        "ffpy.league_api.SleeperIntegration.get_league",
+        "ffpy.sleeper_import.SleeperIntegration.get_league",
         lambda league_id: {"name": "Test League", "season": 2024, "total_rosters": 10},
     )
     monkeypatch.setattr(
-        "ffpy.league_api.SleeperIntegration.get_league_users",
+        "ffpy.sleeper_import.SleeperIntegration.get_league_users",
         lambda league_id: [
             {"user_id": "o1", "display_name": "owner1", "metadata": {"team_name": "Team A"}},
             {"user_id": "o2", "display_name": "owner2", "metadata": {"team_name": "Team B"}},
         ],
     )
     monkeypatch.setattr(
-        "ffpy.league_api.SleeperIntegration.get_rosters",
+        "ffpy.sleeper_import.SleeperIntegration.get_rosters",
         lambda league_id: [
             {
                 "roster_id": 1,
@@ -159,7 +159,7 @@ def test_import_round_trip_sleeper(client: TestClient, auth_secret: str, monkeyp
         ],
     )
     monkeypatch.setattr(
-        "ffpy.league_api.SleeperIntegration.get_matchups",
+        "ffpy.sleeper_import.SleeperIntegration.get_matchups",
         lambda league_id, week: [{"roster_id": 1, "matchup_id": 2, "points": 100}],
     )
     monkeypatch.setattr(
@@ -250,15 +250,15 @@ def test_sleeper_discover(client: TestClient, monkeypatch: pytest.MonkeyPatch):
 
 def test_import_sleeper_username_visible_when_auth_off(client: TestClient, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
-        "ffpy.league_api.SleeperIntegration.get_league",
+        "ffpy.sleeper_import.SleeperIntegration.get_league",
         lambda league_id: {"name": "Test League", "season": 2024, "total_rosters": 10},
     )
     monkeypatch.setattr(
-        "ffpy.league_api.SleeperIntegration.get_league_users",
+        "ffpy.sleeper_import.SleeperIntegration.get_league_users",
         lambda league_id: [{"user_id": "o1", "display_name": "owner1", "metadata": {"team_name": "Team A"}}],
     )
     monkeypatch.setattr(
-        "ffpy.league_api.SleeperIntegration.get_rosters",
+        "ffpy.sleeper_import.SleeperIntegration.get_rosters",
         lambda league_id: [
             {
                 "roster_id": 1,
@@ -268,7 +268,7 @@ def test_import_sleeper_username_visible_when_auth_off(client: TestClient, monke
             },
         ],
     )
-    monkeypatch.setattr("ffpy.league_api.SleeperIntegration.get_matchups", lambda league_id, week: [])
+    monkeypatch.setattr("ffpy.sleeper_import.SleeperIntegration.get_matchups", lambda league_id, week: [])
     monkeypatch.setattr(
         "ffpy.draft_strategy.load_sleeper_players",
         lambda force=False: {"1234": {"full_name": "Player One", "position": "RB", "team": "KC"}},
