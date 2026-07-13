@@ -56,16 +56,20 @@ class ESPNLeagueIntegration:
         self.swid = swid or os.getenv("ESPN_SWID", "")
         self.espn_s2 = espn_s2 or os.getenv("ESPN_S2", "")
 
-        # Build cookies dict
+        # Build cookies dict (only if at least one cookie is provided).
+        # Sending an empty cookies dict can cause 401 on public leagues.
         self.cookies = {}
-        if self.swid:
+        has_auth = bool(self.swid) and bool(self.espn_s2)
+        if has_auth:
             self.cookies["swid"] = self.swid
-        if self.espn_s2:
             self.cookies["espn_s2"] = self.espn_s2
 
     def _make_request(self, params: Dict[str, Any]) -> Dict:
         """
-        Make authenticated request to ESPN API.
+        Make request to ESPN API.
+
+        For public leagues, no cookies are sent.  For private leagues,
+        SWID and espn_s2 cookies are included automatically.
 
         Args:
             params: Query parameters
@@ -83,7 +87,11 @@ class ESPNLeagueIntegration:
             "Accept": "application/json",
         }
 
-        response = requests.get(url, params=params, headers=headers, cookies=self.cookies, timeout=10)
+        kwargs = {"params": params, "headers": headers, "timeout": 10}
+        if self.cookies:
+            kwargs["cookies"] = self.cookies
+
+        response = requests.get(url, **kwargs)
         response.raise_for_status()
 
         return response.json()
