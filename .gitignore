@@ -32,4 +32,5 @@ data/exports/
 htmlcov/
 .pytest_cache/
 .pre-commit-cache/
+.pre-commit-home/
 .ai/*
