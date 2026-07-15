@@ -56,7 +56,7 @@ class ESPNLeagueIntegration:
         self.swid = swid or os.getenv("ESPN_SWID", "")
         self.espn_s2 = espn_s2 or os.getenv("ESPN_S2", "")
 
-        # Build cookies dict (only if at least one cookie is provided).
+        # Only attach cookies when both SWID and espn_s2 are present.
         # Sending an empty cookies dict can cause 401 on public leagues.
         self.cookies = {}
         has_auth = bool(self.swid) and bool(self.espn_s2)

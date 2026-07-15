@@ -106,6 +106,14 @@ class TestFetchEspnLeague:
             fetch_espn_league("123456", season=2024, interactive=False)
 
     @patch("ffpy.integrations.espn_league.requests.get")
+    def test_non_auth_http_error_is_reraised(self, mock_get):
+        """Non-auth failures should not be treated as a private league."""
+        mock_get.side_effect = [_make_mock_response(500)]
+
+        with pytest.raises(requests.HTTPError, match="500"):
+            fetch_espn_league("123456", season=2024, interactive=False)
+
+    @patch("ffpy.integrations.espn_league.requests.get")
     def test_normalized_data_shape(self, mock_get):
         """Verify the output dict matches DB schema expectations."""
         league_data = {

@@ -6,6 +6,7 @@ import logging
 from typing import List, Optional
 
 import pandas as pd
+import requests
 
 from ffpy.ingest.auth import load_espn_cookies, save_espn_cookies
 from ffpy.integrations.espn_league import ESPNLeagueIntegration
@@ -51,9 +52,12 @@ def fetch_espn_league(
         info = integration.get_league_info()
         teams = integration.get_all_teams()
         all_rosters = integration.get_all_rosters()
-    except Exception:
+    except requests.HTTPError as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status not in (401, 403):
+            raise
         public = False
-        logger.info("League %s is not public (or endpoint requires auth)", league_id)
+        logger.info("League %s requires auth (HTTP %s)", league_id, status)
         info = teams = None
         all_rosters = None
 

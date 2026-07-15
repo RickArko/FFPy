@@ -15,6 +15,8 @@ class TestYahooToken:
         token = {"access_token": "test", "expires_at": 9999999999}
         auth.save_yahoo_token(token)
 
+        assert oct(auth.TOKEN_FILE.stat().st_mode & 0o777) == "0o600"
+
         loaded = auth.load_yahoo_token()
         assert loaded["access_token"] == "test"
 
@@ -71,10 +73,12 @@ class TestEspnCookies:
         assert s2 == "FILE-S2"
 
     def test_save_and_delete(self, tmp_path):
+        auth.TOKEN_DIR = tmp_path
         auth.COOKIE_FILE = tmp_path / "espn_cookies.json"
 
         auth.save_espn_cookies("{SWID}", "S2VAL")
         assert auth.COOKIE_FILE.exists()
+        assert oct(auth.COOKIE_FILE.stat().st_mode & 0o777) == "0o600"
 
         data = json.loads(auth.COOKIE_FILE.read_text())
         assert data["swid"] == "{SWID}"

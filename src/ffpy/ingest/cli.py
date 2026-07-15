@@ -1,15 +1,15 @@
 """ffpy-ingest CLI — ingest league data from ESPN, Yahoo, and Sleeper.
 
 Usage:
-    ffpy-ingest espn <league_id> [--season N] [--json|--csv|--db] [--swid ...] [--s2 ...]
-    ffpy-ingest yahoo <league_id> [--season N] [--json|--csv|--db] [--token ...]
-    ffpy-ingest sleeper <league_id> [--season N] [--json|--csv|--db]
-    ffpy-ingest yahoo auth
-    ffpy-ingest yahoo token --code CODE
-    ffpy-ingest leagues list [--db PATH]
-    ffpy-ingest leagues info <id> [--db PATH]
-    ffpy-ingest roster <league_id> <team_id> [--db PATH] [--json|--csv]
-    ffpy-ingest matchups <league_id> <week> [--db PATH] [--json|--csv]
+    ffpy-ingest espn <league_id> [--season N] [--json|--csv] [--db PATH] [--swid ...] [--s2 ...]
+    ffpy-ingest yahoo <league_id> [--season N] [--json|--csv] [--db PATH] [--token ...]
+    ffpy-ingest sleeper <league_id> [--season N] [--json|--csv] [--db PATH]
+    ffpy-ingest yahoo-auth
+    ffpy-ingest yahoo-token --code CODE
+    ffpy-ingest leagues-list [--json|--csv] [--db PATH]
+    ffpy-ingest leagues-info <id> [--json|--csv] [--db PATH]
+    ffpy-ingest roster <league_id> <team_id> [--json|--csv] [--db PATH]
+    ffpy-ingest matchups <league_id> <week> [--json|--csv] [--db PATH]
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from typing import List, Optional
+import time
+from typing import Any, List, Optional
 
 from ffpy.database import FFPyDatabase
 from ffpy.ingest import auth, espn, output, sleeper, yahoo
@@ -29,7 +30,7 @@ def _get_db(db_path: Optional[str] = None) -> FFPyDatabase:
     return FFPyDatabase(db_path=db_path)
 
 
-def _format_and_exit(data: any, fmt: str) -> None:
+def _format_and_exit(data: Any, fmt: str) -> None:
     output.format_output(data, fmt)
     sys.exit(0)
 
@@ -46,8 +47,8 @@ def cmd_ingest_espn(args: argparse.Namespace) -> None:
         swid=args.swid,
         espn_s2=args.s2,
     )
-    if args.db:
-        output.persist_to_db(data, db_path=args.db)
+    if args.db is not None:
+        output.persist_to_db(data, db_path=args.db or None)
     _format_and_exit(data, args.format)
 
 
@@ -57,8 +58,8 @@ def cmd_ingest_yahoo(args: argparse.Namespace) -> None:
         season=args.season,
         access_token=args.token,
     )
-    if args.db:
-        output.persist_to_db(data, db_path=args.db)
+    if args.db is not None:
+        output.persist_to_db(data, db_path=args.db or None)
     _format_and_exit(data, args.format)
 
 
@@ -67,8 +68,8 @@ def cmd_ingest_sleeper(args: argparse.Namespace) -> None:
         league_id=args.league_id,
         season=args.season,
     )
-    if args.db:
-        output.persist_to_db(data, db_path=args.db)
+    if args.db is not None:
+        output.persist_to_db(data, db_path=args.db or None)
     _format_and_exit(data, args.format)
 
 
@@ -103,9 +104,6 @@ def cmd_yahoo_auth(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     token = integration.exchange_code(code)
-    token["expires_at"] = token.get("expires_in", 3600)
-    import time
-
     token["expires_at"] = time.time() + token.get("expires_in", 3600)
     auth.save_yahoo_token(token)
     print(f"\nToken saved to {auth.TOKEN_FILE}")
@@ -119,8 +117,6 @@ def cmd_yahoo_token(args: argparse.Namespace) -> None:
 
     code = args.code
     token = integration.exchange_code(code)
-    import time
-
     token["expires_at"] = time.time() + token.get("expires_in", 3600)
     auth.save_yahoo_token(token)
     print(f"Token saved to {auth.TOKEN_FILE}")
@@ -132,7 +128,7 @@ def cmd_yahoo_token(args: argparse.Namespace) -> None:
 
 
 def cmd_leagues_list(args: argparse.Namespace) -> None:
-    db = _get_db(args.db)
+    db = _get_db(args.db or None)
     try:
         leagues = db.get_all_leagues()
     finally:
@@ -157,7 +153,7 @@ def cmd_leagues_list(args: argparse.Namespace) -> None:
 
 
 def cmd_leagues_info(args: argparse.Namespace) -> None:
-    db = _get_db(args.db)
+    db = _get_db(args.db or None)
     try:
         league = db.get_league_by_id(args.id)
     finally:
@@ -176,9 +172,8 @@ def cmd_leagues_info(args: argparse.Namespace) -> None:
 
 
 def cmd_roster(args: argparse.Namespace) -> None:
-    db = _get_db(args.db)
+    db = _get_db(args.db or None)
     try:
-        # Try with users from all leagues
         teams = db.get_teams_for_league(args.league_id)
     finally:
         db.close()
@@ -208,7 +203,7 @@ def cmd_roster(args: argparse.Namespace) -> None:
 
 
 def cmd_matchups(args: argparse.Namespace) -> None:
-    db = _get_db(args.db)
+    db = _get_db(args.db or None)
     try:
         matchups = db.get_matchups_for_league(args.league_id, args.week)
     finally:
@@ -237,21 +232,33 @@ def cmd_matchups(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _common_parser() -> argparse.ArgumentParser:
+    """Shared flags that work after any subcommand."""
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--db",
+        nargs="?",
+        const="",
+        default=None,
+        help="Also persist to SQLite (optional path; default: ~/.ffpy/ffpy.db)",
+    )
+    common.add_argument(
+        "--json", action="store_const", dest="format", const="json", default="table", help="Output as JSON"
+    )
+    common.add_argument("--csv", action="store_const", dest="format", const="csv", help="Output as CSV")
+    return common
+
+
 def build_parser() -> argparse.ArgumentParser:
+    common = _common_parser()
     parser = argparse.ArgumentParser(
         prog="ffpy-ingest",
         description="Ingest fantasy league data from ESPN, Yahoo, and Sleeper.",
     )
-    parser.add_argument("--db", default=None, help="SQLite database path (default: ~/.ffpy/ffpy.db)")
-    parser.add_argument(
-        "--json", action="store_const", dest="format", const="json", default="table", help="Output as JSON"
-    )
-    parser.add_argument("--csv", action="store_const", dest="format", const="csv", help="Output as CSV")
-
     sub = parser.add_subparsers(dest="command", required=True)
 
     # --- ingest espn ---
-    ingest_espn = sub.add_parser("espn", help="Ingest ESPN league data")
+    ingest_espn = sub.add_parser("espn", parents=[common], help="Ingest ESPN league data")
     ingest_espn.add_argument("league_id", help="ESPN league ID (from URL)")
     ingest_espn.add_argument("--season", type=int, default=2025, help="Season year (default: 2025)")
     ingest_espn.add_argument("--swid", default=None, help="ESPN SWID cookie (for private leagues)")
@@ -259,14 +266,14 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_espn.set_defaults(func=cmd_ingest_espn)
 
     # --- ingest yahoo ---
-    ingest_yahoo = sub.add_parser("yahoo", help="Ingest Yahoo league data")
+    ingest_yahoo = sub.add_parser("yahoo", parents=[common], help="Ingest Yahoo league data")
     ingest_yahoo.add_argument("league_id", help="Yahoo league key (e.g. 389.l.12345)")
     ingest_yahoo.add_argument("--season", type=int, default=2025, help="Season year (default: 2025)")
     ingest_yahoo.add_argument("--token", default=None, help="Yahoo OAuth access token")
     ingest_yahoo.set_defaults(func=cmd_ingest_yahoo)
 
     # --- ingest sleeper ---
-    ingest_sleeper = sub.add_parser("sleeper", help="Ingest Sleeper league data")
+    ingest_sleeper = sub.add_parser("sleeper", parents=[common], help="Ingest Sleeper league data")
     ingest_sleeper.add_argument("league_id", help="Sleeper league ID")
     ingest_sleeper.add_argument("--season", type=int, default=2025, help="Season year (default: 2025)")
     ingest_sleeper.set_defaults(func=cmd_ingest_sleeper)
@@ -281,24 +288,24 @@ def build_parser() -> argparse.ArgumentParser:
     yahoo_token.set_defaults(func=cmd_yahoo_token)
 
     # --- leagues list ---
-    leagues_list = sub.add_parser("leagues-list", help="List imported leagues from DB")
+    leagues_list = sub.add_parser("leagues-list", parents=[common], help="List imported leagues from DB")
     leagues_list.set_defaults(func=cmd_leagues_list)
 
     # --- leagues info ---
-    leagues_info = sub.add_parser("leagues-info", help="Show imported league details")
+    leagues_info = sub.add_parser("leagues-info", parents=[common], help="Show imported league details")
     leagues_info.add_argument("id", help="League ID (prefixed, e.g. espn:123456)")
     leagues_info.set_defaults(func=cmd_leagues_info)
 
     # --- roster ---
-    roster = sub.add_parser("roster", help="Show team roster from DB")
+    roster = sub.add_parser("roster", parents=[common], help="Show team roster from DB")
     roster.add_argument("league_id", help="League ID (prefixed)")
     roster.add_argument("team_id", help="Team ID (prefixed)")
     roster.set_defaults(func=cmd_roster)
 
     # --- matchups ---
-    matchups = sub.add_parser("matchups", help="Show week matchups from DB")
+    matchups = sub.add_parser("matchups", parents=[common], help="Show week matchups from DB")
     matchups.add_argument("league_id", help="League ID (prefixed)")
-    matchups.add_argument("week", type=int, help="Week number (1-18)")
+    matchups.add_argument("week", type=int, help="Week number (1-17)")
     matchups.set_defaults(func=cmd_matchups)
 
     return parser

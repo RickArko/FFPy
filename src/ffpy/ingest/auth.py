@@ -45,6 +45,7 @@ def save_yahoo_token(token: dict) -> None:
     """Persist Yahoo OAuth token to ~/.ffpy/yahoo_token.json."""
     _ensure_dir()
     TOKEN_FILE.write_text(json.dumps(token, indent=2))
+    TOKEN_FILE.chmod(0o600)
     logger.info("Yahoo token saved to %s", TOKEN_FILE)
 
 
@@ -81,6 +82,7 @@ def save_espn_cookies(swid: str, espn_s2: str) -> None:
     """Persist ESPN cookies to ~/.ffpy/espn_cookies.json."""
     _ensure_dir()
     COOKIE_FILE.write_text(json.dumps({"swid": swid, "espn_s2": espn_s2}, indent=2))
+    COOKIE_FILE.chmod(0o600)
     logger.info("ESPN cookies saved to %s", COOKIE_FILE)
 
 
