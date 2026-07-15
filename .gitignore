@@ -31,4 +31,5 @@ data/exports/
 .coverage.*
 htmlcov/
 .pytest_cache/
+.pre-commit-cache/
 .ai/*
