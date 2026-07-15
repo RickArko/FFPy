@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -154,14 +155,17 @@ def test_normalize_cfb_plays_renames_key_columns():
     assert row["home_team"] == "Alabama"
 
 
-def test_cfb_roster_availability_message_for_unpublished_season():
+@patch("ffpy.cfbverse.get_cfb_roster_seasons", return_value=frozenset({2023, 2024}))
+def test_cfb_roster_availability_message_for_unpublished_season(_mock_seasons):
     message = cfb_roster_availability_message(2025)
     assert message is not None
     assert "2025" in message
     assert "--skip-rosters" in message
+    assert "SEASON=2024" in message
 
 
-def test_cfb_roster_availability_message_for_published_season():
+@patch("ffpy.cfbverse.get_cfb_roster_seasons", return_value=frozenset({2023, 2024}))
+def test_cfb_roster_availability_message_for_published_season(_mock_seasons):
     assert cfb_roster_availability_message(2024) is None
     assert position_from_id("17") == "QB"
     assert position_from_id("45") == "WR"
