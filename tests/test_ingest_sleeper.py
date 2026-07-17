@@ -73,6 +73,8 @@ class TestFetchSleeperLeague:
         assert team_a["name"] == "A-Team"
         assert team_a["owner"] == "Alice"
         assert team_a["wins"] == 5
+        assert team_a["rank"] == 1
+        assert data["teams"][1]["rank"] == 2
         assert len(team_a["roster"]) == 2
         assert team_a["roster"][0]["player"] == "Patrick Mahomes"
 
@@ -157,3 +159,4 @@ class TestFetchSleeperLeague:
         assert data["teams"][0]["name"] == "Alice"
         assert data["teams"][1]["name"] == "Bob"
         assert data["teams"][2]["name"] == "Charlie"
+        assert [t["rank"] for t in data["teams"]] == [1, 2, 3]
