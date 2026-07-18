@@ -64,6 +64,8 @@ def fetch_sleeper_league(league_id: str, season: int = 2025) -> dict:
         )
 
     teams.sort(key=lambda t: (-(t.get("wins") or 0), -(t.get("points_for") or 0)))
+    for idx, team in enumerate(teams, start=1):
+        team["rank"] = idx
 
     matchups: List[dict] = []
     for week in range(1, 18):

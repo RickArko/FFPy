@@ -84,12 +84,14 @@ def fetch_espn_league(
         teams = integration.get_all_teams()
         all_rosters = integration.get_all_rosters()
 
-    # Build matchups (loop weeks 1-17, stop on failure)
+    # Build matchups (loop weeks 1-17; stop on failure or empty future weeks)
     matchups: List[dict] = []
     for week in range(1, 18):
         try:
             week_matchups = integration.get_matchups(week)
         except Exception:
+            break
+        if not week_matchups:
             break
         for m in week_matchups:
             matchups.append(
