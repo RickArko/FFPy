@@ -12,6 +12,7 @@ from ffpy.account_data import (
     delete_feature_artifact,
     expire_feature_artifacts,
     export_user_data,
+    get_feature_artifact,
     list_feature_artifacts,
     purge_user_data,
     save_feature_artifact,
@@ -186,3 +187,125 @@ def test_delete_feature_artifact(db: FFPyDatabase) -> None:
     )
     assert delete_feature_artifact(db, row["artifact_id"], "user-1") is True
     assert delete_feature_artifact(db, row["artifact_id"], "user-1") is False
+
+
+def test_save_feature_artifact_rejects_non_positive_cap(db: FFPyDatabase) -> None:
+    with pytest.raises(ValueError, match="cap must be >= 1"):
+        save_feature_artifact(
+            db,
+            "user-1",
+            feature="trades",
+            request={},
+            result={},
+            cap=0,
+        )
+    with pytest.raises(ValueError, match="cap must be >= 1"):
+        save_feature_artifact(
+            db,
+            "user-1",
+            feature="trades",
+            request={},
+            result={},
+            cap=-1,
+        )
+
+
+def test_get_feature_artifact_hides_expired(db: FFPyDatabase) -> None:
+    row = save_feature_artifact(
+        db,
+        "user-1",
+        feature="draft_help",
+        request={},
+        result={},
+        ttl_days=90,
+    )
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).replace(microsecond=0)
+    past_iso = past.isoformat().replace("+00:00", "Z")
+    db.conn.execute(
+        "UPDATE user_feature_artifacts SET expires_at = ? WHERE artifact_id = ?",
+        (past_iso, row["artifact_id"]),
+    )
+    db.conn.commit()
+
+    assert get_feature_artifact(db, row["artifact_id"], "user-1") is None
+    assert get_feature_artifact(db, row["artifact_id"], "user-1", include_expired=True) is not None
+
+
+def test_save_feature_artifact_expires_stale_rows(db: FFPyDatabase) -> None:
+    row = save_feature_artifact(
+        db,
+        "user-1",
+        feature="draft_help",
+        request={},
+        result={},
+        ttl_days=90,
+    )
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).replace(microsecond=0)
+    past_iso = past.isoformat().replace("+00:00", "Z")
+    db.conn.execute(
+        "UPDATE user_feature_artifacts SET expires_at = ? WHERE artifact_id = ?",
+        (past_iso, row["artifact_id"]),
+    )
+    db.conn.commit()
+
+    save_feature_artifact(
+        db,
+        "user-1",
+        feature="draft_help",
+        request={"n": 2},
+        result={},
+    )
+    remaining = list_feature_artifacts(db, "user-1", include_expired=True)
+    assert len(remaining) == 1
+    assert remaining[0]["request_json"] == {"n": 2}
+
+
+def test_store_user_league_updates_rank_on_refresh(db: FFPyDatabase) -> None:
+    league_id = "sleeper:rank-refresh"
+    payload = {
+        "league": {
+            "league_id": league_id,
+            "provider": "sleeper",
+            "name": "Rank League",
+            "season": 2026,
+            "scoring_type": "ppr",
+            "num_teams": 2,
+        },
+        "teams": [
+            {
+                "team_id": f"{league_id}:1",
+                "name": "A",
+                "owner": "a",
+                "wins": 5,
+                "losses": 1,
+                "points_for": 800,
+                "rank": 1,
+                "roster": [],
+            },
+            {
+                "team_id": f"{league_id}:2",
+                "name": "B",
+                "owner": "b",
+                "wins": 1,
+                "losses": 5,
+                "points_for": 400,
+                "rank": 2,
+                "roster": [],
+            },
+        ],
+        "matchups": [],
+    }
+    db.store_user_league("user-1", payload)
+
+    # Simulate standings flip on re-import.
+    payload["teams"][0]["wins"] = 1
+    payload["teams"][0]["points_for"] = 400
+    payload["teams"][0]["rank"] = 2
+    payload["teams"][1]["wins"] = 5
+    payload["teams"][1]["points_for"] = 800
+    payload["teams"][1]["rank"] = 1
+    db.store_user_league("user-1", payload)
+
+    teams = {t["team_id"]: t for t in db.get_teams_for_league(league_id)}
+    assert teams[f"{league_id}:1"]["rank"] == 2
+    assert teams[f"{league_id}:2"]["rank"] == 1

@@ -135,8 +135,13 @@ def save_feature_artifact(
 
     if not feature.strip():
         raise ValueError("feature is required")
+    if cap < 1:
+        raise ValueError("cap must be >= 1")
     if not _table_exists(db, "user_feature_artifacts"):
         raise RuntimeError("user_feature_artifacts table is missing; run migrations")
+
+    # Opportunistic GC so TTL is enforced without a separate cron job.
+    expire_feature_artifacts(db)
 
     now = _utcnow()
     expires = now + timedelta(days=ttl_days)
@@ -207,15 +212,22 @@ def get_feature_artifact(
     db: FFPyDatabase,
     artifact_id: str,
     user_id: str,
+    *,
+    include_expired: bool = False,
 ) -> dict[str, Any] | None:
     if not _table_exists(db, "user_feature_artifacts"):
         return None
+    clauses = ["artifact_id = ?", "user_id = ?"]
+    params: list[Any] = [artifact_id, user_id]
+    if not include_expired:
+        clauses.append("expires_at > ?")
+        params.append(_iso(_utcnow()))
     cursor = db.conn.execute(
-        """
+        f"""
         SELECT * FROM user_feature_artifacts
-        WHERE artifact_id = ? AND user_id = ?
+        WHERE {" AND ".join(clauses)}
         """,
-        (artifact_id, user_id),
+        params,
     )
     row = cursor.fetchone()
     return _artifact_row(row) if row else None
@@ -255,10 +267,9 @@ def delete_feature_artifact(db: FFPyDatabase, artifact_id: str, user_id: str) ->
         "DELETE FROM user_feature_artifacts WHERE artifact_id = ? AND user_id = ?",
         (artifact_id, user_id),
     )
-    if cur.rowcount:
-        db.conn.commit()
-        return True
-    return False
+    # Always commit: a zero-row DELETE still opens a SQLite write transaction.
+    db.conn.commit()
+    return cur.rowcount > 0
 
 
 def expire_feature_artifacts(db: FFPyDatabase, *, now: datetime | None = None) -> int:

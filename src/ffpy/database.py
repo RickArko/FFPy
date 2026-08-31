@@ -3740,7 +3740,8 @@ class FFPyDatabase:
                     ties = excluded.ties,
                     roster_json = excluded.roster_json,
                     points_for = excluded.points_for,
-                    points_against = excluded.points_against
+                    points_against = excluded.points_against,
+                    rank = excluded.rank
             """,
                 (
                     team["team_id"],
