@@ -110,6 +110,7 @@ class FFPyDatabase:
             "022_cfb_adp.sql",
             "023_sleeper_franchises.sql",
             "024_rookie_intel.sql",
+            "025_user_feature_artifacts.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
@@ -3739,7 +3740,8 @@ class FFPyDatabase:
                     ties = excluded.ties,
                     roster_json = excluded.roster_json,
                     points_for = excluded.points_for,
-                    points_against = excluded.points_against
+                    points_against = excluded.points_against,
+                    rank = excluded.rank
             """,
                 (
                     team["team_id"],
