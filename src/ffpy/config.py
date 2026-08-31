@@ -54,6 +54,9 @@ class Config:
     SUPABASE_BROWSER_KEY = SUPABASE_PUBLISHABLE_KEY or SUPABASE_ANON_KEY
     SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
+    # Master key for provider credential encryption (ESPN/Yahoo). Falls back to
+    # the JWT secret when unset so local HS256 auth works without extra setup.
+    CREDENTIAL_MASTER_KEY = os.getenv("CREDENTIAL_MASTER_KEY", "")
     SUPABASE_JWKS_URL = os.getenv("SUPABASE_JWKS_URL", "")
     SUPABASE_JWT_AUDIENCE = os.getenv("SUPABASE_JWT_AUDIENCE", "authenticated")
     SUPABASE_FETCH_USER_ON_VERIFY = os.getenv("SUPABASE_FETCH_USER_ON_VERIFY", "true").lower() in {

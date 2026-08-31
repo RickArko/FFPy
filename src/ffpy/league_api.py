@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import pandas as pd
 import uvicorn
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -25,10 +24,17 @@ from ffpy.auth import (
 )
 from ffpy.config import Config
 from ffpy.database import FFPyDatabase
-from ffpy.integrations.espn_league import ESPNLeagueIntegration
 from ffpy.integrations.sleeper import SleeperIntegration
-from ffpy.integrations.yahoo import YahooIntegration
 from ffpy.league_crypto import decrypt_credentials, encrypt_credentials
+from ffpy.provider_web import (
+    import_from_espn as _import_from_espn,
+)
+from ffpy.provider_web import (
+    import_from_yahoo as _import_from_yahoo,
+)
+from ffpy.provider_web import (
+    resolve_credential_master_key,
+)
 from ffpy.sleeper_import import (
     DraftHelpRequest,
     run_draft_help,
@@ -39,7 +45,7 @@ from ffpy.sleeper_import import (
 
 logger = logging.getLogger(__name__)
 
-MASTER_KEY = Config.SUPABASE_JWT_SECRET.encode() if Config.SUPABASE_JWT_SECRET else b""
+MASTER_KEY = resolve_credential_master_key()
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -99,155 +105,8 @@ def _require_user(
     return user
 
 
-# ---------------------------------------------------------------------------
-# Import helpers (ESPN/Yahoo only; Sleeper import is in ffpy.sleeper_import)
-# ---------------------------------------------------------------------------
-
-
-def _import_from_espn(league_id: str, season: int, creds: dict) -> dict:
-    integration = ESPNLeagueIntegration(
-        league_id=int(league_id),
-        season=season,
-        swid=creds.get("swid"),
-        espn_s2=creds.get("s2"),
-    )
-    info = integration.get_league_info()
-    teams = integration.get_all_teams()
-
-    # Fetch all rosters in a single ESPN API call (mRoster view returns entire league)
-    all_rosters = integration.get_all_rosters()
-
-    matchups: List[dict] = []
-    for week in range(1, 18):
-        try:
-            week_matchups = integration.get_matchups(week)
-            for m in week_matchups:
-                matchups.append(
-                    {
-                        "week": week,
-                        "home_team_id": f"espn:{league_id}:{m['home_team_id']}",
-                        "away_team_id": f"espn:{league_id}:{m['away_team_id']}",
-                        "home_score": m.get("home_score"),
-                        "away_score": m.get("away_score"),
-                        "is_playoff": 0,
-                        "is_consolation": 0,
-                    }
-                )
-        except Exception:
-            # ESPN returns empty schedule for future weeks; stop when we hit the first failure
-            break
-
-    team_list = []
-    for t in teams:
-        team_id = t["id"]
-        roster = all_rosters.get(team_id, pd.DataFrame())
-        team_list.append(
-            {
-                "team_id": f"espn:{league_id}:{team_id}",
-                "name": t["name"],
-                "owner": t.get("owner", "Unknown"),
-                "wins": t.get("wins", 0),
-                "losses": t.get("losses", 0),
-                "ties": t.get("ties", 0),
-                "points_for": t.get("points_for", 0),
-                "points_against": t.get("points_against", 0),
-                "rank": t.get("rank"),
-                "roster": roster.to_dict(orient="records") if not roster.empty else [],
-            }
-        )
-    return {
-        "league": {
-            "league_id": f"espn:{league_id}",
-            "provider": "espn",
-            "name": info.get("name", "Unknown"),
-            "season": season,
-            "scoring_type": info.get("scoring_type", "custom").lower().replace("-", "_"),
-            "roster_size": info.get("size"),
-            "num_teams": info.get("size"),
-            "playoff_teams": info.get("playoff_teams"),
-        },
-        "teams": team_list,
-        "matchups": matchups,
-    }
-
-
-def _import_from_yahoo(league_id: str, season: int, creds: dict) -> dict:
-    client_id = creds.get("client_id") or os.getenv("YAHOO_CLIENT_ID", "")
-    client_secret = creds.get("client_secret") or os.getenv("YAHOO_CLIENT_SECRET", "")
-    access_token = creds.get("access_token", "")
-    integration = YahooIntegration(
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=creds.get("redirect_uri", "http://localhost:8001"),
-    )
-    meta = integration.get_league_metadata(league_id, access_token)
-    standings = integration.get_standings(league_id, access_token)
-    teams = []
-    for s in standings:
-        team_key = s.get("team_key", "")
-        roster = integration.get_team_roster(team_key, access_token) if team_key else []
-        teams.append(
-            {
-                "team_id": f"yahoo:{league_id}:{team_key}",
-                "name": s.get("name", "Unknown"),
-                "owner": s.get("manager", {}).get("nickname", "Unknown"),
-                "wins": s.get("standings", {}).get("outcome_totals", {}).get("wins", 0),
-                "losses": s.get("standings", {}).get("outcome_totals", {}).get("losses", 0),
-                "ties": s.get("standings", {}).get("outcome_totals", {}).get("ties", 0),
-                "points_for": s.get("standings", {}).get("points_for", 0),
-                "points_against": s.get("standings", {}).get("points_against", 0),
-                "rank": s.get("standings", {}).get("rank"),
-                "roster": roster if isinstance(roster, list) else [],
-            }
-        )
-    matchups: List[dict] = []
-    for week in range(1, 18):
-        try:
-            week_matchups = integration.get_matchups(league_id, week, access_token)
-            for m in week_matchups:
-                teams_in = m.get("teams", {})
-                home = away = None
-                for key, val in teams_in.items():
-                    if not isinstance(val, dict):
-                        continue
-                    t = val.get("team", [])
-                    if isinstance(t, list) and len(t) > 1:
-                        tk = t[0].get("team_key", "")
-                        if home is None:
-                            home = tk
-                        else:
-                            away = tk
-                if home and away:
-                    matchups.append(
-                        {
-                            "week": week,
-                            "home_team_id": f"yahoo:{league_id}:{home}",
-                            "away_team_id": f"yahoo:{league_id}:{away}",
-                            "home_score": None,
-                            "away_score": None,
-                            "is_playoff": 0,
-                            "is_consolation": 0,
-                        }
-                    )
-        except Exception:
-            break
-    return {
-        "league": {
-            "league_id": f"yahoo:{league_id}",
-            "provider": "yahoo",
-            "name": meta.get("name", "Unknown"),
-            "season": season,
-            "scoring_type": "custom",
-            "roster_size": None,
-            "num_teams": meta.get("num_teams"),
-            "playoff_teams": None,
-        },
-        "teams": teams,
-        "matchups": matchups,
-    }
-
-
-# _import_from_sleeper is imported from ffpy.sleeper_import (see module imports).
+# ESPN/Yahoo importers are promoted to ffpy.provider_web (season-qualified ids);
+# Sleeper import lives in ffpy.sleeper_import. All three are imported above.
 
 
 # ---------------------------------------------------------------------------
