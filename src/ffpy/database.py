@@ -110,6 +110,7 @@ class FFPyDatabase:
             "022_cfb_adp.sql",
             "023_sleeper_franchises.sql",
             "024_rookie_intel.sql",
+            "025_user_feature_artifacts.sql",
         ):
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
