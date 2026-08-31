@@ -602,7 +602,7 @@ def test_yahoo_import_creates_franchise(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["league_id"] == "yahoo:449.l.123456:2026"
-    assert body["franchise_id"] == f"franchise:{TEST_USER.user_id}:yahoo:449.l.123456"
+    assert body["franchise_id"] == f"franchise:{TEST_USER.user_id}:yahoo:123456"
     assert body["teams"] == 1
 
     franchise = provider_db.get_franchise(body["franchise_id"], TEST_USER.user_id)
@@ -637,7 +637,7 @@ def test_yahoo_refresh_route_retries_on_401(
     provider_db.store_user_league(
         TEST_USER.user_id,
         seeded,
-        franchise_id=f"franchise:{TEST_USER.user_id}:yahoo:449.l.123456",
+        franchise_id=f"franchise:{TEST_USER.user_id}:yahoo:123456",
     )
 
     calls = {"imports": 0}
@@ -667,3 +667,51 @@ def test_yahoo_refresh_route_retries_on_401(
     cipher = provider_db.get_credential_ciphertext(TEST_USER.user_id, "yahoo")
     creds = decrypt_credentials(cipher, TEST_USER.user_id, b"test-credential-master-key")
     assert creds["access_token"] == "access-2"
+
+
+def test_yahoo_import_groups_seasons_into_one_franchise(
+    client: TestClient,
+    provider_db: FFPyDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same Yahoo league across seasons (449.l.123 vs 423.l.123) -> one franchise."""
+
+    _configure_yahoo(monkeypatch)
+    _store_yahoo_tokens(provider_db, "access-1", "refresh-1")
+
+    def payload(game: str, season: int) -> dict:
+        return {
+            "league": {
+                "league_id": f"yahoo:{game}.l.123456:{season}",
+                "provider": "yahoo",
+                "name": "Contract Yahoo League",
+                "season": season,
+                "sleeper_league_id": f"{game}.l.123456",
+                "scoring_type": "custom",
+                "roster_positions": [],
+                "num_teams": 10,
+            },
+            "teams": [],
+            "matchups": [],
+        }
+
+    monkeypatch.setattr(
+        "ffpy.provider_web.import_from_yahoo", lambda lid, season, creds: payload(lid.split(".")[0], season)
+    )
+
+    first = client.post(
+        "/api/providers/yahoo/import", json={"league_key": "449.l.123456", "season": 2026}, headers=_auth()
+    )
+    second = client.post(
+        "/api/providers/yahoo/import", json={"league_key": "423.l.123456", "season": 2025}, headers=_auth()
+    )
+    assert first.status_code == 200 and second.status_code == 200
+
+    franchise_id = f"franchise:{TEST_USER.user_id}:yahoo:123456"
+    assert first.json()["franchise_id"] == franchise_id
+    assert second.json()["franchise_id"] == franchise_id
+
+    seasons = sorted(
+        s["league_id"] for s in provider_db.get_franchise_leagues(franchise_id, TEST_USER.user_id)
+    )
+    assert seasons == ["yahoo:423.l.123456:2025", "yahoo:449.l.123456:2026"]

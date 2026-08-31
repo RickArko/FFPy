@@ -405,6 +405,17 @@ class YahooImportBody(BaseModel):
     season: int = Field(..., ge=2000, le=2100)
 
 
+def _yahoo_franchise_key(league_key: str) -> str:
+    """Franchise key groups Yahoo seasons like ESPN's per-league-id key.
+
+    Yahoo league keys are season-qualified (``{game_key}.l.{league_id}``); the
+    trailing numeric id is stable across seasons, so 449.l.123 (2026) and
+    423.l.123 (2025) land in one franchise instead of two.
+    """
+
+    return f"yahoo:{league_key.rsplit('.', 1)[-1]}"
+
+
 # ---------------------------------------------------------------------------
 # Mountable router
 # ---------------------------------------------------------------------------
@@ -594,7 +605,7 @@ def register_provider_routes(
             user.user_id,
             "yahoo",
             data,
-            franchise_key=f"yahoo:{league_key}",
+            franchise_key=_yahoo_franchise_key(league_key),
         )
 
     @router.post("/leagues/{league_id}/refresh")
