@@ -21,6 +21,7 @@ def build_dev_token(
     role: str = "authenticated",
     email_confirmed: bool = True,
     ttl_minutes: int = 60,
+    issuer: Optional[str] = None,
 ) -> str:
     """Create a local bearer token compatible with the Supabase verifier."""
 
@@ -28,6 +29,12 @@ def build_dev_token(
         raise ValueError("secret is required")
     if ttl_minutes <= 0:
         raise ValueError("ttl_minutes must be > 0")
+
+    # SupabaseTokenVerifier requires iss={SUPABASE_URL}/auth/v1 whenever
+    # SUPABASE_URL is configured — mirror that here so local tokens verify.
+    resolved_issuer = issuer
+    if resolved_issuer is None and Config.SUPABASE_URL:
+        resolved_issuer = f"{Config.SUPABASE_URL.rstrip('/')}/auth/v1"
 
     now = datetime.now(tz=timezone.utc)
     claims = {
@@ -38,6 +45,8 @@ def build_dev_token(
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=ttl_minutes)).timestamp()),
     }
+    if resolved_issuer:
+        claims["iss"] = resolved_issuer
     if email_confirmed:
         claims["email_confirmed_at"] = now.isoformat()
 
@@ -79,6 +88,11 @@ def main() -> None:
         default=60,
         help="Token lifetime in minutes.",
     )
+    parser.add_argument(
+        "--issuer",
+        default=None,
+        help="iss claim override (defaults to {SUPABASE_URL}/auth/v1 when configured).",
+    )
     confirmed_group = parser.add_mutually_exclusive_group()
     confirmed_group.add_argument(
         "--confirmed",
@@ -103,6 +117,7 @@ def main() -> None:
         role=args.role,
         email_confirmed=not args.unconfirmed,
         ttl_minutes=args.ttl_minutes,
+        issuer=args.issuer,
     )
     print(token)
 
