@@ -57,6 +57,11 @@ class Config:
     # Master key for provider credential encryption (ESPN/Yahoo). Falls back to
     # the JWT secret when unset so local HS256 auth works without extra setup.
     CREDENTIAL_MASTER_KEY = os.getenv("CREDENTIAL_MASTER_KEY", "")
+    # Yahoo OAuth (provider imports). Optional until a Yahoo dev app is registered;
+    # provider routes return 503 "not configured" when these are unset.
+    YAHOO_CLIENT_ID = os.getenv("YAHOO_CLIENT_ID", "")
+    YAHOO_CLIENT_SECRET = os.getenv("YAHOO_CLIENT_SECRET", "")
+    YAHOO_REDIRECT_URI = os.getenv("YAHOO_REDIRECT_URI", "")
     SUPABASE_JWKS_URL = os.getenv("SUPABASE_JWKS_URL", "")
     SUPABASE_JWT_AUDIENCE = os.getenv("SUPABASE_JWT_AUDIENCE", "authenticated")
     SUPABASE_FETCH_USER_ON_VERIFY = os.getenv("SUPABASE_FETCH_USER_ON_VERIFY", "true").lower() in {

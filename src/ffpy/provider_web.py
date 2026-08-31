@@ -8,11 +8,17 @@ standalone FFPy League Manager app.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import logging
 import os
-from typing import Any, Dict, List
+import re
+import time
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from ffpy.auth import AuthenticatedUser
@@ -26,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 ESPN_FRANCHISE_PREFIX = "espn"
 PROVIDER_PATTERN = r"^(espn|yahoo)$"
+YAHOO_LEAGUE_KEY_PATTERN = r"^[a-z0-9]+\.l\.[a-z0-9]+$"
+YAHOO_STATE_TTL_SECONDS = 600
 
 
 def resolve_credential_master_key() -> bytes:
@@ -283,6 +291,121 @@ def _import_with_franchise(
 
 
 # ---------------------------------------------------------------------------
+# Yahoo OAuth (signed-state callback — browser redirects carry no Bearer token)
+# ---------------------------------------------------------------------------
+
+
+def _yahoo_integration() -> YahooIntegration:
+    redirect_uri = Config.YAHOO_REDIRECT_URI or (
+        Config.PUBLIC_APP_URL.rstrip("/") + "/api/providers/yahoo/callback"
+    )
+    return YahooIntegration(
+        client_id=Config.YAHOO_CLIENT_ID,
+        client_secret=Config.YAHOO_CLIENT_SECRET,
+        redirect_uri=redirect_uri,
+    )
+
+
+def _yahoo_configured() -> bool:
+    return bool(Config.YAHOO_CLIENT_ID and Config.YAHOO_CLIENT_SECRET)
+
+
+def sign_oauth_state(user_id: str, ttl_seconds: int = YAHOO_STATE_TTL_SECONDS) -> str:
+    """Sign ``user_id|expiry`` with the credential master key (HMAC-SHA256)."""
+
+    master = resolve_credential_master_key()
+    if not master:
+        raise HTTPException(status_code=500, detail="Credential encryption key not configured")
+    payload = f"{user_id}|{int(time.time()) + ttl_seconds}"
+    mac = hmac.new(master, payload.encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(payload.encode() + b"." + mac).decode().rstrip("=")
+
+
+def verify_oauth_state(state: str) -> Optional[str]:
+    """Return the user_id from a signed state, or None if invalid/expired."""
+
+    if not state:
+        return None
+    try:
+        padded = state + "=" * (-len(state) % 4)
+        raw = base64.urlsafe_b64decode(padded.encode())
+        payload, _, mac = raw.rpartition(b".")
+        if not payload or not mac:
+            return None
+        expected = hmac.new(resolve_credential_master_key(), payload, hashlib.sha256).digest()
+        if not hmac.compare_digest(mac, expected):
+            return None
+        user_id, _, expiry = payload.decode().rpartition("|")
+        if not user_id or not expiry.isdigit() or int(expiry) < time.time():
+            return None
+        return user_id
+    except Exception:
+        return None
+
+
+def _is_token_rejected(exc: Exception) -> bool:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return status == 401
+
+
+def _yahoo_tokens(db: FFPyDatabase, user_id: str, master: bytes) -> dict:
+    creds = _load_credentials(db, user_id, "yahoo", master)
+    if not creds.get("access_token"):
+        raise HTTPException(
+            status_code=400, detail="Stored Yahoo credentials are incomplete — reconnect Yahoo"
+        )
+    return creds
+
+
+def _refresh_yahoo_tokens(db: FFPyDatabase, user_id: str, master: bytes, creds: dict) -> dict:
+    refresh_token = creds.get("refresh_token", "")
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Yahoo session expired — reconnect Yahoo")
+    try:
+        tokens = _yahoo_integration().refresh_access_token(refresh_token)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Yahoo token refresh failed for user=%s", user_id)
+        raise HTTPException(status_code=401, detail="Yahoo session expired — reconnect Yahoo") from exc
+    updated = dict(creds)
+    updated["access_token"] = tokens.get("access_token", creds.get("access_token", ""))
+    if tokens.get("refresh_token"):
+        updated["refresh_token"] = tokens["refresh_token"]
+    if not updated["access_token"]:
+        raise HTTPException(status_code=401, detail="Yahoo session expired — reconnect Yahoo")
+    cipher = encrypt_credentials(updated, user_id, master)
+    db.store_user_credentials(user_id, "yahoo", cipher, "Yahoo OAuth tokens")
+    return updated
+
+
+def _yahoo_import_with_retry(
+    db: FFPyDatabase, user_id: str, master: bytes, league_key: str, season: int
+) -> dict:
+    """Run a Yahoo import, refreshing the stored access token once on 401."""
+
+    creds = _yahoo_tokens(db, user_id, master)
+    try:
+        return import_from_yahoo(league_key, season, creds)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if not _is_token_rejected(exc):
+            raise
+        creds = _refresh_yahoo_tokens(db, user_id, master, creds)
+        try:
+            return import_from_yahoo(league_key, season, creds)
+        except Exception as exc2:
+            logger.exception("Yahoo import failed after token refresh league_key=%s", league_key)
+            raise HTTPException(status_code=401, detail="Yahoo session expired — reconnect Yahoo") from exc2
+
+
+class YahooImportBody(BaseModel):
+    league_key: str = Field(..., min_length=1, max_length=64)
+    season: int = Field(..., ge=2000, le=2100)
+
+
+# ---------------------------------------------------------------------------
 # Mountable router
 # ---------------------------------------------------------------------------
 
@@ -357,6 +480,123 @@ def register_provider_routes(
         )
         return result
 
+    @router.get("/yahoo/authorize")
+    def yahoo_authorize(
+        user: AuthenticatedUser = Depends(get_current_user),
+    ) -> Dict[str, str]:
+        if not _yahoo_configured():
+            raise HTTPException(status_code=503, detail="Yahoo sign-in is not configured yet")
+        url = _yahoo_integration().get_authorization_url(state=sign_oauth_state(user.user_id))
+        return {"url": url}
+
+    @router.get("/yahoo/callback")
+    def yahoo_callback(
+        code: str = "",
+        state: str = "",
+        db: FFPyDatabase = Depends(get_db),
+    ) -> RedirectResponse:
+        """Yahoo redirects the browser here; the signed state identifies the user."""
+
+        dest = Config.PUBLIC_APP_URL.rstrip("/") + "/"
+
+        def _landing(flag: str) -> RedirectResponse:
+            return RedirectResponse(f"{dest}?yahoo={flag}", status_code=302)
+
+        if not code or not state:
+            return _landing("error")
+        user_id = verify_oauth_state(state)
+        if not user_id:
+            logger.warning("Yahoo callback rejected an invalid/expired state")
+            return _landing("error")
+        try:
+            tokens = _yahoo_integration().exchange_code(code)
+        except Exception:
+            logger.exception("Yahoo token exchange failed")
+            return _landing("error")
+        if not tokens.get("access_token"):
+            logger.warning("Yahoo token exchange returned no access token")
+            return _landing("error")
+        master = _require_master_key()
+        creds = {
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens.get("refresh_token", ""),
+        }
+        cipher = encrypt_credentials(creds, user_id, master)
+        db.store_user_credentials(user_id, "yahoo", cipher, "Yahoo OAuth tokens")
+        return _landing("connected")
+
+    @router.get("/yahoo/leagues")
+    def yahoo_leagues(
+        user: AuthenticatedUser = Depends(get_current_user),
+        db: FFPyDatabase = Depends(get_db),
+    ) -> List[dict]:
+        if not _yahoo_configured():
+            raise HTTPException(status_code=503, detail="Yahoo sign-in is not configured yet")
+        master = _require_master_key()
+        creds = _yahoo_tokens(db, user.user_id, master)
+        integration = _yahoo_integration()
+        try:
+            raw = integration.get_user_leagues(creds["access_token"])
+        except Exception as exc:
+            if not _is_token_rejected(exc):
+                logger.exception("Yahoo league discovery failed")
+                raise HTTPException(status_code=502, detail="Could not load Yahoo leagues")
+            creds = _refresh_yahoo_tokens(db, user.user_id, master, creds)
+            try:
+                raw = integration.get_user_leagues(creds["access_token"])
+            except Exception as exc2:
+                logger.exception("Yahoo league discovery failed after token refresh")
+                raise HTTPException(
+                    status_code=401, detail="Yahoo session expired — reconnect Yahoo"
+                ) from exc2
+        leagues: List[dict] = []
+        for lg in raw:
+            key = str(lg.get("league_key") or "")
+            if not key:
+                continue
+            season = lg.get("season")
+            if isinstance(season, str) and season.isdigit():
+                season = int(season)
+            leagues.append(
+                {
+                    "league_key": key,
+                    "name": lg.get("name") or "Yahoo league",
+                    "season": season,
+                    "num_teams": lg.get("num_teams"),
+                }
+            )
+        return leagues
+
+    @router.post("/yahoo/import")
+    def import_yahoo_league(
+        payload: YahooImportBody,
+        user: AuthenticatedUser = Depends(get_current_user),
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        league_key = payload.league_key.strip()
+        if not re.match(YAHOO_LEAGUE_KEY_PATTERN, league_key, re.IGNORECASE):
+            raise HTTPException(
+                status_code=400, detail="Yahoo league key looks like 399.l.123456 (from the league URL)"
+            )
+        master = _require_master_key()
+        try:
+            data = _yahoo_import_with_retry(db, user.user_id, master, league_key, payload.season)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Yahoo import failed league_key=%s season=%s", league_key, payload.season)
+            raise HTTPException(
+                status_code=502,
+                detail="Yahoo import failed. Check the league key and season, then try again.",
+            ) from exc
+        return _import_with_franchise(
+            db,
+            user.user_id,
+            "yahoo",
+            data,
+            franchise_key=f"yahoo:{league_key}",
+        )
+
     @router.post("/leagues/{league_id}/refresh")
     def refresh_provider_league(
         league_id: str,
@@ -386,9 +626,8 @@ def register_provider_routes(
                 ) from exc
         elif provider == "yahoo":
             master = _require_master_key()
-            creds = _load_credentials(db, user.user_id, "yahoo", master)
             try:
-                data = import_from_yahoo(str(raw_id), season, creds)
+                data = _yahoo_import_with_retry(db, user.user_id, master, str(raw_id), season)
             except HTTPException:
                 raise
             except Exception as exc:
@@ -414,8 +653,11 @@ __all__ = [
     "EspnCredentialBody",
     "EspnImportBody",
     "ProviderImportRequest",
+    "YahooImportBody",
     "import_from_espn",
     "import_from_yahoo",
     "register_provider_routes",
     "resolve_credential_master_key",
+    "sign_oauth_state",
+    "verify_oauth_state",
 ]

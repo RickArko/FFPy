@@ -77,7 +77,7 @@ class YahooIntegration:
         resp.raise_for_status()
         return resp.json()
 
-    def get_user_leagues(self, access_token: str, game_key: str = " nfl") -> List[dict]:
+    def get_user_leagues(self, access_token: str, game_key: str = "nfl") -> List[dict]:
         """GET /users;use_login=1/games;game_keys={game_key}/leagues"""
         # Yahoo game key for NFL changes yearly, e.g., 449 for 2024
         data = self._get(f"/users;use_login=1/games;game_keys={game_key}/leagues", access_token)

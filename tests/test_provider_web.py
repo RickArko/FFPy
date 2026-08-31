@@ -343,3 +343,327 @@ def test_import_from_espn_empty_roster_is_list(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("ffpy.provider_web.ESPNLeagueIntegration", _NoRoster)
     data = import_from_espn("123", 2026, {"swid": "the-swid", "s2": "the-s2"})
     assert data["teams"][0]["roster"] == []
+
+
+# ---------------------------------------------------------------------------
+# Yahoo OAuth (signed state, callback, league discovery, import)
+# ---------------------------------------------------------------------------
+
+
+class _FakeYahoo401(Exception):
+    def __init__(self):
+        self.response = type("R", (), {"status_code": 401})()
+
+
+def _configure_yahoo(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ffpy.provider_web.Config.YAHOO_CLIENT_ID", "yahoo-client-id")
+    monkeypatch.setattr("ffpy.provider_web.Config.YAHOO_CLIENT_SECRET", "yahoo-client-secret")
+    monkeypatch.setattr(
+        "ffpy.provider_web.Config.YAHOO_REDIRECT_URI",
+        "http://localhost:8002/api/providers/yahoo/callback",
+    )
+    monkeypatch.setattr("ffpy.provider_web.Config.PUBLIC_APP_URL", "http://localhost:8002")
+
+
+def test_yahoo_authorize_unconfigured_503(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("ffpy.provider_web.Config.YAHOO_CLIENT_ID", "")
+    monkeypatch.setattr("ffpy.provider_web.Config.YAHOO_CLIENT_SECRET", "")
+    resp = client.get("/api/providers/yahoo/authorize", headers=_auth())
+    assert resp.status_code == 503
+    assert "not configured" in resp.json()["detail"]
+
+
+def test_yahoo_authorize_returns_consent_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.parse as urlparse
+
+    _configure_yahoo(monkeypatch)
+    resp = client.get("/api/providers/yahoo/authorize", headers=_auth())
+    assert resp.status_code == 200, resp.text
+    url = resp.json()["url"]
+    assert "request_auth" in url
+    query = urlparse.parse_qs(urlparse.urlparse(url).query)
+    assert query["client_id"] == ["yahoo-client-id"]
+    assert query["state"], "authorize URL must carry a signed state"
+
+
+def test_oauth_state_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ffpy.provider_web.Config.CREDENTIAL_MASTER_KEY", "test-credential-master-key")
+    from ffpy.provider_web import sign_oauth_state, verify_oauth_state
+
+    state = sign_oauth_state("user-abc")
+    assert verify_oauth_state(state) == "user-abc"
+
+
+def test_oauth_state_rejects_tampering(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ffpy.provider_web.Config.CREDENTIAL_MASTER_KEY", "test-credential-master-key")
+    from ffpy.provider_web import sign_oauth_state, verify_oauth_state
+
+    state = sign_oauth_state("user-abc")
+    assert verify_oauth_state(state[:-2] + "AA") is None
+    assert verify_oauth_state("") is None
+
+
+def test_oauth_state_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ffpy.provider_web.Config.CREDENTIAL_MASTER_KEY", "test-credential-master-key")
+    from ffpy.provider_web import sign_oauth_state, verify_oauth_state
+
+    state = sign_oauth_state("user-abc", ttl_seconds=-10)
+    assert verify_oauth_state(state) is None
+
+
+def test_yahoo_callback_stores_tokens(
+    client: TestClient,
+    provider_db: FFPyDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ffpy.league_crypto import decrypt_credentials
+    from ffpy.provider_web import sign_oauth_state
+
+    _configure_yahoo(monkeypatch)
+
+    class _Exchange:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def exchange_code(self, code: str) -> dict:
+            assert code == "the-code"
+            return {"access_token": "access-1", "refresh_token": "refresh-1"}
+
+    monkeypatch.setattr("ffpy.provider_web.YahooIntegration", _Exchange)
+
+    state = sign_oauth_state(TEST_USER.user_id)
+    resp = client.get(f"/api/providers/yahoo/callback?code=the-code&state={state}", follow_redirects=False)
+    assert resp.status_code == 302, resp.text
+    assert "yahoo=connected" in resp.headers["location"]
+
+    cipher = provider_db.get_credential_ciphertext(TEST_USER.user_id, "yahoo")
+    assert cipher, "callback must store encrypted tokens"
+    creds = decrypt_credentials(cipher, TEST_USER.user_id, b"test-credential-master-key")
+    assert creds["access_token"] == "access-1"
+    assert creds["refresh_token"] == "refresh-1"
+
+
+def test_yahoo_callback_rejects_bad_state(
+    client: TestClient, provider_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_yahoo(monkeypatch)
+    resp = client.get("/api/providers/yahoo/callback?code=the-code&state=garbage", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "yahoo=error" in resp.headers["location"]
+    assert provider_db.get_credential_ciphertext(TEST_USER.user_id, "yahoo") is None
+
+
+def _store_yahoo_tokens(provider_db: FFPyDatabase, access: str, refresh: str) -> None:
+    from ffpy.league_crypto import encrypt_credentials
+
+    cipher = encrypt_credentials(
+        {"access_token": access, "refresh_token": refresh},
+        TEST_USER.user_id,
+        b"test-credential-master-key",
+    )
+    provider_db.store_user_credentials(TEST_USER.user_id, "yahoo", cipher, "Yahoo OAuth tokens")
+
+
+def test_yahoo_leagues_requires_connection(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_yahoo(monkeypatch)
+    resp = client.get("/api/providers/yahoo/leagues", headers=_auth())
+    assert resp.status_code == 400
+    assert "No stored credentials" in resp.json()["detail"]
+
+
+def test_yahoo_leagues_refreshes_on_401(
+    client: TestClient,
+    provider_db: FFPyDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ffpy.league_crypto import decrypt_credentials
+
+    _configure_yahoo(monkeypatch)
+    _store_yahoo_tokens(provider_db, "access-1", "refresh-1")
+
+    payload = {
+        "fantasy_content": {
+            "users": {
+                "0": {
+                    "user": {
+                        "games": {
+                            "0": {
+                                "game": {
+                                    "leagues": {
+                                        "0": {
+                                            "league": [
+                                                {
+                                                    "league_key": "449.l.123456",
+                                                    "name": "Contract Yahoo League",
+                                                    "season": "2026",
+                                                    "num_teams": 10,
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    calls = {"leagues": 0, "refresh": 0}
+
+    class _Leagues:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_user_leagues(self, access_token: str, game_key: str = "nfl"):
+            calls["leagues"] += 1
+            if access_token == "access-1":
+                raise _FakeYahoo401()
+            assert access_token == "access-2"
+            return payload["fantasy_content"]["users"]["0"]["user"]["games"]["0"]["game"]["leagues"]["0"][
+                "league"
+            ]
+
+        def refresh_access_token(self, refresh_token: str) -> dict:
+            calls["refresh"] += 1
+            assert refresh_token == "refresh-1"
+            return {"access_token": "access-2", "refresh_token": "refresh-2"}
+
+    monkeypatch.setattr("ffpy.provider_web.YahooIntegration", _Leagues)
+
+    resp = client.get("/api/providers/yahoo/leagues", headers=_auth())
+    assert resp.status_code == 200, resp.text
+    leagues = resp.json()
+    assert leagues == [
+        {
+            "league_key": "449.l.123456",
+            "name": "Contract Yahoo League",
+            "season": 2026,
+            "num_teams": 10,
+        }
+    ]
+    assert calls == {"leagues": 2, "refresh": 1}
+
+    cipher = provider_db.get_credential_ciphertext(TEST_USER.user_id, "yahoo")
+    creds = decrypt_credentials(cipher, TEST_USER.user_id, b"test-credential-master-key")
+    assert creds["access_token"] == "access-2"
+    assert creds["refresh_token"] == "refresh-2"
+
+
+def test_yahoo_import_validates_league_key(
+    client: TestClient, provider_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_yahoo(monkeypatch)
+    _store_yahoo_tokens(provider_db, "access-1", "refresh-1")
+    resp = client.post(
+        "/api/providers/yahoo/import", json={"league_key": "123456", "season": 2026}, headers=_auth()
+    )
+    assert resp.status_code == 400
+    assert "399.l.123456" in resp.json()["detail"]
+
+
+def test_yahoo_import_creates_franchise(
+    client: TestClient,
+    provider_db: FFPyDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_yahoo(monkeypatch)
+    _store_yahoo_tokens(provider_db, "access-1", "refresh-1")
+
+    data = {
+        "league": {
+            "league_id": "yahoo:449.l.123456:2026",
+            "provider": "yahoo",
+            "name": "Contract Yahoo League",
+            "season": 2026,
+            "sleeper_league_id": "449.l.123456",
+            "scoring_type": "custom",
+            "roster_positions": [],
+            "num_teams": 10,
+        },
+        "teams": [
+            {"team_id": "yahoo:449.l.123456:2026:1", "name": "Alpha", "owner": "me", "roster": []},
+        ],
+        "matchups": [],
+    }
+
+    def _import(league_id: str, season: int, creds: dict) -> dict:
+        assert creds["access_token"] == "access-1"
+        return data
+
+    monkeypatch.setattr("ffpy.provider_web.import_from_yahoo", _import)
+
+    resp = client.post(
+        "/api/providers/yahoo/import",
+        json={"league_key": "449.l.123456", "season": 2026},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["league_id"] == "yahoo:449.l.123456:2026"
+    assert body["franchise_id"] == f"franchise:{TEST_USER.user_id}:yahoo:449.l.123456"
+    assert body["teams"] == 1
+
+    franchise = provider_db.get_franchise(body["franchise_id"], TEST_USER.user_id)
+    assert franchise and franchise["display_name"] == "Contract Yahoo League"
+
+
+def test_yahoo_refresh_route_retries_on_401(
+    client: TestClient,
+    provider_db: FFPyDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ffpy.league_crypto import decrypt_credentials
+
+    _configure_yahoo(monkeypatch)
+    _store_yahoo_tokens(provider_db, "access-1", "refresh-1")
+
+    # Seed a stored yahoo league so the refresh route can find it.
+    seeded = {
+        "league": {
+            "league_id": "yahoo:449.l.123456:2026",
+            "provider": "yahoo",
+            "name": "Contract Yahoo League",
+            "season": 2026,
+            "sleeper_league_id": "449.l.123456",
+            "scoring_type": "custom",
+            "roster_positions": [],
+            "num_teams": 10,
+        },
+        "teams": [],
+        "matchups": [],
+    }
+    provider_db.store_user_league(
+        TEST_USER.user_id,
+        seeded,
+        franchise_id=f"franchise:{TEST_USER.user_id}:yahoo:449.l.123456",
+    )
+
+    calls = {"imports": 0}
+
+    class _Refresh:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def refresh_access_token(self, refresh_token: str) -> dict:
+            return {"access_token": "access-2", "refresh_token": "refresh-2"}
+
+    def _import(league_id: str, season: int, creds: dict) -> dict:
+        calls["imports"] += 1
+        if creds["access_token"] == "access-1":
+            raise _FakeYahoo401()
+        assert creds["access_token"] == "access-2"
+        return seeded
+
+    monkeypatch.setattr("ffpy.provider_web.import_from_yahoo", _import)
+    monkeypatch.setattr("ffpy.provider_web.YahooIntegration", _Refresh)
+
+    resp = client.post("/api/providers/leagues/yahoo%3A449.l.123456%3A2026/refresh", headers=_auth())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "refreshed"
+    assert calls["imports"] == 2
+
+    cipher = provider_db.get_credential_ciphertext(TEST_USER.user_id, "yahoo")
+    creds = decrypt_credentials(cipher, TEST_USER.user_id, b"test-credential-master-key")
+    assert creds["access_token"] == "access-2"
