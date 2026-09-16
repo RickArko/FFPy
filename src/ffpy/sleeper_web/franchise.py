@@ -110,15 +110,37 @@ class FranchiseService:
             results.append(franchise)
         return results
 
+    @staticmethod
+    def _is_sleeper_season(league_row: dict) -> bool:
+        """True when the row is a Sleeper import (not ESPN/Yahoo provider seasons)."""
+
+        league_id = str(league_row.get("league_id") or "")
+        provider = str(league_row.get("provider") or "").lower()
+        if provider in {"espn", "yahoo"}:
+            return False
+        # Collision copies are stored as u:{user}:espn:... / u:{user}:yahoo:...
+        if league_id.startswith("u:") and (":espn:" in league_id or ":yahoo:" in league_id):
+            return False
+        return not league_id.startswith(("espn:", "yahoo:"))
+
     def refresh_franchise(self, user_id: str, franchise_id: str, *, current_only: bool = False) -> dict:
-        """Re-import all seasons for a franchise (or current season only)."""
+        """Re-import Sleeper seasons for a franchise (or current season only).
+
+        ESPN/Yahoo seasons co-grouped on a mixed franchise are skipped — those
+        must be refreshed via ``/api/providers/leagues/{id}/refresh``.
+        """
         franchise = self.db.get_franchise(franchise_id, user_id)
         if not franchise:
             raise LookupError("Franchise not found")
         leagues = self.db.get_franchise_leagues(franchise_id, user_id)
         if not leagues:
             raise LookupError("No imported seasons for franchise")
-        targets = leagues[:1] if current_only else leagues
+        sleeper_leagues = [row for row in leagues if self._is_sleeper_season(row)]
+        if not sleeper_leagues:
+            raise LookupError(
+                "No Sleeper seasons on this franchise — refresh ESPN/Yahoo seasons via the provider routes"
+            )
+        targets = sleeper_leagues[:1] if current_only else sleeper_leagues
         refreshed: List[dict] = []
         for league_row in targets:
             sleeper_league_id = (

@@ -399,3 +399,51 @@ def test_delete_user_league_wrong_owner_preserves_data(api_db: FFPyDatabase):
     assert still_owned is not None
     assert still_owned["user_id"] == "owner_a"
     assert teams_after == teams_before
+
+
+def test_refresh_espn_uses_sleeper_league_id_not_season_suffix(
+    client: TestClient, api_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch
+):
+    from ffpy.league_crypto import encrypt_credentials
+
+    league_id = "espn:123:2026"
+    cipher = encrypt_credentials({"swid": "x", "s2": "y"}, "anon", b"super-secret-test-key-with-32-bytes")
+    api_db.store_user_credentials("anon", "espn", cipher, "test")
+    api_db.store_user_league(
+        "anon",
+        {
+            "league": {
+                "league_id": league_id,
+                "provider": "espn",
+                "name": "ESPN Season",
+                "season": 2026,
+                "sleeper_league_id": "123",
+                "scoring_type": "ppr",
+                "num_teams": 1,
+            },
+            "teams": [{"team_id": f"{league_id}:1", "name": "A", "owner": "me", "roster": []}],
+            "matchups": [],
+        },
+    )
+    seen: list[tuple[str, int]] = []
+
+    def fake_espn(raw_id: str, season: int, creds: dict) -> dict:
+        seen.append((raw_id, season))
+        return {
+            "league": {
+                "league_id": league_id,
+                "provider": "espn",
+                "name": "ESPN Season",
+                "season": season,
+                "sleeper_league_id": raw_id,
+                "scoring_type": "ppr",
+                "num_teams": 1,
+            },
+            "teams": [{"team_id": f"{league_id}:1", "name": "A", "owner": "me", "roster": []}],
+            "matchups": [],
+        }
+
+    monkeypatch.setattr("ffpy.league_api._import_from_espn", fake_espn)
+    res = client.post(f"/api/leagues/{league_id}/refresh")
+    assert res.status_code == 200, res.text
+    assert seen == [("123", 2026)]
