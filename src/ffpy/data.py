@@ -1,4 +1,8 @@
-"""Data module for fantasy football projections."""
+"""Streamlit-only helpers for the FFPy lab UI.
+
+Do not import this module from ``ffpy.database`` or other library paths.
+``import ffpy.database`` must not pull Streamlit.
+"""
 
 from typing import List, Optional
 

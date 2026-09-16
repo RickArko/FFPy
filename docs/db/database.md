@@ -2,6 +2,8 @@
 
 Complete guide to the local SQLite fantasy football database — schema, CLI, data feeds, and visualization.
 
+Sports warehouse schema and the projection flywheel now live in sibling `football/nfl-data` (`nfl-db`). `ffpy-db` still migrates ops/Sleeper tables and remains the ingest CLI. Both open `$HOME/.ffpy/ffpy.db` by default.
+
 ---
 
 ## Quick Reference

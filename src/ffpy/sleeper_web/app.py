@@ -28,6 +28,10 @@ from ffpy.sleeper_web.routes import (
 )
 
 logger = logging.getLogger(__name__)
+logger.warning(
+    "ffpy-sleeper is a legacy duplicate of sleeper-brain. "
+    "Production Sleeper UI lives in sleeper-brain; do not add features here."
+)
 
 
 def create_sleeper_app(

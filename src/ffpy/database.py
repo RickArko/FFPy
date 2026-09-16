@@ -86,9 +86,10 @@ class FFPyDatabase:
         not every workflow needs it.
         """
         migrations_dir = Path(__file__).parent / "migrations"
-        for name in (
+        # Sports warehouse (001, 004–013) is owned by nfl-data. Apply from
+        # nfl-data when installed; otherwise use the local copies.
+        sports = (
             "001_initial_schema.sql",
-            "003_backtest_schema.sql",
             "004_advanced_stats.sql",
             "005_ngs.sql",
             "006_injuries.sql",
@@ -99,25 +100,53 @@ class FFPyDatabase:
             "011_game_weather.sql",
             "012_player_rosters.sql",
             "013_offensive_line_stats.sql",
+        )
+        try:
+            from nfl_data.database import MIGRATIONS_DIR as NFL_MIGRATIONS
+            from nfl_data.database import SPORTS_MIGRATIONS
+
+            for name in SPORTS_MIGRATIONS:
+                with open(NFL_MIGRATIONS / name, "r") as f:
+                    self.conn.executescript(f.read())
+        except ImportError:
+            for name in sports:
+                with open(migrations_dir / name, "r") as f:
+                    self.conn.executescript(f.read())
+        ops = (
+            "003_backtest_schema.sql",
             "014_league_import.sql",
-            "015_cfb_schema.sql",
-            "016_cfb_fantasy_schema.sql",
-            "017_cfb_transactions.sql",
-            "018_cfb_league_settings.sql",
-            "019_cfb_draft.sql",
-            "020_cfb_waivers.sql",
-            "021_cfb_trades.sql",
-            "022_cfb_adp.sql",
             "023_sleeper_franchises.sql",
             "024_rookie_intel.sql",
             "025_user_feature_artifacts.sql",
-        ):
+        )
+        for name in ops:
             with open(migrations_dir / name, "r") as f:
                 self.conn.executescript(f.read())
-        self._upgrade_cfb_columns()
+        # S5: do not create CFB tables on new NFL product DBs. Existing files
+        # that already have cfb_games keep getting the CREATE IF NOT EXISTS + upgrades.
+        if self._has_cfb_tables():
+            for name in (
+                "015_cfb_schema.sql",
+                "016_cfb_fantasy_schema.sql",
+                "017_cfb_transactions.sql",
+                "018_cfb_league_settings.sql",
+                "019_cfb_draft.sql",
+                "020_cfb_waivers.sql",
+                "021_cfb_trades.sql",
+                "022_cfb_adp.sql",
+            ):
+                with open(migrations_dir / name, "r") as f:
+                    self.conn.executescript(f.read())
+            self._upgrade_cfb_columns()
         self._upgrade_sleeper_franchise_columns()
         self._upgrade_sleeper_profiles_shared_links()
         self.conn.commit()
+
+    def _has_cfb_tables(self) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'cfb_games'"
+        ).fetchone()
+        return row is not None
 
     def _upgrade_sleeper_profiles_shared_links(self) -> None:
         """Allow multiple app users to link the same Sleeper account.
