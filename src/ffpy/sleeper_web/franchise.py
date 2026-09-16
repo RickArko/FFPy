@@ -118,6 +118,9 @@ class FranchiseService:
         provider = str(league_row.get("provider") or "").lower()
         if provider in {"espn", "yahoo"}:
             return False
+        # Collision copies are stored as u:{user}:espn:... / u:{user}:yahoo:...
+        if league_id.startswith("u:") and (":espn:" in league_id or ":yahoo:" in league_id):
+            return False
         return not league_id.startswith(("espn:", "yahoo:"))
 
     def refresh_franchise(self, user_id: str, franchise_id: str, *, current_only: bool = False) -> dict:

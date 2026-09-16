@@ -137,6 +137,8 @@ def save_feature_artifact(
         raise ValueError("feature is required")
     if cap < 1:
         raise ValueError("cap must be >= 1")
+    if ttl_days < 1:
+        raise ValueError("ttl_days must be >= 1")
     if not _table_exists(db, "user_feature_artifacts"):
         raise RuntimeError("user_feature_artifacts table is missing; run migrations")
 

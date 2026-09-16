@@ -33,6 +33,7 @@ from ffpy.provider_web import (
     import_from_yahoo as _import_from_yahoo,
 )
 from ffpy.provider_web import (
+    provider_native_id,
     resolve_credential_master_key,
 )
 from ffpy.sleeper_import import (
@@ -424,9 +425,7 @@ def create_league_app(
         else:
             creds = {}
 
-        raw_id = league_id
-        if ":" in raw_id:
-            raw_id = raw_id.split(":", 1)[1]
+        raw_id = provider_native_id(league, league_id)
 
         try:
             if provider == "espn":

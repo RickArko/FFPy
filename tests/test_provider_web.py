@@ -11,8 +11,11 @@ from ffpy.database import FFPyDatabase
 from ffpy.provider_web import (
     ESPNLeagueIntegration,
     import_from_espn,
+    import_from_yahoo,
+    provider_native_id,
     register_provider_routes,
     resolve_credential_master_key,
+    strip_stored_league_id,
 )
 
 TEST_USER = AuthenticatedUser(
@@ -399,7 +402,9 @@ def test_oauth_state_rejects_tampering(monkeypatch: pytest.MonkeyPatch) -> None:
     from ffpy.provider_web import sign_oauth_state, verify_oauth_state
 
     state = sign_oauth_state("user-abc")
-    assert verify_oauth_state(state[:-2] + "AA") is None
+    # Flip a payload character so the MAC cannot match (trailing base64 bits can be a no-op).
+    tampered = ("B" if state[0] != "B" else "C") + state[1:]
+    assert verify_oauth_state(tampered) is None
     assert verify_oauth_state("") is None
 
 
@@ -409,6 +414,25 @@ def test_oauth_state_expires(monkeypatch: pytest.MonkeyPatch) -> None:
 
     state = sign_oauth_state("user-abc", ttl_seconds=-10)
     assert verify_oauth_state(state) is None
+
+
+def test_oauth_state_survives_dot_byte_in_mac(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HMAC-SHA256 is arbitrary binary; ~12% of MACs contain 0x2e ('.')."""
+
+    monkeypatch.setattr("ffpy.provider_web.Config.CREDENTIAL_MASTER_KEY", "test-credential-master-key")
+    from ffpy.provider_web import sign_oauth_state, verify_oauth_state
+
+    dotted_mac = b"x" * 15 + b"." + b"y" * 16
+    assert len(dotted_mac) == 32
+    assert b"." in dotted_mac
+
+    class _Fixed:
+        def digest(self) -> bytes:
+            return dotted_mac
+
+    monkeypatch.setattr("ffpy.provider_web.hmac.new", lambda *a, **k: _Fixed())
+    state = sign_oauth_state("user-abc")
+    assert verify_oauth_state(state) == "user-abc"
 
 
 def test_yahoo_callback_stores_tokens(
@@ -715,3 +739,116 @@ def test_yahoo_import_groups_seasons_into_one_franchise(
         s["league_id"] for s in provider_db.get_franchise_leagues(franchise_id, TEST_USER.user_id)
     )
     assert seasons == ["yahoo:423.l.123456:2025", "yahoo:449.l.123456:2026"]
+
+
+def test_import_from_yahoo_reads_rank_from_standings(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _StubYahoo:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_league_metadata(self, league_id: str, access_token: str) -> dict:
+            return {"name": "Yahoo Rank League", "num_teams": 2}
+
+        def get_standings(self, league_id: str, access_token: str) -> list[dict]:
+            return [
+                {
+                    "team_key": "449.l.1.t.1",
+                    "name": "Alpha",
+                    "manager": {"nickname": "a"},
+                    "rank": 99,
+                    "standings": {
+                        "rank": 1,
+                        "outcome_totals": {"wins": 8, "losses": 1, "ties": 0},
+                        "points_for": 1200,
+                        "points_against": 900,
+                    },
+                }
+            ]
+
+        def get_team_roster(self, team_key: str, access_token: str) -> list:
+            return []
+
+        def get_matchups(self, league_id: str, week: int, access_token: str) -> list:
+            raise RuntimeError("no more weeks")
+
+    monkeypatch.setattr("ffpy.provider_web.YahooIntegration", _StubYahoo)
+    data = import_from_yahoo("449.l.1", 2026, {"access_token": "tok"})
+    assert data["teams"][0]["rank"] == 1
+
+
+def test_yahoo_import_post_refresh_outage_is_502(
+    client: TestClient,
+    provider_db: FFPyDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_yahoo(monkeypatch)
+    _store_yahoo_tokens(provider_db, "access-1", "refresh-1")
+
+    class _Refresh:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def refresh_access_token(self, refresh_token: str) -> dict:
+            return {"access_token": "access-2", "refresh_token": "refresh-2"}
+
+    def _import(league_id: str, season: int, creds: dict) -> dict:
+        if creds["access_token"] == "access-1":
+            raise _FakeYahoo401()
+        raise RuntimeError("yahoo 500")
+
+    monkeypatch.setattr("ffpy.provider_web.import_from_yahoo", _import)
+    monkeypatch.setattr("ffpy.provider_web.YahooIntegration", _Refresh)
+
+    resp = client.post(
+        "/api/providers/yahoo/import",
+        json={"league_key": "449.l.123456", "season": 2026},
+        headers=_auth(),
+    )
+    assert resp.status_code == 502
+    assert "session expired" not in resp.json()["detail"]
+
+
+def test_yahoo_leagues_post_refresh_outage_is_502(
+    client: TestClient,
+    provider_db: FFPyDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_yahoo(monkeypatch)
+    _store_yahoo_tokens(provider_db, "access-1", "refresh-1")
+
+    class _Leagues:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def get_user_leagues(self, access_token: str, game_key: str = "nfl"):
+            if access_token == "access-1":
+                raise _FakeYahoo401()
+            raise RuntimeError("yahoo timeout")
+
+        def refresh_access_token(self, refresh_token: str) -> dict:
+            return {"access_token": "access-2", "refresh_token": "refresh-2"}
+
+    monkeypatch.setattr("ffpy.provider_web.YahooIntegration", _Leagues)
+    resp = client.get("/api/providers/yahoo/leagues", headers=_auth())
+    assert resp.status_code == 502
+    assert "Could not load Yahoo leagues" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("stored_id", "expected"),
+    [
+        ("espn:123:2026", "123"),
+        ("yahoo:449.l.123456:2026", "449.l.123456"),
+        ("u:user-b:espn:123:2026", "123"),
+        ("espn:123", "123"),
+        ("sleeper:999:2024", "999"),
+    ],
+)
+def test_strip_stored_league_id(stored_id: str, expected: str) -> None:
+    assert strip_stored_league_id(stored_id) == expected
+
+
+def test_provider_native_id_prefers_sleeper_league_id() -> None:
+    league = {"league_id": "espn:123:2026:extra", "sleeper_league_id": "123"}
+    assert provider_native_id(league, "espn:123:2026") == "123"
+    assert provider_native_id({"league_id": "espn:123:2026"}, "espn:123:2026") == "123"

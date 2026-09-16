@@ -189,6 +189,27 @@ def test_delete_feature_artifact(db: FFPyDatabase) -> None:
     assert delete_feature_artifact(db, row["artifact_id"], "user-1") is False
 
 
+def test_save_feature_artifact_rejects_non_positive_ttl(db: FFPyDatabase) -> None:
+    with pytest.raises(ValueError, match="ttl_days must be >= 1"):
+        save_feature_artifact(
+            db,
+            "user-1",
+            feature="trades",
+            request={},
+            result={},
+            ttl_days=0,
+        )
+    with pytest.raises(ValueError, match="ttl_days must be >= 1"):
+        save_feature_artifact(
+            db,
+            "user-1",
+            feature="trades",
+            request={},
+            result={},
+            ttl_days=-3,
+        )
+
+
 def test_save_feature_artifact_rejects_non_positive_cap(db: FFPyDatabase) -> None:
     with pytest.raises(ValueError, match="cap must be >= 1"):
         save_feature_artifact(
@@ -309,3 +330,54 @@ def test_store_user_league_updates_rank_on_refresh(db: FFPyDatabase) -> None:
     teams = {t["team_id"]: t for t in db.get_teams_for_league(league_id)}
     assert teams[f"{league_id}:1"]["rank"] == 2
     assert teams[f"{league_id}:2"]["rank"] == 1
+
+
+def test_store_user_league_does_not_steal_another_users_row(db: FFPyDatabase) -> None:
+    payload = {
+        "league": {
+            "league_id": "espn:123:2026",
+            "provider": "espn",
+            "name": "Shared ESPN",
+            "season": 2026,
+            "sleeper_league_id": "123",
+            "scoring_type": "ppr",
+            "num_teams": 2,
+        },
+        "teams": [
+            {
+                "team_id": "espn:123:2026:1",
+                "name": "A",
+                "owner": "a",
+                "rank": 1,
+                "roster": [],
+            }
+        ],
+        "matchups": [
+            {
+                "week": 1,
+                "home_team_id": "espn:123:2026:1",
+                "away_team_id": "espn:123:2026:2",
+                "home_score": 10,
+                "away_score": 7,
+            }
+        ],
+    }
+    first_id = db.store_user_league("user-a", payload)
+    assert first_id == "espn:123:2026"
+    assert db.get_user_league("espn:123:2026", "user-a") is not None
+
+    second_id = db.store_user_league("user-b", payload)
+    assert second_id == "u:user-b:espn:123:2026"
+    assert db.get_user_league("espn:123:2026", "user-a")["user_id"] == "user-a"
+    assert db.get_user_league(second_id, "user-b")["user_id"] == "user-b"
+    assert db.get_user_league("espn:123:2026", "user-b") is None
+
+    a_teams = {t["team_id"] for t in db.get_teams_for_league("espn:123:2026")}
+    b_teams = {t["team_id"] for t in db.get_teams_for_league(second_id)}
+    assert a_teams == {"espn:123:2026:1"}
+    assert b_teams == {"u:user-b:espn:123:2026:1"}
+
+    # Refresh by the second user keeps their scoped row, not the first user's.
+    refreshed = db.store_user_league("user-b", payload)
+    assert refreshed == second_id
+    assert db.get_user_league("espn:123:2026", "user-a")["user_id"] == "user-a"

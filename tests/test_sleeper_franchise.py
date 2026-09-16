@@ -226,6 +226,10 @@ def test_is_sleeper_season_skips_provider_rows():
     assert not FranchiseService._is_sleeper_season({"league_id": "espn:123:2026", "provider": "espn"})
     assert not FranchiseService._is_sleeper_season({"league_id": "yahoo:449.l.1:2026", "provider": "yahoo"})
     assert not FranchiseService._is_sleeper_season({"league_id": "espn:1:2026", "provider": ""})
+    assert not FranchiseService._is_sleeper_season(
+        {"league_id": "u:user-b:espn:123:2026", "provider": "espn"}
+    )
+    assert not FranchiseService._is_sleeper_season({"league_id": "u:user-b:espn:123:2026", "provider": ""})
 
 
 def test_refresh_franchise_skips_provider_seasons(sleeper_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch):

@@ -34,6 +34,7 @@ ESPN_FRANCHISE_PREFIX = "espn"
 PROVIDER_PATTERN = r"^(espn|yahoo)$"
 YAHOO_LEAGUE_KEY_PATTERN = r"^[a-z0-9]+\.l\.[a-z0-9]+$"
 YAHOO_STATE_TTL_SECONDS = 600
+_OAUTH_MAC_LEN = 32  # HMAC-SHA256 digest; never split on 0x2e inside the MAC
 
 
 def resolve_credential_master_key() -> bytes:
@@ -164,7 +165,7 @@ def import_from_yahoo(league_id: str, season: int, creds: dict) -> dict:
                 "ties": s.get("standings", {}).get("outcome_totals", {}).get("ties", 0),
                 "points_for": s.get("standings", {}).get("points_for", 0),
                 "points_against": s.get("standings", {}).get("points_against", 0),
-                "rank": s.get("rank"),
+                "rank": s.get("standings", {}).get("rank"),
                 "roster": roster if isinstance(roster, list) else [],
             }
         )
@@ -329,8 +330,15 @@ def verify_oauth_state(state: str) -> Optional[str]:
     try:
         padded = state + "=" * (-len(state) % 4)
         raw = base64.urlsafe_b64decode(padded.encode())
-        payload, _, mac = raw.rpartition(b".")
-        if not payload or not mac:
+        # MAC is a fixed 32-byte digest and may itself contain 0x2e (~12% of
+        # states). Split at the trailing boundary, not the last '.' byte.
+        if len(raw) < _OAUTH_MAC_LEN + 1:
+            return None
+        mac = raw[-_OAUTH_MAC_LEN:]
+        if raw[-(_OAUTH_MAC_LEN + 1) : -_OAUTH_MAC_LEN] != b".":
+            return None
+        payload = raw[: -(_OAUTH_MAC_LEN + 1)]
+        if not payload:
             return None
         expected = hmac.new(resolve_credential_master_key(), payload, hashlib.sha256).digest()
         if not hmac.compare_digest(mac, expected):
@@ -379,14 +387,16 @@ def _refresh_yahoo_tokens(db: FFPyDatabase, user_id: str, master: bytes, creds: 
     return updated
 
 
-def _yahoo_import_with_retry(
-    db: FFPyDatabase, user_id: str, master: bytes, league_key: str, season: int
-) -> dict:
-    """Run a Yahoo import, refreshing the stored access token once on 401."""
+def _yahoo_call_with_retry(db: FFPyDatabase, user_id: str, master: bytes, creds: dict, fn):
+    """Call ``fn(creds)``, refreshing the access token once on 401.
 
-    creds = _yahoo_tokens(db, user_id, master)
+    A failure after a successful refresh is 401 only when Yahoo rejects the
+    new token; operational errors (5xx, timeout) are re-raised for the caller
+    to map to 502.
+    """
+
     try:
-        return import_from_yahoo(league_key, season, creds)
+        return fn(creds)
     except HTTPException:
         raise
     except Exception as exc:
@@ -394,15 +404,61 @@ def _yahoo_import_with_retry(
             raise
         creds = _refresh_yahoo_tokens(db, user_id, master, creds)
         try:
-            return import_from_yahoo(league_key, season, creds)
+            return fn(creds)
         except Exception as exc2:
-            logger.exception("Yahoo import failed after token refresh league_key=%s", league_key)
-            raise HTTPException(status_code=401, detail="Yahoo session expired — reconnect Yahoo") from exc2
+            if _is_token_rejected(exc2):
+                raise HTTPException(
+                    status_code=401, detail="Yahoo session expired — reconnect Yahoo"
+                ) from exc2
+            raise
+
+
+def _yahoo_import_with_retry(
+    db: FFPyDatabase, user_id: str, master: bytes, league_key: str, season: int
+) -> dict:
+    """Run a Yahoo import, refreshing the stored access token once on 401."""
+
+    creds = _yahoo_tokens(db, user_id, master)
+    return _yahoo_call_with_retry(
+        db,
+        user_id,
+        master,
+        creds,
+        lambda c: import_from_yahoo(league_key, season, c),
+    )
 
 
 class YahooImportBody(BaseModel):
     league_key: str = Field(..., min_length=1, max_length=64)
     season: int = Field(..., ge=2000, le=2100)
+
+
+def provider_native_id(league: dict, stored_league_id: str | None = None) -> str:
+    """Return the provider-native league id used for re-import/refresh.
+
+    Stored ids are season-qualified (``espn:123:2026``, ``yahoo:449.l.1:2026``)
+    and collision copies are user-prefixed (``u:{user}:espn:123:2026``). The
+    ESPN/Yahoo clients need the raw provider id, which we persist on
+    ``sleeper_league_id``.
+    """
+
+    stored = league.get("sleeper_league_id")
+    if stored:
+        return str(stored)
+    return strip_stored_league_id(stored_league_id or str(league.get("league_id") or ""))
+
+
+def strip_stored_league_id(stored_id: str) -> str:
+    """Drop user-scope + provider + season wrappers from a storage league id."""
+
+    parts = stored_id.split(":")
+    if len(parts) >= 3 and parts[0] == "u":
+        parts = parts[2:]
+    if len(parts) >= 3 and parts[-1].isdigit() and len(parts[-1]) == 4:
+        return ":".join(parts[1:-1]) or stored_id
+    if len(parts) >= 2:
+        return ":".join(parts[1:])
+    return stored_id
 
 
 def _yahoo_franchise_key(league_key: str) -> str:
@@ -547,19 +603,18 @@ def register_provider_routes(
         creds = _yahoo_tokens(db, user.user_id, master)
         integration = _yahoo_integration()
         try:
-            raw = integration.get_user_leagues(creds["access_token"])
+            raw = _yahoo_call_with_retry(
+                db,
+                user.user_id,
+                master,
+                creds,
+                lambda c: integration.get_user_leagues(c["access_token"]),
+            )
+        except HTTPException:
+            raise
         except Exception as exc:
-            if not _is_token_rejected(exc):
-                logger.exception("Yahoo league discovery failed")
-                raise HTTPException(status_code=502, detail="Could not load Yahoo leagues")
-            creds = _refresh_yahoo_tokens(db, user.user_id, master, creds)
-            try:
-                raw = integration.get_user_leagues(creds["access_token"])
-            except Exception as exc2:
-                logger.exception("Yahoo league discovery failed after token refresh")
-                raise HTTPException(
-                    status_code=401, detail="Yahoo session expired — reconnect Yahoo"
-                ) from exc2
+            logger.exception("Yahoo league discovery failed")
+            raise HTTPException(status_code=502, detail="Could not load Yahoo leagues") from exc
         leagues: List[dict] = []
         for lg in raw:
             key = str(lg.get("league_key") or "")
@@ -621,7 +676,7 @@ def register_provider_routes(
         season = int(league.get("season") or 0)
         if not season:
             raise HTTPException(status_code=400, detail="League row is missing a season")
-        raw_id = league.get("sleeper_league_id") or league_id.split(":", 1)[-1]
+        raw_id = provider_native_id(league, league_id)
         if provider == "espn":
             master = _require_master_key()
             creds = _load_credentials(db, user.user_id, "espn", master)
@@ -667,8 +722,10 @@ __all__ = [
     "YahooImportBody",
     "import_from_espn",
     "import_from_yahoo",
+    "provider_native_id",
     "register_provider_routes",
     "resolve_credential_master_key",
     "sign_oauth_state",
+    "strip_stored_league_id",
     "verify_oauth_state",
 ]
