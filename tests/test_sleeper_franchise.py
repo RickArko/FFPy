@@ -220,6 +220,58 @@ def test_sync_reclaims_leagues_imported_under_sleeper_username(
     assert sleeper_db.get_user_league("sleeper:1312118348556828672", supabase_user) is not None
 
 
+def test_is_sleeper_season_skips_provider_rows():
+    assert FranchiseService._is_sleeper_season({"league_id": "sleeper:1", "provider": "sleeper"})
+    assert FranchiseService._is_sleeper_season({"league_id": "1312", "provider": ""})
+    assert not FranchiseService._is_sleeper_season({"league_id": "espn:123:2026", "provider": "espn"})
+    assert not FranchiseService._is_sleeper_season({"league_id": "yahoo:449.l.1:2026", "provider": "yahoo"})
+    assert not FranchiseService._is_sleeper_season({"league_id": "espn:1:2026", "provider": ""})
+
+
+def test_refresh_franchise_skips_provider_seasons(sleeper_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch):
+    user_id = "user_mixed"
+    franchise_id = f"franchise:{user_id}:mixed"
+    sleeper_db.upsert_sleeper_profile(user_id, sleeper_user_id="uid", sleeper_username="mixed")
+    sleeper_db.upsert_franchise(franchise_id, user_id, display_name="Mixed", canonical_sleeper_id="999")
+    for league in (
+        {
+            "league_id": "sleeper:999:2026",
+            "provider": "sleeper",
+            "name": "Sleeper Season",
+            "season": 2026,
+            "sleeper_league_id": "999",
+            "scoring_type": "ppr",
+            "roster_positions": [],
+            "num_teams": 10,
+            "franchise_id": franchise_id,
+        },
+        {
+            "league_id": "espn:123:2026",
+            "provider": "espn",
+            "name": "ESPN Season",
+            "season": 2026,
+            "sleeper_league_id": "123",
+            "scoring_type": "ppr",
+            "roster_positions": [],
+            "num_teams": 10,
+            "franchise_id": franchise_id,
+        },
+    ):
+        sleeper_db.store_user_league(user_id, {"league": league, "teams": [], "matchups": []})
+
+    imported: list[tuple[str, int]] = []
+
+    def fake_import(user_id_arg, sleeper_league_id, season, franchise_id=None):
+        imported.append((str(sleeper_league_id), int(season)))
+        return f"sleeper:{sleeper_league_id}:{season}"
+
+    service = FranchiseService(sleeper_db)
+    monkeypatch.setattr(service.import_service, "import_league", fake_import)
+    result = service.refresh_franchise(user_id, franchise_id)
+    assert imported == [("999", 2026)]
+    assert result["refreshed"] == [{"league_id": "sleeper:999:2026", "season": 2026}]
+
+
 @pytest.mark.skip(reason="Optional live Sleeper API check")
 def test_franchise_chain_real_sleeper_user(monkeypatch: pytest.MonkeyPatch):
     """Optional live API check using the official Sleeper account."""
