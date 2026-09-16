@@ -18,6 +18,7 @@ _USER_SCOPED_TABLES = (
     "league_franchises",
     "user_sleeper_profiles",
     "user_credentials",
+    "cfb_leagues",
 )
 
 
@@ -82,12 +83,35 @@ def export_user_data(
     if _table_exists(db, "user_feature_artifacts"):
         artifacts = list_feature_artifacts(db, user_id, include_expired=True)
 
+    cfb_out: list[dict[str, Any]] = []
+    if _table_exists(db, "cfb_leagues"):
+        for league in db.list_cfb_leagues(user_id):
+            league_id = league["league_id"]
+            teams = db.get_cfb_league_teams(league_id)
+            matchups = []
+            if _table_exists(db, "cfb_matchups"):
+                matchups = [
+                    _row_to_jsonable(dict(m))
+                    for m in db.conn.execute(
+                        "SELECT * FROM cfb_matchups WHERE league_id = ? ORDER BY season, week, matchup_id",
+                        (league_id,),
+                    ).fetchall()
+                ]
+            cfb_out.append(
+                {
+                    "league": _row_to_jsonable(dict(league)),
+                    "teams": [_row_to_jsonable(dict(t)) for t in teams],
+                    "matchups": matchups,
+                }
+            )
+
     return {
         "exported_at": _iso(_utcnow()),
         "user": {"user_id": user_id, "email": email},
         "sleeper_profile": _row_to_jsonable(profile) if profile else None,
         "franchises": franchise_rows,
         "leagues": leagues_out,
+        "cfb_leagues": cfb_out,
         "feature_artifacts": artifacts,
     }
 
@@ -107,6 +131,10 @@ def purge_user_data(db: FFPyDatabase, user_id: str) -> dict[str, int]:
 
     cur = db.conn.execute("DELETE FROM league_franchises WHERE user_id = ?", (user_id,))
     counts["franchises"] = cur.rowcount
+
+    if _table_exists(db, "cfb_leagues"):
+        cur = db.conn.execute("DELETE FROM cfb_leagues WHERE user_id = ?", (user_id,))
+        counts["cfb_leagues"] = cur.rowcount
 
     cur = db.conn.execute("DELETE FROM user_sleeper_profiles WHERE user_id = ?", (user_id,))
     counts["sleeper_profiles"] = cur.rowcount

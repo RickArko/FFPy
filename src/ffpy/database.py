@@ -28,41 +28,91 @@ def _sqlite_records(df: pd.DataFrame) -> list[tuple[Any, ...]]:
     return [tuple(_sqlite_value(value) for value in row) for row in df.itertuples(index=False, name=None)]
 
 
-def scope_league_payload_for_user(user_id: str, data: dict, existing_owner: str | None) -> dict:
-    """If another user already owns this league_id, rewrite ids to be user-scoped.
+def rewrite_league_storage_ids(data: dict, target_league_id: str) -> dict:
+    """Rewrite league/team/matchup ids so they share ``target_league_id`` as prefix."""
 
-    Provider league ids (``espn:123:2026``) are global to the provider, but
-    ``user_leagues.league_id`` is the primary key. A second importer gets
-    ``u:{user_id}:{original_id}`` so they cannot steal the first user's row.
-    """
-
-    if existing_owner is None or existing_owner == user_id:
-        return data
     league = dict(data["league"])
-    league_id = str(league["league_id"])
-    prefix = f"u:{user_id}:"
-    if league_id.startswith(prefix):
+    source = str(league["league_id"])
+    if source == target_league_id:
         return data
 
-    def _scope_id(value: object) -> str:
+    def _remap(value: object) -> str:
         text = str(value)
-        return text if text.startswith(prefix) else prefix + text
+        if text == source:
+            return target_league_id
+        prefix = source + ":"
+        if text.startswith(prefix):
+            return target_league_id + ":" + text[len(prefix) :]
+        return text
 
-    league["league_id"] = prefix + league_id
+    league["league_id"] = target_league_id
     teams = []
     for team in data.get("teams", []):
         scoped = dict(team)
-        scoped["team_id"] = _scope_id(scoped["team_id"])
+        scoped["team_id"] = _remap(scoped["team_id"])
         teams.append(scoped)
     matchups = []
     for matchup in data.get("matchups", []):
         scoped = dict(matchup)
         if scoped.get("home_team_id"):
-            scoped["home_team_id"] = _scope_id(scoped["home_team_id"])
+            scoped["home_team_id"] = _remap(scoped["home_team_id"])
         if scoped.get("away_team_id"):
-            scoped["away_team_id"] = _scope_id(scoped["away_team_id"])
+            scoped["away_team_id"] = _remap(scoped["away_team_id"])
         matchups.append(scoped)
     return {"league": league, "teams": teams, "matchups": matchups}
+
+
+def resolve_provider_storage_league_id(conn: sqlite3.Connection, user_id: str, data: dict) -> str:
+    """Pick a stable storage id for an ESPN/Yahoo import owned by ``user_id``.
+
+    Reuse this user's existing row (by provider + native id + season, or by
+    canonical/scoped league_id) so a later refresh cannot jump to a newly
+    vacated unscoped id. Otherwise use the canonical id when free, or a
+    ``u:{user}:...`` copy when another user already occupies it.
+    """
+
+    league = data["league"]
+    canonical = str(league["league_id"])
+    prefix = f"u:{user_id}:"
+    scoped = canonical if canonical.startswith(prefix) else prefix + canonical
+    provider = str(league.get("provider") or "").lower()
+    native_id = league.get("sleeper_league_id")
+    season = league.get("season")
+    if native_id is not None and season is not None:
+        row = conn.execute(
+            """
+            SELECT league_id FROM user_leagues
+            WHERE user_id = ? AND provider = ? AND sleeper_league_id = ? AND season = ?
+            """,
+            (user_id, provider, str(native_id), season),
+        ).fetchone()
+        if row:
+            return str(row["league_id"])
+    row = conn.execute(
+        "SELECT league_id FROM user_leagues WHERE user_id = ? AND league_id IN (?, ?)",
+        (user_id, canonical, scoped),
+    ).fetchone()
+    if row:
+        return str(row["league_id"])
+    owner = conn.execute(
+        "SELECT user_id FROM user_leagues WHERE league_id = ?",
+        (canonical,),
+    ).fetchone()
+    if owner and owner["user_id"] != user_id:
+        return scoped
+    return canonical
+
+
+def scope_league_payload_for_user(user_id: str, data: dict, existing_owner: str | None) -> dict:
+    """If another user already owns this league_id, rewrite ids to be user-scoped."""
+
+    if existing_owner is None or existing_owner == user_id:
+        return data
+    league_id = str(data["league"]["league_id"])
+    prefix = f"u:{user_id}:"
+    if league_id.startswith(prefix):
+        return data
+    return rewrite_league_storage_ids(data, prefix + league_id)
 
 
 def _insert_or_ignore_dataframe(
@@ -3726,15 +3776,12 @@ class FFPyDatabase:
     def store_user_league(self, user_id: str, data: dict, *, franchise_id: str | None = None) -> str:
         """Store league metadata, teams, and matchups from an import."""
         provider = str(data["league"].get("provider") or "").lower()
-        existing = self.conn.execute(
-            "SELECT user_id FROM user_leagues WHERE league_id = ?",
-            (data["league"]["league_id"],),
-        ).fetchone()
-        existing_owner = existing["user_id"] if existing else None
-        # ESPN/Yahoo ids are provider-global; a second app user gets a scoped copy.
+        # ESPN/Yahoo ids are provider-global; keep each user's storage id stable
+        # (reuse their existing row, else scope if the canonical id is taken).
         # Sleeper franchise sync may reclaim a row first stored under a username.
         if provider in {"espn", "yahoo"}:
-            data = scope_league_payload_for_user(user_id, data, existing_owner)
+            target_id = resolve_provider_storage_league_id(self.conn, user_id, data)
+            data = rewrite_league_storage_ids(data, target_id)
         league = data["league"]
         if provider in {"espn", "yahoo"}:
             owner_row = self.conn.execute(

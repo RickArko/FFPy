@@ -107,6 +107,7 @@ def test_export_user_data_shape(db: FFPyDatabase) -> None:
     assert len(payload["leagues"][0]["matchups"]) == 1
     assert len(payload["feature_artifacts"]) == 1
     assert payload["feature_artifacts"][0]["feature"] == "draft_help"
+    assert payload["cfb_leagues"] == []
 
 
 def test_purge_user_data_removes_all_scoped_rows(db: FFPyDatabase) -> None:
@@ -120,6 +121,43 @@ def test_purge_user_data_removes_all_scoped_rows(db: FFPyDatabase) -> None:
         league_id=league_id,
     )
     other_league = _seed_user(db, user_id="user-2")
+    db.create_cfb_league(
+        {
+            "league_id": "cfb:user-1",
+            "user_id": "user-1",
+            "name": "Campus",
+            "season": 2026,
+            "allowed_conferences": "[]",
+            "scoring_json": "{}",
+            "roster_slots_json": "{}",
+            "num_teams": 2,
+        }
+    )
+    db.create_cfb_league_team(
+        {
+            "league_team_id": "cfb:user-1:t1",
+            "league_id": "cfb:user-1",
+            "team_name": "Alpha",
+            "owner_name": "me",
+        }
+    )
+    db.create_cfb_league(
+        {
+            "league_id": "cfb:user-2",
+            "user_id": "user-2",
+            "name": "Other Campus",
+            "season": 2026,
+            "allowed_conferences": "[]",
+            "scoring_json": "{}",
+            "roster_slots_json": "{}",
+            "num_teams": 2,
+        }
+    )
+
+    exported = export_user_data(db, "user-1")
+    assert len(exported["cfb_leagues"]) == 1
+    assert exported["cfb_leagues"][0]["league"]["league_id"] == "cfb:user-1"
+    assert len(exported["cfb_leagues"][0]["teams"]) == 1
 
     counts = purge_user_data(db, "user-1")
     assert counts["leagues"] == 1
@@ -127,15 +165,19 @@ def test_purge_user_data_removes_all_scoped_rows(db: FFPyDatabase) -> None:
     assert counts["sleeper_profiles"] == 1
     assert counts["credentials"] == 1
     assert counts["feature_artifacts"] == 1
+    assert counts["cfb_leagues"] == 1
     assert user_scoped_row_counts(db, "user-1") == {
         "user_feature_artifacts": 0,
         "user_leagues": 0,
         "league_franchises": 0,
         "user_sleeper_profiles": 0,
         "user_credentials": 0,
+        "cfb_leagues": 0,
     }
     # Other user's data untouched
     assert db.get_user_league(other_league, "user-2") is not None
+    assert db.get_cfb_league("cfb:user-2") is not None
+    assert db.get_cfb_league("cfb:user-1") is None
 
 
 def test_artifact_cap_keeps_newest(db: FFPyDatabase) -> None:
@@ -381,3 +423,11 @@ def test_store_user_league_does_not_steal_another_users_row(db: FFPyDatabase) ->
     refreshed = db.store_user_league("user-b", payload)
     assert refreshed == second_id
     assert db.get_user_league("espn:123:2026", "user-a")["user_id"] == "user-a"
+
+    # If the first user deletes, B's next refresh must keep the scoped row
+    # instead of claiming the vacated canonical id.
+    db.delete_user_league("espn:123:2026", "user-a")
+    after_delete = db.store_user_league("user-b", payload)
+    assert after_delete == second_id
+    assert db.get_user_league("espn:123:2026", "user-b") is None
+    assert db.get_user_league(second_id, "user-b") is not None

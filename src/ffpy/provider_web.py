@@ -37,6 +37,16 @@ YAHOO_STATE_TTL_SECONDS = 600
 _OAUTH_MAC_LEN = 32  # HMAC-SHA256 digest; never split on 0x2e inside the MAC
 
 
+def _espn_team_ranks(teams: List[dict]) -> Dict[Any, int]:
+    """Derive standings rank from wins, then points for (same as ESPNIntegration)."""
+
+    ordered = sorted(
+        teams,
+        key=lambda t: (-int(t.get("wins") or 0), -float(t.get("points_for") or 0), str(t.get("id"))),
+    )
+    return {t["id"]: index + 1 for index, t in enumerate(ordered)}
+
+
 def resolve_credential_master_key() -> bytes:
     """Master key for credential encryption: CREDENTIAL_MASTER_KEY, else JWT secret.
 
@@ -93,6 +103,7 @@ def import_from_espn(league_id: str, season: int, creds: dict) -> dict:
             # ESPN returns empty schedule for future weeks; stop at the first failure
             break
 
+    ranks = _espn_team_ranks(teams)
     team_list = []
     for t in teams:
         team_id = t["id"]
@@ -107,7 +118,7 @@ def import_from_espn(league_id: str, season: int, creds: dict) -> dict:
                 "ties": t.get("ties", 0),
                 "points_for": t.get("points_for", 0),
                 "points_against": t.get("points_against", 0),
-                "rank": t.get("rank"),
+                "rank": ranks.get(team_id),
                 "roster": roster.to_dict(orient="records") if roster is not None and not roster.empty else [],
             }
         )
@@ -374,8 +385,10 @@ def _refresh_yahoo_tokens(db: FFPyDatabase, user_id: str, master: bytes, creds: 
     except HTTPException:
         raise
     except Exception as exc:
+        if _is_token_rejected(exc):
+            raise HTTPException(status_code=401, detail="Yahoo session expired — reconnect Yahoo") from exc
         logger.warning("Yahoo token refresh failed for user=%s", user_id)
-        raise HTTPException(status_code=401, detail="Yahoo session expired — reconnect Yahoo") from exc
+        raise
     updated = dict(creds)
     updated["access_token"] = tokens.get("access_token", creds.get("access_token", ""))
     if tokens.get("refresh_token"):
@@ -462,14 +475,14 @@ def strip_stored_league_id(stored_id: str) -> str:
 
 
 def _yahoo_franchise_key(league_key: str) -> str:
-    """Franchise key groups Yahoo seasons like ESPN's per-league-id key.
+    """Franchise key is the full Yahoo league key.
 
-    Yahoo league keys are season-qualified (``{game_key}.l.{league_id}``); the
-    trailing numeric id is stable across seasons, so 449.l.123 (2026) and
-    423.l.123 (2025) land in one franchise instead of two.
+    The trailing numeric id is scoped to a season/game key and is not a
+    reliable renewal identifier, so 449.l.123 and 423.l.123 stay distinct
+    until an explicit previous-league mapping exists.
     """
 
-    return f"yahoo:{league_key.rsplit('.', 1)[-1]}"
+    return f"yahoo:{league_key.strip()}"
 
 
 # ---------------------------------------------------------------------------

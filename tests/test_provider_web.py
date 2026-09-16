@@ -311,7 +311,10 @@ class _StubESPN:
         }
 
     def get_all_teams(self):
-        return [{"id": 1, "name": "Stub Team", "owner": "stub", "wins": 1, "losses": 0}]
+        return [
+            {"id": 1, "name": "Stub Team", "owner": "stub", "wins": 1, "losses": 0, "points_for": 100},
+            {"id": 2, "name": "Other Team", "owner": "them", "wins": 0, "losses": 1, "points_for": 80},
+        ]
 
     def get_all_rosters(self):
         import pandas as pd
@@ -332,6 +335,8 @@ def test_import_from_espn_shape(monkeypatch: pytest.MonkeyPatch):
     # D/ST maps to DEF for starter_slots_from_sleeper; BENCH dropped.
     assert data["league"]["roster_positions"] == ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "K", "DEF"]
     assert data["teams"][0]["team_id"] == "espn:123:2026:1"
+    assert data["teams"][0]["rank"] == 1
+    assert data["teams"][1]["rank"] == 2
     assert data["teams"][0]["roster"] == [{"player": "Josh Allen", "position": "QB", "team": "BUF"}]
     assert data["matchups"][0]["home_team_id"] == "espn:123:2026:1"
     assert data["matchups"][0]["away_team_id"] == "espn:123:2026:2"
@@ -626,7 +631,7 @@ def test_yahoo_import_creates_franchise(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["league_id"] == "yahoo:449.l.123456:2026"
-    assert body["franchise_id"] == f"franchise:{TEST_USER.user_id}:yahoo:123456"
+    assert body["franchise_id"] == f"franchise:{TEST_USER.user_id}:yahoo:449.l.123456"
     assert body["teams"] == 1
 
     franchise = provider_db.get_franchise(body["franchise_id"], TEST_USER.user_id)
@@ -661,7 +666,7 @@ def test_yahoo_refresh_route_retries_on_401(
     provider_db.store_user_league(
         TEST_USER.user_id,
         seeded,
-        franchise_id=f"franchise:{TEST_USER.user_id}:yahoo:123456",
+        franchise_id=f"franchise:{TEST_USER.user_id}:yahoo:449.l.123456",
     )
 
     calls = {"imports": 0}
@@ -693,12 +698,12 @@ def test_yahoo_refresh_route_retries_on_401(
     assert creds["access_token"] == "access-2"
 
 
-def test_yahoo_import_groups_seasons_into_one_franchise(
+def test_yahoo_import_keeps_full_league_key_franchises(
     client: TestClient,
     provider_db: FFPyDatabase,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Same Yahoo league across seasons (449.l.123 vs 423.l.123) -> one franchise."""
+    """Yahoo numeric ids are game-scoped; 449.l.123 and 423.l.123 stay distinct."""
 
     _configure_yahoo(monkeypatch)
     _store_yahoo_tokens(provider_db, "access-1", "refresh-1")
@@ -730,15 +735,8 @@ def test_yahoo_import_groups_seasons_into_one_franchise(
         "/api/providers/yahoo/import", json={"league_key": "423.l.123456", "season": 2025}, headers=_auth()
     )
     assert first.status_code == 200 and second.status_code == 200
-
-    franchise_id = f"franchise:{TEST_USER.user_id}:yahoo:123456"
-    assert first.json()["franchise_id"] == franchise_id
-    assert second.json()["franchise_id"] == franchise_id
-
-    seasons = sorted(
-        s["league_id"] for s in provider_db.get_franchise_leagues(franchise_id, TEST_USER.user_id)
-    )
-    assert seasons == ["yahoo:423.l.123456:2025", "yahoo:449.l.123456:2026"]
+    assert first.json()["franchise_id"] == f"franchise:{TEST_USER.user_id}:yahoo:449.l.123456"
+    assert second.json()["franchise_id"] == f"franchise:{TEST_USER.user_id}:yahoo:423.l.123456"
 
 
 def test_import_from_yahoo_reads_rank_from_standings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -798,6 +796,36 @@ def test_yahoo_import_post_refresh_outage_is_502(
 
     monkeypatch.setattr("ffpy.provider_web.import_from_yahoo", _import)
     monkeypatch.setattr("ffpy.provider_web.YahooIntegration", _Refresh)
+
+    resp = client.post(
+        "/api/providers/yahoo/import",
+        json={"league_key": "449.l.123456", "season": 2026},
+        headers=_auth(),
+    )
+    assert resp.status_code == 502
+    assert "session expired" not in resp.json()["detail"]
+
+
+def test_yahoo_import_refresh_token_outage_is_502(
+    client: TestClient,
+    provider_db: FFPyDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_yahoo(monkeypatch)
+    _store_yahoo_tokens(provider_db, "access-1", "refresh-1")
+
+    class _RefreshBoom:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def refresh_access_token(self, refresh_token: str) -> dict:
+            raise RuntimeError("yahoo token endpoint timeout")
+
+    def _import(league_id: str, season: int, creds: dict) -> dict:
+        raise _FakeYahoo401()
+
+    monkeypatch.setattr("ffpy.provider_web.import_from_yahoo", _import)
+    monkeypatch.setattr("ffpy.provider_web.YahooIntegration", _RefreshBoom)
 
     resp = client.post(
         "/api/providers/yahoo/import",
