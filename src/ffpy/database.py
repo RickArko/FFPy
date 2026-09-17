@@ -204,6 +204,7 @@ class FFPyDatabase:
         self._upgrade_cfb_columns()
         self._upgrade_sleeper_franchise_columns()
         self._upgrade_sleeper_profiles_shared_links()
+        self._upgrade_k_dst_columns()
         self.conn.commit()
 
     def _upgrade_sleeper_profiles_shared_links(self) -> None:
@@ -281,6 +282,43 @@ class FFPyDatabase:
             "ALTER TABLE cfb_transactions ADD COLUMN week INTEGER",
             "ALTER TABLE cfb_transactions ADD COLUMN processed_at TIMESTAMP",
             "ALTER TABLE cfb_transactions ADD COLUMN failure_reason TEXT",
+        ]
+        for stmt in alters:
+            try:
+                self.conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
+
+    def _upgrade_k_dst_columns(self) -> None:
+        """Idempotent K/DST column adds on actual_stats (migration 026).
+
+        Kicker counting stats (FG distance buckets + PATs) and DST unit stats
+        (sacks/turnovers/TDs/points allowed) so both positions have real
+        history instead of flat fallbacks.
+        """
+        alters = [
+            # Kicker counting stats
+            "ALTER TABLE actual_stats ADD COLUMN fg_made INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fg_att INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fg_missed INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fg_long INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fgm_0_19 INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fgm_20_29 INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fgm_30_39 INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fgm_40_49 INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fgm_50_59 INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fgm_60p INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN xp_made INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN xp_att INTEGER",
+            # DST unit stats
+            "ALTER TABLE actual_stats ADD COLUMN sacks REAL",
+            "ALTER TABLE actual_stats ADD COLUMN def_interceptions INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN fumble_recoveries INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN def_tds INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN safeties INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN special_teams_tds INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN blocked_kicks INTEGER",
+            "ALTER TABLE actual_stats ADD COLUMN points_allowed INTEGER",
         ]
         for stmt in alters:
             try:
@@ -382,8 +420,17 @@ class FFPyDatabase:
                     passing_yards, passing_tds, interceptions,
                     rushing_yards, rushing_tds,
                     receiving_yards, receiving_tds, receptions,
-                    opponent, home_away, game_date, source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    opponent, home_away, game_date, source,
+                    fg_made, fg_att, fg_missed, fg_long,
+                    fgm_0_19, fgm_20_29, fgm_30_39, fgm_40_49, fgm_50_59, fgm_60p,
+                    xp_made, xp_att,
+                    sacks, def_interceptions, fumble_recoveries,
+                    def_tds, safeties, special_teams_tds, blocked_kicks, points_allowed
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?
+                )""",
                 (
                     player_id,
                     season,
@@ -401,6 +448,26 @@ class FFPyDatabase:
                     row.get("home_away", ""),
                     row.get("game_date"),
                     source,
+                    row.get("fg_made"),
+                    row.get("fg_att"),
+                    row.get("fg_missed"),
+                    row.get("fg_long"),
+                    row.get("fgm_0_19"),
+                    row.get("fgm_20_29"),
+                    row.get("fgm_30_39"),
+                    row.get("fgm_40_49"),
+                    row.get("fgm_50_59"),
+                    row.get("fgm_60p"),
+                    row.get("xp_made"),
+                    row.get("xp_att"),
+                    row.get("sacks"),
+                    row.get("def_interceptions"),
+                    row.get("fumble_recoveries"),
+                    row.get("def_tds"),
+                    row.get("safeties"),
+                    row.get("special_teams_tds"),
+                    row.get("blocked_kicks"),
+                    row.get("points_allowed"),
                 ),
             )
 

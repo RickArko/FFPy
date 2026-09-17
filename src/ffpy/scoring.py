@@ -302,3 +302,121 @@ def calculate_points_from_projection(
     }
 
     return calculate_fantasy_points(stats, scoring_config)
+
+
+# ==================== KICKER / DST SCORING ====================
+#
+# Skill-position actuals arrive pre-scored from nflverse (fantasy_points_ppr),
+# but nflverse reports 0.0 for kickers and has no DST concept at all. These
+# helpers score K/DST weeks from counting stats. Defaults match Sleeper's
+# standard league settings; pass a league's raw ``scoring_settings`` dict to
+# override individual rules.
+
+KICKER_DEFAULT_SCORING: Dict[str, float] = {
+    "fgm_0_19": 3.0,
+    "fgm_20_29": 3.0,
+    "fgm_30_39": 3.0,
+    "fgm_40_49": 4.0,
+    "fgm_50_59": 5.0,
+    "fgm_60p": 6.0,
+    "fgmiss": -1.0,
+    "xpm": 1.0,
+    "xpmiss": -1.0,
+}
+
+DST_DEFAULT_SCORING: Dict[str, float] = {
+    "sack": 1.0,
+    "int": 2.0,
+    "fum_rec": 2.0,
+    "def_td": 6.0,
+    "st_td": 6.0,
+    "safety": 2.0,
+    "blk_kick": 4.0,
+    "pts_allow_0": 10.0,
+    "pts_allow_1_6": 7.0,
+    "pts_allow_7_13": 4.0,
+    "pts_allow_14_20": 1.0,
+    "pts_allow_21_27": 0.0,
+    "pts_allow_28_34": -1.0,
+    "pts_allow_35p": -4.0,
+}
+
+_FG_BUCKET_KEYS = ("fgm_0_19", "fgm_20_29", "fgm_30_39", "fgm_40_49", "fgm_50_59", "fgm_60p")
+
+
+def _rule(settings: Dict[str, float], key: str, default: float) -> float:
+    try:
+        return float(settings.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def score_kicker_week(stats: Dict[str, float], settings: Dict[str, float] | None = None) -> float:
+    """Score one kicker week from counting stats.
+
+    Expected keys (nflverse-derived): ``fgm_0_19`` … ``fgm_60p`` distance
+    buckets, ``fg_missed`` (incl. blocked), ``xp_made``, ``xp_att``.
+    """
+    rules = KICKER_DEFAULT_SCORING if settings is None else settings
+    points = 0.0
+    for bucket in _FG_BUCKET_KEYS:
+        made = float(stats.get(bucket) or 0)
+        if made > 0:
+            points += made * _rule(rules, bucket, KICKER_DEFAULT_SCORING[bucket])
+    fg_missed = float(stats.get("fg_missed") or 0)
+    if fg_missed > 0:
+        points += fg_missed * _rule(rules, "fgmiss", KICKER_DEFAULT_SCORING["fgmiss"])
+    xp_made = float(stats.get("xp_made") or 0)
+    if xp_made > 0:
+        points += xp_made * _rule(rules, "xpm", KICKER_DEFAULT_SCORING["xpm"])
+    xp_missed = max(float(stats.get("xp_att") or 0) - xp_made, 0.0)
+    if xp_missed > 0:
+        points += xp_missed * _rule(rules, "xpmiss", KICKER_DEFAULT_SCORING["xpmiss"])
+    return round(points, 2)
+
+
+def points_allowed_tier(points_allowed: float) -> str:
+    """Sleeper points-allowed scoring tier key for a defensive score."""
+    pa = max(float(points_allowed), 0.0)
+    if pa < 1:
+        return "pts_allow_0"
+    if pa < 7:
+        return "pts_allow_1_6"
+    if pa < 14:
+        return "pts_allow_7_13"
+    if pa < 21:
+        return "pts_allow_14_20"
+    if pa < 28:
+        return "pts_allow_21_27"
+    if pa < 35:
+        return "pts_allow_28_34"
+    return "pts_allow_35p"
+
+
+def score_dst_week(stats: Dict[str, float], settings: Dict[str, float] | None = None) -> float:
+    """Score one DST unit week from team-level counting stats.
+
+    Expected keys: ``sacks``, ``def_interceptions``, ``fumble_recoveries``,
+    ``def_tds``, ``special_teams_tds``, ``safeties``, ``blocked_kicks``,
+    ``points_allowed`` (optional — tier scoring skipped when absent).
+    """
+    rules = DST_DEFAULT_SCORING if settings is None else settings
+    points = 0.0
+    counting = (
+        ("sacks", "sack"),
+        ("def_interceptions", "int"),
+        ("fumble_recoveries", "fum_rec"),
+        ("def_tds", "def_td"),
+        ("special_teams_tds", "st_td"),
+        ("safeties", "safety"),
+        ("blocked_kicks", "blk_kick"),
+    )
+    for stat_key, rule_key in counting:
+        value = float(stats.get(stat_key) or 0)
+        if value > 0:
+            points += value * _rule(rules, rule_key, DST_DEFAULT_SCORING[rule_key])
+    points_allowed = stats.get("points_allowed")
+    if points_allowed is not None:
+        tier = points_allowed_tier(float(points_allowed))
+        points += _rule(rules, tier, DST_DEFAULT_SCORING[tier])
+    return round(points, 2)

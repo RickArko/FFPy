@@ -137,10 +137,12 @@ def _normalise_nflverse_actual_stats(
         (df["season"] == season)
         & (df["week"].between(start_week, end_week))
         & (df["season_type"] == "REG")
-        & (df["position"].isin(["QB", "RB", "WR", "TE"]))
+        & (df["position"].isin(["QB", "RB", "WR", "TE", "K"]))
     ].copy()
     if df.empty:
         return pd.DataFrame()
+
+    from ffpy.scoring import score_kicker_week
 
     points_col = "fantasy_points_ppr" if "fantasy_points_ppr" in df.columns else "fantasy_points"
     player_col = "player_display_name" if "player_display_name" in df.columns else "player_name"
@@ -165,6 +167,37 @@ def _normalise_nflverse_actual_stats(
         }
     )
 
+    # Kickers: nflverse reports fantasy_points as 0.0 for K — score from
+    # kicking counting stats instead (Sleeper-standard rules by default).
+    def _series(name: str) -> pd.Series:
+        col = df.get(name)
+        if col is None:
+            return pd.Series(0, index=df.index)
+        return col.fillna(0)
+
+    kicker_mask = out["position"] == "K"
+    if kicker_mask.any():
+        out.loc[kicker_mask, "fg_made"] = _series("fg_made")
+        out.loc[kicker_mask, "fg_att"] = _series("fg_att")
+        out.loc[kicker_mask, "fg_missed"] = _series("fg_missed") + _series("fg_blocked")
+        out.loc[kicker_mask, "fg_long"] = _series("fg_long")
+        bucket_map = {
+            "fgm_0_19": "fg_made_0_19",
+            "fgm_20_29": "fg_made_20_29",
+            "fgm_30_39": "fg_made_30_39",
+            "fgm_40_49": "fg_made_40_49",
+            "fgm_50_59": "fg_made_50_59",
+            "fgm_60p": "fg_made_60_",
+        }
+        for out_col, src_col in bucket_map.items():
+            out.loc[kicker_mask, out_col] = _series(src_col)
+        out.loc[kicker_mask, "xp_made"] = _series("pat_made")
+        out.loc[kicker_mask, "xp_att"] = _series("pat_att")
+        kicker_rows = out.loc[kicker_mask]
+        out.loc[kicker_mask, "actual_points"] = [
+            score_kicker_week(row) for row in kicker_rows.to_dict("records")
+        ]
+
     numeric_cols = [
         "actual_points",
         "passing_yards",
@@ -180,16 +213,44 @@ def _normalise_nflverse_actual_stats(
     return out.sort_values(["week", "position", "player"]).reset_index(drop=True)
 
 
-def _load_nflverse_actual_stats(season: int, start_week: int, end_week: int) -> pd.DataFrame:
+def _load_nflverse_raw_stats(season: int) -> pd.DataFrame:
+    """Fetch the raw nflverse weekly player frame once (all positions)."""
     import nflreadpy as nfl
 
-    stats = nfl.load_player_stats(seasons=[season], summary_level="week")
+    return nfl.load_player_stats(seasons=[season], summary_level="week").to_pandas()
+
+
+def _load_nflverse_actual_stats(season: int, start_week: int, end_week: int) -> pd.DataFrame:
     return _normalise_nflverse_actual_stats(
-        stats.to_pandas(),
+        _load_nflverse_raw_stats(season),
         season=season,
         start_week=start_week,
         end_week=end_week,
     )
+
+
+def _load_games_frame(db, *, season: int, start_week: int, end_week: int) -> pd.DataFrame:
+    """Final scores for DST points-allowed: DB games table, else nflverse schedules."""
+    try:
+        rows = db.conn.execute(
+            """
+            SELECT week, home_team, away_team, home_score, away_score
+            FROM games
+            WHERE season = ? AND season_type = 'REG' AND week BETWEEN ? AND ?
+            """,
+            (season, start_week, end_week),
+        ).fetchall()
+    except Exception:
+        rows = []  # games table is opt-in (002 pbp schema) and may not exist
+    if rows:
+        return pd.DataFrame([dict(row) for row in rows])
+    # Current-season games may not be loaded yet — fall back to nflverse schedules.
+    try:
+        import nflreadpy as nfl
+
+        return nfl.load_schedules(seasons=[season]).to_pandas()
+    except Exception:
+        return pd.DataFrame()
 
 
 def _collect_nflverse_actual_stats(
@@ -200,14 +261,29 @@ def _collect_nflverse_actual_stats(
     db_path: str | None = None,
 ) -> int:
     from ffpy.database import FFPyDatabase
+    from ffpy.dst_stats import build_dst_weekly_rows
 
     if start_week > end_week:
         raise ValueError("start_week must be <= end_week")
 
-    stats = _load_nflverse_actual_stats(season, start_week, end_week)
+    raw_stats = _load_nflverse_raw_stats(season)
+    stats = _normalise_nflverse_actual_stats(
+        raw_stats,
+        season=season,
+        start_week=start_week,
+        end_week=end_week,
+    )
     db = FFPyDatabase(db_path=db_path)
     total = 0
     try:
+        games = _load_games_frame(db, season=season, start_week=start_week, end_week=end_week)
+        dst_rows = build_dst_weekly_rows(
+            raw_stats,
+            games,
+            season=season,
+            start_week=start_week,
+            end_week=end_week,
+        )
         print(f"Collecting actual stats from nflverse for {season}, weeks {start_week}-{end_week}")
         for week in range(start_week, end_week + 1):
             print(f"[Week {week}/{end_week}] ", end="", flush=True)
@@ -216,15 +292,22 @@ def _collect_nflverse_actual_stats(
                 continue
 
             week_df = stats[stats["week"] == week].copy()
-            if week_df.empty:
+            week_dst = dst_rows[dst_rows["week"] == week].copy() if not dst_rows.empty else dst_rows
+            if week_df.empty and week_dst.empty:
                 print("no data")
                 db.log_api_request("nflverse", season, week, "actuals", False, "No data returned")
                 continue
 
-            db.store_actual_stats(week_df, season=season, week=week, source="nflverse")
+            stored = 0
+            if not week_df.empty:
+                db.store_actual_stats(week_df, season=season, week=week, source="nflverse")
+                stored += len(week_df)
+            if not week_dst.empty:
+                db.store_actual_stats(week_dst, season=season, week=week, source="nflverse")
+                stored += len(week_dst)
             db.log_api_request("nflverse", season, week, "actuals", True)
-            total += len(week_df)
-            print(f"stored {len(week_df)} players")
+            total += stored
+            print(f"stored {stored} player-week records")
 
         print(f"\nDone. Stored {total} player-week records at {db.db_path}")
         return total
