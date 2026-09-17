@@ -310,6 +310,8 @@ class FFPyDatabase:
             "ALTER TABLE actual_stats ADD COLUMN fgm_60p INTEGER",
             "ALTER TABLE actual_stats ADD COLUMN xp_made INTEGER",
             "ALTER TABLE actual_stats ADD COLUMN xp_att INTEGER",
+            # Per-FG distances ("25;43;32") for per-yard bonus rescoring.
+            "ALTER TABLE actual_stats ADD COLUMN fg_made_list TEXT",
             # DST unit stats
             "ALTER TABLE actual_stats ADD COLUMN sacks REAL",
             "ALTER TABLE actual_stats ADD COLUMN def_interceptions INTEGER",
@@ -423,12 +425,12 @@ class FFPyDatabase:
                     opponent, home_away, game_date, source,
                     fg_made, fg_att, fg_missed, fg_long,
                     fgm_0_19, fgm_20_29, fgm_30_39, fgm_40_49, fgm_50_59, fgm_60p,
-                    xp_made, xp_att,
+                    xp_made, xp_att, fg_made_list,
                     sacks, def_interceptions, fumble_recoveries,
                     def_tds, safeties, special_teams_tds, blocked_kicks, points_allowed
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?
                 )""",
                 (
@@ -460,6 +462,7 @@ class FFPyDatabase:
                     row.get("fgm_60p"),
                     row.get("xp_made"),
                     row.get("xp_att"),
+                    row.get("fg_made_list"),
                     row.get("sacks"),
                     row.get("def_interceptions"),
                     row.get("fumble_recoveries"),

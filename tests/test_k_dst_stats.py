@@ -47,6 +47,55 @@ class TestKickerScoring:
     def test_empty_week_scores_zero(self):
         assert score_kicker_week({}) == 0.0
 
+    def test_fgm_50p_alias_fills_split_buckets(self):
+        # Sleeper 50+ league payload shape: combined key, splits absent.
+        settings = {"fgm_0_19": 3.0, "fgm_20_29": 3.0, "fgm_30_39": 3.0, "fgm_40_49": 4.0, "fgm_50p": 5.0}
+        stats = {"fgm_50_59": 1, "fgm_60p": 1, "xp_made": 1, "xp_att": 1}
+        assert score_kicker_week(stats, settings) == 11.0  # 5 + 5 + 1
+
+    def test_fgm_50p_overrides_explicit_zero_splits(self):
+        # Payload carries explicit zero splits alongside the combined key.
+        settings = {"fgm_50_59": 0.0, "fgm_60p": 0.0, "fgm_50p": 5.0, "xpm": 1.0}
+        stats = {"fgm_50_59": 2, "xp_made": 1, "xp_att": 1}
+        assert score_kicker_week(stats, settings) == 11.0  # 2×5 + 1, not 0
+
+    def test_flat_fgm_plus_bucket_bonus_shape(self):
+        # Continuous league: flat 3 per FG, +1 bonus for 40-49.
+        settings = {"fgm": 3.0, "fgm_40_49": 1.0, "xpm": 1.0}
+        stats = {"fgm_20_29": 1, "fgm_40_49": 1, "xp_made": 2, "xp_att": 2}
+        assert score_kicker_week(stats, settings) == 3 + 4 + 2  # 9.0
+
+    def test_fgm_yds_over_30_uses_fg_made_list(self):
+        settings = {"fgm": 3.0, "fgm_yds_over_30": 0.1, "xpm": 1.0}
+        # 35- and 51-yarders: (5 + 21) × 0.1 = 2.6 bonus on 2×3 base.
+        stats = {"fgm_30_39": 1, "fgm_50_59": 1, "fg_made_list": "35;51"}
+        assert score_kicker_week(stats, settings) == 8.6
+
+    def test_real_sleeper_payload_fixture(self):
+        """Observed Sleeper league payload shape (macker1477 league)."""
+        settings = {
+            "fgm_0_19": 3.0,
+            "fgm_20_29": 3.0,
+            "fgm_30_39": 3.0,
+            "fgm_40_49": 4.0,
+            "fgm_50_59": 5.0,
+            "fgm_60p": 6.0,
+            "fgmiss": -1.0,
+            "xpm": 1.0,
+            "xpmiss": -1.0,
+        }
+        # 3 FGs (25, 43, 32) + 2/3 XP: 3 + 4 + 3 + 2 - 1 = 11
+        stats = {
+            "fgm_20_29": 1,
+            "fgm_30_39": 1,
+            "fgm_40_49": 1,
+            "fg_missed": 0,
+            "xp_made": 2,
+            "xp_att": 3,
+            "fg_made_list": "25;43;32",
+        }
+        assert score_kicker_week(stats, settings) == 11.0
+
 
 class TestDstScoring:
     def test_shutout_with_turnovers(self):

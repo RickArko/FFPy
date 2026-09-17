@@ -193,6 +193,10 @@ def _normalise_nflverse_actual_stats(
             out.loc[kicker_mask, out_col] = _series(src_col)
         out.loc[kicker_mask, "xp_made"] = _series("pat_made")
         out.loc[kicker_mask, "xp_att"] = _series("pat_att")
+        # Per-FG distances ("25;43;32") enable per-yard bonus rescoring later.
+        fg_list = df.get("fg_made_list")
+        if fg_list is not None:
+            out.loc[kicker_mask, "fg_made_list"] = fg_list
         kicker_rows = out.loc[kicker_mask]
         out.loc[kicker_mask, "actual_points"] = [
             score_kicker_week(row) for row in kicker_rows.to_dict("records")

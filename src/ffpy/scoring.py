@@ -7,7 +7,7 @@ and provides utilities to convert player stats into fantasy points.
 
 import json
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Any, Dict, List
 
 
 @dataclass
@@ -351,27 +351,87 @@ def _rule(settings: Dict[str, float], key: str, default: float) -> float:
         return default
 
 
+def _kicker_rules(settings: Dict[str, float] | None) -> Dict[str, float]:
+    """Normalize Sleeper kicker scoring shapes into bucket rules.
+
+    Sleeper payloads vary: bucket keys (``fgm_50_59``/``fgm_60p``), a combined
+    ``fgm_50p``, a flat per-FG ``fgm`` with bucket keys acting as bonuses, and
+    a per-yard ``fgm_yds_over_30`` bonus. Normalize all of them; when a flat
+    ``fgm`` base is present, unset buckets default to 0 (bonus shape) instead
+    of the standalone defaults.
+    """
+    if settings is None:
+        return dict(KICKER_DEFAULT_SCORING)
+    flat_fgm = "fgm" in settings
+    rules: Dict[str, float] = {}
+    for bucket in _FG_BUCKET_KEYS:
+        if bucket in settings:
+            rules[bucket] = _rule(settings, bucket, 0.0)
+        elif flat_fgm:
+            rules[bucket] = 0.0
+        else:
+            rules[bucket] = KICKER_DEFAULT_SCORING[bucket]
+    # Combined 50+ key fills the split buckets when they are unset — or when
+    # they carry explicit zeros while fgm_50p is non-zero (a payload shape
+    # Sleeper emits for 50+ leagues, which would otherwise score 50+ FGs as 0).
+    if "fgm_50p" in settings:
+        fgm_50p = _rule(settings, "fgm_50p", 0.0)
+        for split in ("fgm_50_59", "fgm_60p"):
+            split_val = settings.get(split)
+            if split_val is None or (float(split_val or 0) == 0.0 and fgm_50p != 0.0):
+                rules[split] = fgm_50p
+    for key in ("fgmiss", "xpm", "xpmiss"):
+        rules[key] = _rule(settings, key, KICKER_DEFAULT_SCORING[key])
+    if flat_fgm:
+        rules["fgm"] = _rule(settings, "fgm", 0.0)
+    if "fgm_yds_over_30" in settings:
+        rules["fgm_yds_over_30"] = _rule(settings, "fgm_yds_over_30", 0.0)
+    return rules
+
+
+def _fg_made_distances(stats: Dict[str, Any]) -> List[float]:
+    """Per-FG distances from the stored ``fg_made_list`` (e.g. "25;43;32")."""
+    raw = stats.get("fg_made_list")
+    if not raw:
+        return []
+    distances: List[float] = []
+    for part in str(raw).split(";"):
+        try:
+            distances.append(float(part.strip()))
+        except (TypeError, ValueError):
+            continue
+    return distances
+
+
 def score_kicker_week(stats: Dict[str, float], settings: Dict[str, float] | None = None) -> float:
     """Score one kicker week from counting stats.
 
     Expected keys (nflverse-derived): ``fgm_0_19`` … ``fgm_60p`` distance
-    buckets, ``fg_missed`` (incl. blocked), ``xp_made``, ``xp_att``.
+    buckets, ``fg_missed`` (incl. blocked), ``xp_made``, ``xp_att``, and
+    optionally ``fg_made_list`` ("25;43;32") for per-yard bonus rules.
     """
-    rules = KICKER_DEFAULT_SCORING if settings is None else settings
+    rules = _kicker_rules(settings)
     points = 0.0
+    total_made = 0.0
     for bucket in _FG_BUCKET_KEYS:
         made = float(stats.get(bucket) or 0)
+        total_made += made
         if made > 0:
-            points += made * _rule(rules, bucket, KICKER_DEFAULT_SCORING[bucket])
+            points += made * rules[bucket]
+    if rules.get("fgm"):
+        points += total_made * rules["fgm"]
+    if rules.get("fgm_yds_over_30"):
+        bonus = sum(max(d - 30.0, 0.0) for d in _fg_made_distances(stats))
+        points += bonus * rules["fgm_yds_over_30"]
     fg_missed = float(stats.get("fg_missed") or 0)
     if fg_missed > 0:
-        points += fg_missed * _rule(rules, "fgmiss", KICKER_DEFAULT_SCORING["fgmiss"])
+        points += fg_missed * rules["fgmiss"]
     xp_made = float(stats.get("xp_made") or 0)
     if xp_made > 0:
-        points += xp_made * _rule(rules, "xpm", KICKER_DEFAULT_SCORING["xpm"])
+        points += xp_made * rules["xpm"]
     xp_missed = max(float(stats.get("xp_att") or 0) - xp_made, 0.0)
     if xp_missed > 0:
-        points += xp_missed * _rule(rules, "xpmiss", KICKER_DEFAULT_SCORING["xpmiss"])
+        points += xp_missed * rules["xpmiss"]
     return round(points, 2)
 
 
