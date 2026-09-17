@@ -199,6 +199,54 @@ class TestBuildDstWeeklyRows:
         out = build_dst_weekly_rows(pd.DataFrame(), pd.DataFrame(), season=2025, start_week=1, end_week=1)
         assert out.empty
 
+    def test_punt_return_td_not_double_counted(self):
+        """pt_return_tds is credited to the PUNTING team — never add it."""
+        stats = _stats_frame()
+        # WAS returner scores a punt-return TD; NO's punter is charged with pt_return_tds.
+        returner = {col: 0 for col in stats.columns}
+        returner.update(
+            {"season": 2025, "week": 1, "season_type": "REG", "team": "WAS", "special_teams_tds": 1}
+        )
+        punter = {col: 0 for col in stats.columns}
+        punter.update({"season": 2025, "week": 1, "season_type": "REG", "team": "NO", "pt_return_tds": 1})
+        stats = pd.concat([stats, pd.DataFrame([returner, punter])], ignore_index=True)
+        games = pd.DataFrame(
+            [
+                {
+                    "week": 1,
+                    "season_type": "REG",
+                    "home_team": "NO",
+                    "away_team": "WAS",
+                    "home_score": 17,
+                    "away_score": 24,
+                }
+            ]
+        )
+        out = build_dst_weekly_rows(stats, games, season=2025, start_week=1, end_week=1)
+        was = out[out["team"] == "WAS"].iloc[0]
+        no = out[out["team"] == "NO"].iloc[0]
+        assert was["special_teams_tds"] == 1  # return team's DST gets the TD
+        assert no["special_teams_tds"] == 0  # punting team's DST does NOT
+        # WAS allowed 17 but NO's score includes no def/ST TDs → unchanged.
+        assert was["points_allowed"] == 17
+
+    def test_points_allowed_excludes_opponent_def_and_st_tds(self):
+        """Sleeper DST points allowed excludes pick-sixes and return TDs (XP counts)."""
+        stats = _stats_frame()
+        # BAL's defense scores a pick-six against KC.
+        bal_def = {col: 0 for col in stats.columns}
+        bal_def.update({"season": 2025, "week": 1, "season_type": "REG", "team": "BAL", "def_tds": 1})
+        stats = pd.concat([stats, pd.DataFrame([bal_def])], ignore_index=True)
+        out = build_dst_weekly_rows(stats, _games_frame(), season=2025, start_week=1, end_week=1)
+        kc = out[out["team"] == "KC"].iloc[0]
+        # BAL scored 20, one pick-six → KC's DST is charged 14, not 20.
+        assert kc["points_allowed"] == 14
+        # BAL's own row still gets the defensive TD; KC's 27 included a
+        # defensive TD (fixture def_tds=1), so BAL is charged 21.
+        bal = out[out["team"] == "BAL"].iloc[0]
+        assert bal["def_tds"] == 1
+        assert bal["points_allowed"] == 21
+
 
 class TestNormalizeGamesFrame:
     def test_nflverse_schedule_shape(self):

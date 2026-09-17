@@ -89,6 +89,25 @@ def normalize_games_frame(games: pd.DataFrame) -> pd.DataFrame:
     return out.reset_index(drop=True)
 
 
+def _unit_counting_stats(unit: pd.DataFrame) -> dict:
+    """Aggregate one team's defensive/ST counting stats for a week."""
+    return {
+        "sacks": _sum_column(unit, "def_sacks"),
+        "def_interceptions": _sum_column(unit, "def_interceptions"),
+        "fumble_recoveries": _sum_column(unit, "fumble_recovery_opp"),
+        "def_tds": _sum_column(unit, "def_tds"),
+        # nflverse special_teams_tds already covers all kick/punt return TDs
+        # (and blocked-kick return TDs). pt_return_tds is credited to the
+        # PUNTING team (the unit that allowed the score) — adding it would
+        # award the TD to both DSTs.
+        "special_teams_tds": _sum_column(unit, "special_teams_tds"),
+        "safeties": _sum_column(unit, "def_safeties"),
+        "blocked_kicks": _sum_column(unit, "def_punt_blocks")
+        + _sum_column(unit, "def_fg_blocks")
+        + _sum_column(unit, "def_pat_blocks"),
+    }
+
+
 def build_dst_weekly_rows(
     stats_df: pd.DataFrame,
     games_df: pd.DataFrame,
@@ -103,6 +122,11 @@ def build_dst_weekly_rows(
     ``stats_df`` is the raw nflverse weekly player frame (all positions —
     defensive columns live on defensive players). ``games_df`` provides final
     scores; team-weeks without a score row are skipped (game not played yet).
+
+    ``points_allowed`` follows Sleeper's DST rule: the opponent's defensive
+    and kick/punt-return touchdowns do not count against the unit (the
+    following conversion still does), so each opponent def/ST TD subtracts 6
+    from the final score.
     """
     games = normalize_games_frame(games_df)
     if games.empty:
@@ -120,31 +144,27 @@ def build_dst_weekly_rows(
         ].copy()
         stats["team"] = stats["team"].map(_norm_team)
 
+    # First pass: per team-week unit aggregates (used for a team's own row and
+    # for its opponent's points-allowed adjustment).
+    unit_stats: dict[tuple[str, int], dict] = {}
+    if not stats.empty:
+        for (team, week), unit in stats.groupby(["team", "week"]):
+            unit_stats[(str(team), int(week))] = _unit_counting_stats(unit)
+
+    def _offensive_points_allowed(opponent: str, week: int, final_score: int) -> int:
+        opp = unit_stats.get((opponent, week), {})
+        non_offensive_tds = float(opp.get("def_tds") or 0) + float(opp.get("special_teams_tds") or 0)
+        return max(int(final_score) - int(6 * non_offensive_tds), 0)
+
     rows = []
     for _, game in games.iterrows():
         week = int(game["week"])
-        for team, opponent, points_allowed, home_away in (
+        for team, opponent, raw_points_allowed, home_away in (
             (game["home_team"], game["away_team"], int(game["away_score"]), "home"),
             (game["away_team"], game["home_team"], int(game["home_score"]), "away"),
         ):
-            unit = (
-                stats[(stats["team"] == team) & (stats["week"] == week)]
-                if not stats.empty
-                else pd.DataFrame()
-            )
-            counting = {
-                "sacks": _sum_column(unit, "def_sacks"),
-                "def_interceptions": _sum_column(unit, "def_interceptions"),
-                "fumble_recoveries": _sum_column(unit, "fumble_recovery_opp"),
-                "def_tds": _sum_column(unit, "def_tds"),
-                "special_teams_tds": _sum_column(unit, "special_teams_tds")
-                + _sum_column(unit, "pt_return_tds"),
-                "safeties": _sum_column(unit, "def_safeties"),
-                "blocked_kicks": _sum_column(unit, "def_punt_blocks")
-                + _sum_column(unit, "def_fg_blocks")
-                + _sum_column(unit, "def_pat_blocks"),
-                "points_allowed": points_allowed,
-            }
+            counting = dict(unit_stats.get((team, week), _unit_counting_stats(pd.DataFrame())))
+            counting["points_allowed"] = _offensive_points_allowed(opponent, week, raw_points_allowed)
             rows.append(
                 {
                     "player": _TEAM_NAMES.get(team, f"{team} DST"),
