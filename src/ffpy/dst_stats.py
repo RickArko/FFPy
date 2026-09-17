@@ -5,9 +5,10 @@ This module aggregates per-team defensive/special-teams counting stats from
 the raw weekly player stats and joins final scores for points allowed, then
 scores each unit week with Sleeper-standard rules (see ``ffpy.scoring``).
 
-Synthetic identity: ``player = "{ABBR} DST"``, ``nfl_id = "dst:{ABBR}"`` —
-matching ``SleeperIntegration.player_display_name`` so Sleeper roster entries
-exact-match these rows.
+Synthetic identity: ``player = "<full team name>"`` (e.g. "San Francisco
+49ers"), ``nfl_id = "dst:{ABBR}"`` — matching the Sleeper players map, whose
+DEF entries carry the full team name as ``full_name``, so Sleeper roster
+entries exact-match these rows.
 """
 
 from __future__ import annotations
@@ -20,6 +21,42 @@ from ffpy.scoring import score_dst_week
 
 # nflverse team abbreviation for the Rams differs across eras/datasets.
 _TEAM_ALIASES = {"LA": "LAR", "STL": "LAR", "OAK": "LV", "SD": "LAC", "WSH": "WAS"}
+
+# Canonical abbreviation → full team name (matches Sleeper's DEF full_name).
+_TEAM_NAMES = {
+    "ARI": "Arizona Cardinals",
+    "ATL": "Atlanta Falcons",
+    "BAL": "Baltimore Ravens",
+    "BUF": "Buffalo Bills",
+    "CAR": "Carolina Panthers",
+    "CHI": "Chicago Bears",
+    "CIN": "Cincinnati Bengals",
+    "CLE": "Cleveland Browns",
+    "DAL": "Dallas Cowboys",
+    "DEN": "Denver Broncos",
+    "DET": "Detroit Lions",
+    "GB": "Green Bay Packers",
+    "HOU": "Houston Texans",
+    "IND": "Indianapolis Colts",
+    "JAX": "Jacksonville Jaguars",
+    "KC": "Kansas City Chiefs",
+    "LAR": "Los Angeles Rams",
+    "LAC": "Los Angeles Chargers",
+    "LV": "Las Vegas Raiders",
+    "MIA": "Miami Dolphins",
+    "MIN": "Minnesota Vikings",
+    "NE": "New England Patriots",
+    "NO": "New Orleans Saints",
+    "NYG": "New York Giants",
+    "NYJ": "New York Jets",
+    "PHI": "Philadelphia Eagles",
+    "PIT": "Pittsburgh Steelers",
+    "SEA": "Seattle Seahawks",
+    "SF": "San Francisco 49ers",
+    "TB": "Tampa Bay Buccaneers",
+    "TEN": "Tennessee Titans",
+    "WAS": "Washington Commanders",
+}
 
 
 def _norm_team(team: object) -> str:
@@ -110,7 +147,7 @@ def build_dst_weekly_rows(
             }
             rows.append(
                 {
-                    "player": f"{team} DST",
+                    "player": _TEAM_NAMES.get(team, f"{team} DST"),
                     "team": team,
                     "position": "DST",
                     "opponent": opponent,

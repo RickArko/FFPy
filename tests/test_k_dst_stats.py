@@ -164,7 +164,7 @@ class TestBuildDstWeeklyRows:
         out = build_dst_weekly_rows(_stats_frame(), _games_frame(), season=2025, start_week=1, end_week=1)
         assert len(out) == 4  # 2 games × 2 teams
         kc = out[out["team"] == "KC"].iloc[0]
-        assert kc["player"] == "KC DST"
+        assert kc["player"] == "Kansas City Chiefs"  # matches Sleeper DEF full_name
         assert kc["nfl_id"] == "dst:KC"
         assert kc["position"] == "DST"
         assert kc["opponent"] == "BAL"
@@ -186,7 +186,7 @@ class TestBuildDstWeeklyRows:
         stats = _stats_frame()
         stats.loc[stats["team"] == "KC", "team"] = "LAR"  # unused alias target check
         out = build_dst_weekly_rows(stats, games, season=2025, start_week=1, end_week=1)
-        assert "LAR DST" in set(out["player"])
+        assert "Los Angeles Rams" in set(out["player"])
 
     def test_unplayed_games_skipped(self):
         games = _games_frame()
@@ -243,7 +243,7 @@ def test_store_dst_rows_round_trip(tmp_path):
             """
         ).fetchall()
         assert len(stored) == 4
-        kc = next(r for r in stored if r["name"] == "KC DST")
+        kc = next(r for r in stored if r["name"] == "Kansas City Chiefs")
         assert kc["actual_points"] == 19.0
         assert kc["points_allowed"] == 20
         assert kc["sacks"] == 4.0
