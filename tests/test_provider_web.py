@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
@@ -10,6 +13,7 @@ from ffpy.auth import AuthenticatedUser
 from ffpy.database import FFPyDatabase
 from ffpy.provider_web import (
     ESPNLeagueIntegration,
+    import_from_cbs,
     import_from_espn,
     import_from_yahoo,
     provider_native_id,
@@ -880,3 +884,160 @@ def test_provider_native_id_prefers_sleeper_league_id() -> None:
     league = {"league_id": "espn:123:2026:extra", "sleeper_league_id": "123"}
     assert provider_native_id(league, "espn:123:2026") == "123"
     assert provider_native_id({"league_id": "espn:123:2026"}, "espn:123:2026") == "123"
+
+
+# ---------------------------------------------------------------------------
+# CBS
+# ---------------------------------------------------------------------------
+
+
+class _FakeCBS:
+    def __init__(self, *, auth_error: bool = False):
+        self.auth_error = auth_error
+
+    def fetch(self, path: str, **params: object) -> dict:
+        if self.auth_error:
+            from ffpy.integrations.cbs_league import CBSAuthError
+
+            raise CBSAuthError("rejected")
+        name = {
+            "/league/details": "league_details.json",
+            "/league/teams": "teams.json",
+            "/league/rosters": "rosters.json",
+            "/league/rules": "rules.json",
+            "/league/scoring/categories": "scoring.json",
+            "/league/schedules": "schedules.json",
+            "/league/standings/overall": "standings.json",
+        }[path]
+        return json.loads((_CBS_FIXTURES / name).read_text(encoding="utf-8"))
+
+
+_CBS_FIXTURES = Path(__file__).parent / "fixtures" / "cbs"
+
+
+def test_cbs_credentials_round_trip(client: TestClient, provider_db: FFPyDatabase):
+    resp = client.post(
+        "/api/providers/cbs/credentials",
+        headers=_auth(),
+        json={"access_token": "cbs-token-value", "label": "Dad league"},
+    )
+    assert resp.status_code == 200, resp.text
+    listed = client.get("/api/providers/credentials", headers=_auth()).json()
+    assert any(c["provider"] == "cbs" and c["label"] == "Dad league" for c in listed)
+    assert all("access_token" not in c and "encrypted" not in c for c in listed)
+    stored = provider_db.get_credential_ciphertext("dev-user", "cbs")
+    assert stored and "cbs-token-value" not in stored
+    deleted = client.delete("/api/providers/credentials/cbs", headers=_auth())
+    assert deleted.status_code == 200
+    assert provider_db.get_credential_ciphertext("dev-user", "cbs") is None
+
+
+def test_cbs_credentials_require_a_token(client: TestClient):
+    resp = client.post("/api/providers/cbs/credentials", headers=_auth(), json={"access_token": "  "})
+    assert resp.status_code == 400
+
+
+def test_cbs_import_requires_credentials(client: TestClient):
+    resp = client.post(
+        "/api/providers/cbs/import",
+        headers=_auth(),
+        json={"league_id": "sample", "season": 2026},
+    )
+    assert resp.status_code == 400
+    assert "No stored credentials" in resp.json()["detail"]
+
+
+def test_cbs_import_creates_franchise_and_season(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    client.post(
+        "/api/providers/cbs/credentials",
+        headers=_auth(),
+        json={"access_token": "cbs-token-value"},
+    )
+
+    def _import(league_id: str, season: int, creds: dict, **kwargs: object) -> dict:
+        assert league_id == "dadleague"
+        assert season == 2026
+        assert creds.get("access_token")
+        return import_from_cbs(league_id, season, creds, client=_FakeCBS())
+
+    monkeypatch.setattr("ffpy.provider_web.import_from_cbs", _import)
+    resp = client.post(
+        "/api/providers/cbs/import",
+        headers=_auth(),
+        json={"league_id": "https://dadleague.football.cbssports.com/teams", "season": 2026},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["franchise_id"] == "franchise:dev-user:cbs:dadleague"
+    assert body["league_id"] == "cbs:dadleague:2026"
+    assert body["teams"] == 2
+
+
+def test_cbs_import_auth_failure_is_reconnect(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from ffpy.integrations.cbs_league import CBSAuthError
+
+    client.post(
+        "/api/providers/cbs/credentials",
+        headers=_auth(),
+        json={"access_token": "stale-token"},
+    )
+
+    def _boom(*args: object, **kwargs: object) -> dict:
+        raise CBSAuthError("rejected")
+
+    monkeypatch.setattr("ffpy.provider_web.import_from_cbs", _boom)
+    resp = client.post(
+        "/api/providers/cbs/import",
+        headers=_auth(),
+        json={"league_id": "dadleague", "season": 2026},
+    )
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "CBS session expired. Paste a fresh token."
+
+
+def test_cbs_refresh_round_trip(
+    client: TestClient, provider_db: FFPyDatabase, monkeypatch: pytest.MonkeyPatch
+):
+    client.post(
+        "/api/providers/cbs/credentials",
+        headers=_auth(),
+        json={"access_token": "cbs-token-value"},
+    )
+    payload = import_from_cbs("dadleague", 2026, {"access_token": "t"}, client=_FakeCBS())
+    provider_db.store_user_league("dev-user", payload, franchise_id="franchise:dev-user:cbs:dadleague")
+    monkeypatch.setattr(
+        "ffpy.provider_web.import_from_cbs",
+        lambda *args, **kwargs: import_from_cbs("dadleague", 2026, {"access_token": "t"}, client=_FakeCBS()),
+    )
+    resp = client.post("/api/providers/leagues/cbs:dadleague:2026/refresh", headers=_auth())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "refreshed"
+
+
+def test_import_from_cbs_shape():
+    from ffpy.draft_strategy import _resolve_roster
+
+    data = import_from_cbs("dadleague", 2026, {"access_token": "t"}, client=_FakeCBS())
+    league = data["league"]
+    assert league["league_id"] == "cbs:dadleague:2026"
+    assert league["provider"] == "cbs"
+    assert league["sleeper_league_id"] == "dadleague"
+    assert league["scoring_type"] == "ppr"
+    assert league["scoring_settings"]["rec"] == 1.0
+    assert league["roster_positions"] == ["QB", "RB", "RB", "WR", "WR", "TE", "FLEX", "OP"]
+    assert league["idp_positions"] == ["DL", "LB", "DB"]
+    assert data["matchups"][0]["week"] == 1
+    assert len(data["matchups"]) == 1
+    alpha = data["teams"][0]
+    slots = {row["player"]: row["lineup_slot"] for row in alpha["roster"]}
+    assert slots["SF DST"] == "DST"
+    assert slots["Taxi Back"] == "TAX"
+    assert slots["Injured Receiver"] == "IR"
+    assert slots["Micah Parsons"] == "DL"
+    keeper = next(row for row in alpha["roster"] if row["player"] == "Keeper Jones Jr.")
+    assert keeper["roster_source"] == "keeper"
+    resolved = _resolve_roster(json.dumps(alpha["roster"]), "cbs", None)
+    names = {row["name"] for row in resolved}
+    assert "Patrick Mahomes" in names
+    assert "SF DST" in names
+    assert all(row["position"] for row in resolved)

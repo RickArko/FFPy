@@ -1,0 +1,23 @@
+{
+  "missing_league_id": {
+    "status": 400,
+    "content_type": "text/plain",
+    "body": "Missing league_id"
+  },
+  "invalid_token": {
+    "status": 400,
+    "content_type": "text/plain",
+    "body": "Failed Authentication: error - invalid access token"
+  },
+  "league_id_without_token": {
+    "status": 500,
+    "content_type": "application/json",
+    "body": {
+      "uriAlias": "/league/details",
+      "statusMessage": null,
+      "statusCode": 500,
+      "body": {"type": "internal_server_error", "msg": "Internal Server Error"},
+      "uri": "/league/details"
+    }
+  }
+}

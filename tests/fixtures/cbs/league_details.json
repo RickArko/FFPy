@@ -1,0 +1,15 @@
+{
+  "statusCode": 200,
+  "statusMessage": "OK",
+  "uri": "/league/details",
+  "uriAlias": "/league/details",
+  "body": {
+    "league_details": {
+      "name": "Sample Dynasty",
+      "current_period": "6",
+      "num_teams": "2",
+      "regular_season_periods": "14",
+      "num_divisions": "0"
+    }
+  }
+}

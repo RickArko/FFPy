@@ -1,0 +1,34 @@
+{
+  "statusCode": 200,
+  "statusMessage": "OK",
+  "uri": "/players/list",
+  "uriAlias": "/players/list",
+  "body": {
+    "players": [
+      {
+        "id": "3163291",
+        "elias_id": "ABA159567",
+        "firstname": "Israel",
+        "lastname": "Abanikanda",
+        "fullname": "Israel Abanikanda",
+        "position": "RB",
+        "pro_team": "DAL",
+        "pro_status": "A",
+        "bye_week": "14",
+        "eligible_positions_display": "RB"
+      },
+      {
+        "id": "1925",
+        "elias_id": "415",
+        "firstname": "",
+        "lastname": "49ers",
+        "fullname": "49ers",
+        "position": "DST",
+        "pro_team": "SF",
+        "pro_status": null,
+        "bye_week": "8",
+        "eligible_positions_display": "DST"
+      }
+    ]
+  }
+}

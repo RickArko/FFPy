@@ -1,0 +1,17 @@
+{
+  "statusCode": 200,
+  "statusMessage": "OK",
+  "body": {
+    "scoring_categories": [
+      {"abbr": "PaYds", "name": "Passing Yards", "points": "0.04"},
+      {"abbr": "PaTD", "name": "Passing Touchdowns", "points": "4"},
+      {"abbr": "INT", "name": "Interceptions", "points": "-2"},
+      {"abbr": "RuYds", "name": "Rushing Yards", "points": "0.1"},
+      {"abbr": "RuTD", "name": "Rushing Touchdowns", "points": "6"},
+      {"abbr": "Rec", "name": "Receptions", "points": "1"},
+      {"abbr": "ReYds", "name": "Receiving Yards", "points": "0.1"},
+      {"abbr": "ReTD", "name": "Receiving Touchdowns", "points": "6"},
+      {"abbr": "FumL", "name": "Fumbles Lost", "points": "-2"}
+    ]
+  }
+}

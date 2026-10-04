@@ -1,0 +1,10 @@
+{
+  "statusCode": 200,
+  "statusMessage": "OK",
+  "body": {
+    "teams": [
+      {"id": "1", "name": "Alpha", "owners": [{"id": "owner-1", "name": "Alex Owner"}]},
+      {"id": "2", "name": "Beta", "owners": [{"id": "owner-2", "name": "Blair Owner"}]}
+    ]
+  }
+}

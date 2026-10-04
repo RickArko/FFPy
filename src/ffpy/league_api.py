@@ -24,8 +24,12 @@ from ffpy.auth import (
 )
 from ffpy.config import Config
 from ffpy.database import FFPyDatabase
+from ffpy.integrations.cbs_league import CBSAuthError
 from ffpy.integrations.sleeper import SleeperIntegration
 from ffpy.league_crypto import decrypt_credentials, encrypt_credentials
+from ffpy.provider_web import (
+    import_from_cbs as _import_from_cbs,
+)
 from ffpy.provider_web import (
     import_from_espn as _import_from_espn,
 )
@@ -54,13 +58,13 @@ MASTER_KEY = resolve_credential_master_key()
 
 
 class CredentialStoreRequest(BaseModel):
-    provider: str = Field(..., pattern=r"^(espn|yahoo|sleeper)$")
+    provider: str = Field(..., pattern=r"^(espn|yahoo|sleeper|cbs)$")
     credentials: Dict[str, Any]
     label: str = ""
 
 
 class LeagueImportRequest(BaseModel):
-    provider: str = Field(..., pattern=r"^(espn|yahoo|sleeper)$")
+    provider: str = Field(..., pattern=r"^(espn|yahoo|sleeper|cbs)$")
     league_id: str
     season: int = Field(..., ge=2000, le=2100)
     sleeper_username: Optional[str] = None  # local/no-auth: key imports to this user
@@ -310,7 +314,7 @@ def create_league_app(
         user: AuthenticatedUser = Depends(get_current_user),
         db: FFPyDatabase = Depends(get_db),
     ) -> Dict[str, Any]:
-        if payload.provider in ("espn", "yahoo"):
+        if payload.provider in ("espn", "yahoo", "cbs"):
             if not MASTER_KEY:
                 raise HTTPException(status_code=500, detail="Encryption key not configured")
             cipher = db.get_credential_ciphertext(user.user_id, payload.provider)
@@ -325,6 +329,13 @@ def create_league_app(
                 data = _import_from_espn(payload.league_id, payload.season, creds)
             elif payload.provider == "yahoo":
                 data = _import_from_yahoo(payload.league_id, payload.season, creds)
+            elif payload.provider == "cbs":
+                try:
+                    data = _import_from_cbs(payload.league_id, payload.season, creds)
+                except CBSAuthError as exc:
+                    raise HTTPException(
+                        status_code=401, detail="CBS session expired. Paste a fresh token."
+                    ) from exc
             elif payload.provider == "sleeper":
                 data = _import_from_sleeper(payload.league_id, payload.season)
             else:
@@ -415,7 +426,7 @@ def create_league_app(
         provider = league.get("provider", "")
         season = league.get("season") or Config.NFL_SEASON
 
-        if provider in ("espn", "yahoo"):
+        if provider in ("espn", "yahoo", "cbs"):
             if not MASTER_KEY:
                 raise HTTPException(status_code=500, detail="Encryption key not configured")
             cipher = db.get_credential_ciphertext(league["user_id"], provider)
@@ -432,6 +443,13 @@ def create_league_app(
                 data = _import_from_espn(raw_id, season, creds)
             elif provider == "yahoo":
                 data = _import_from_yahoo(raw_id, season, creds)
+            elif provider == "cbs":
+                try:
+                    data = _import_from_cbs(raw_id, season, creds)
+                except CBSAuthError as exc:
+                    raise HTTPException(
+                        status_code=401, detail="CBS session expired. Paste a fresh token."
+                    ) from exc
             elif provider == "sleeper":
                 data = _import_from_sleeper(raw_id, season)
             else:

@@ -1,0 +1,77 @@
+{
+  "statusCode": 200,
+  "statusMessage": "OK",
+  "body": {
+    "rosters": {
+      "teams": [
+        {
+          "id": "1",
+          "players": [
+            {
+              "id": "1001",
+              "firstname": "Patrick",
+              "lastname": "Mahomes",
+              "fullname": "Patrick Mahomes",
+              "position": "QB",
+              "pro_team": "KC",
+              "roster_status": "A",
+              "roster_pos": "QB"
+            },
+            {
+              "id": "1925",
+              "firstname": "",
+              "lastname": "49ers",
+              "fullname": "49ers",
+              "position": "DST",
+              "pro_team": "SF",
+              "roster_status": "A",
+              "roster_pos": "DST"
+            },
+            {
+              "id": "1003",
+              "firstname": "Taxi",
+              "lastname": "Back",
+              "fullname": "Taxi Back",
+              "position": "RB",
+              "pro_team": "DAL",
+              "roster_status": "TX",
+              "roster_pos": "TX"
+            },
+            {
+              "id": "1004",
+              "firstname": "Injured",
+              "lastname": "Receiver",
+              "fullname": "Injured Receiver",
+              "position": "WR",
+              "pro_team": "PHI",
+              "roster_status": "I",
+              "roster_pos": "I"
+            },
+            {
+              "id": "1005",
+              "firstname": "Micah",
+              "lastname": "Parsons",
+              "fullname": "Micah Parsons",
+              "position": "DL",
+              "pro_team": "GB",
+              "roster_status": "A",
+              "roster_pos": "DL"
+            },
+            {
+              "id": "1006",
+              "firstname": "Keeper",
+              "lastname": "Jones Jr.",
+              "fullname": "Keeper Jones Jr.",
+              "position": "WR",
+              "pro_team": "CIN",
+              "roster_status": "A",
+              "roster_pos": "WR",
+              "wildcards": {"contract": "2"}
+            }
+          ]
+        },
+        {"id": "2", "players": []}
+      ]
+    }
+  }
+}

@@ -205,6 +205,7 @@ class FFPyDatabase:
         self._upgrade_sleeper_franchise_columns()
         self._upgrade_sleeper_profiles_shared_links()
         self._upgrade_k_dst_columns()
+        self._upgrade_user_credentials_provider_check()
         self.conn.commit()
 
     def _upgrade_sleeper_profiles_shared_links(self) -> None:
@@ -327,6 +328,53 @@ class FFPyDatabase:
                 self.conn.execute(stmt)
             except sqlite3.OperationalError:
                 pass
+
+    def _upgrade_user_credentials_provider_check(self) -> None:
+        """Rebuild user_credentials so provider CHECK includes cbs.
+
+        SQLite cannot ALTER a CHECK. Migration 026 is applied here, and only
+        while the live table SQL still omits cbs, so startup does not wipe
+        credentials on every boot.
+        """
+
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'user_credentials'"
+        ).fetchone()
+        if not row or not row[0] or "cbs" in row[0]:
+            return
+        # executescript() recompiles every view, including vw_player_weeks,
+        # which references snap_counts from the opt-in 002 migration.
+        # Statement-at-a-time plus legacy_alter_table matches the profile rebuild.
+        self.conn.execute("PRAGMA foreign_keys=OFF")
+        self.conn.execute("PRAGMA legacy_alter_table=ON")
+        try:
+            self.conn.execute(
+                """
+                CREATE TABLE user_credentials_cbs (
+                    cred_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    provider TEXT NOT NULL CHECK(provider IN ('espn','yahoo','sleeper','cbs')),
+                    encrypted TEXT NOT NULL,
+                    label TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, provider)
+                )
+                """
+            )
+            self.conn.execute(
+                """
+                INSERT INTO user_credentials_cbs
+                    (cred_id, user_id, provider, encrypted, label, created_at, updated_at)
+                SELECT cred_id, user_id, provider, encrypted, label, created_at, updated_at
+                FROM user_credentials
+                """
+            )
+            self.conn.execute("DROP TABLE user_credentials")
+            self.conn.execute("ALTER TABLE user_credentials_cbs RENAME TO user_credentials")
+        finally:
+            self.conn.execute("PRAGMA legacy_alter_table=OFF")
+            self.conn.execute("PRAGMA foreign_keys=ON")
 
     def close(self):
         """Close database connection."""
@@ -3849,11 +3897,11 @@ class FFPyDatabase:
         # ESPN/Yahoo ids are provider-global; keep each user's storage id stable
         # (reuse their existing row, else scope if the canonical id is taken).
         # Sleeper franchise sync may reclaim a row first stored under a username.
-        if provider in {"espn", "yahoo"}:
+        if provider in {"espn", "yahoo", "cbs"}:
             target_id = resolve_provider_storage_league_id(self.conn, user_id, data)
             data = rewrite_league_storage_ids(data, target_id)
         league = data["league"]
-        if provider in {"espn", "yahoo"}:
+        if provider in {"espn", "yahoo", "cbs"}:
             owner_row = self.conn.execute(
                 "SELECT user_id FROM user_leagues WHERE league_id = ?",
                 (league["league_id"],),

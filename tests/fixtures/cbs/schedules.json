@@ -1,0 +1,20 @@
+{
+  "statusCode": 200,
+  "statusMessage": "OK",
+  "body": {
+    "schedule": {
+      "periods": [
+        {
+          "label": "Week 1",
+          "matchups": [
+            {
+              "home_team": {"id": "1", "name": "Alpha", "points": "110.2", "result": "W"},
+              "away_team": {"id": "2", "name": "Beta", "points": "98.1", "result": "L"}
+            }
+          ]
+        },
+        {"label": "Week 2", "matchups": []}
+      ]
+    }
+  }
+}

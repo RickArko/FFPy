@@ -1,0 +1,28 @@
+{
+  "statusCode": 200,
+  "statusMessage": "OK",
+  "body": {
+    "overall_standings": {
+      "teams": [
+        {
+          "id": "1",
+          "wins": "8",
+          "losses": "2",
+          "ties": "0",
+          "points_scored": "1200.5",
+          "points_against": "1100",
+          "order": "1"
+        },
+        {
+          "id": "2",
+          "wins": "4",
+          "losses": "6",
+          "ties": "0",
+          "points_scored": "1000",
+          "points_against": "1050",
+          "order": "2"
+        }
+      ]
+    }
+  }
+}

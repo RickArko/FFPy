@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from ffpy.auth import AuthenticatedUser
 from ffpy.config import Config
 from ffpy.database import FFPyDatabase
+from ffpy.integrations.cbs_league import CBSAuthError, build_cbs_import, parse_cbs_league_id
 from ffpy.integrations.espn_league import ESPNLeagueIntegration
 from ffpy.integrations.yahoo import YahooIntegration
 from ffpy.league_crypto import decrypt_credentials, encrypt_credentials
@@ -227,6 +228,16 @@ def import_from_yahoo(league_id: str, season: int, creds: dict) -> dict:
         "teams": teams,
         "matchups": matchups,
     }
+
+
+def import_from_cbs(league_id: str, season: int, creds: dict, *, client: Any = None) -> dict:
+    """Import a CBS league as a season-qualified payload.
+
+    Stored ids follow the ESPN convention (``cbs:{league_id}:{season}``).
+    ``league_id`` may be a bare id or a CBS league URL.
+    """
+
+    return build_cbs_import(league_id, season, creds, client=client)
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +457,16 @@ class YahooImportBody(BaseModel):
     season: int = Field(..., ge=2000, le=2100)
 
 
+class CbsCredentialBody(BaseModel):
+    access_token: str = Field("", max_length=4096)
+    label: str = Field("", max_length=128)
+
+
+class CbsImportBody(BaseModel):
+    league_id: str = Field(..., min_length=1, max_length=512)
+    season: int = Field(..., ge=2000, le=2100)
+
+
 def provider_native_id(league: dict, stored_league_id: str | None = None) -> str:
     """Return the provider-native league id used for re-import/refresh.
 
@@ -525,7 +546,7 @@ def register_provider_routes(
         user: AuthenticatedUser = Depends(get_current_user),
         db: FFPyDatabase = Depends(get_db),
     ) -> Dict[str, str]:
-        if provider not in ("espn", "yahoo"):
+        if provider not in ("espn", "yahoo", "cbs"):
             raise HTTPException(status_code=400, detail="Unsupported provider")
         db.delete_user_credentials(user.user_id, provider)
         return {"status": "deleted"}
@@ -676,6 +697,55 @@ def register_provider_routes(
             franchise_key=_yahoo_franchise_key(league_key),
         )
 
+    @router.post("/cbs/credentials")
+    def store_cbs_credentials(
+        payload: CbsCredentialBody,
+        user: AuthenticatedUser = Depends(get_current_user),
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, str]:
+        token = payload.access_token.strip()
+        if not token:
+            raise HTTPException(status_code=400, detail="Paste a CBS access token.")
+        master = _require_master_key()
+        cipher = encrypt_credentials({"access_token": token}, user.user_id, master)
+        db.store_user_credentials(user.user_id, "cbs", cipher, payload.label or "CBS access token")
+        return {"status": "ok"}
+
+    @router.post("/cbs/import")
+    def import_cbs_league(
+        payload: CbsImportBody,
+        user: AuthenticatedUser = Depends(get_current_user),
+        db: FFPyDatabase = Depends(get_db),
+    ) -> Dict[str, Any]:
+        master = _require_master_key()
+        creds = _load_credentials(db, user.user_id, "cbs", master)
+        try:
+            native = parse_cbs_league_id(payload.league_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Paste a CBS league link (https://yourleague.football.cbssports.com) or a league id.",
+            ) from exc
+        try:
+            data = import_from_cbs(native, payload.season, creds)
+        except CBSAuthError as exc:
+            raise HTTPException(status_code=401, detail="CBS session expired. Paste a fresh token.") from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("CBS import failed league_id=%s season=%s", native, payload.season)
+            raise HTTPException(
+                status_code=502,
+                detail="CBS import failed. Check the league link and token, then try again.",
+            ) from exc
+        return _import_with_franchise(
+            db,
+            user.user_id,
+            "cbs",
+            data,
+            franchise_key=f"cbs:{native}",
+        )
+
     @router.post("/leagues/{league_id}/refresh")
     def refresh_provider_league(
         league_id: str,
@@ -715,6 +785,23 @@ def register_provider_routes(
                     status_code=502,
                     detail="Yahoo refresh failed. Reconnect Yahoo and try again.",
                 ) from exc
+        elif provider == "cbs":
+            master = _require_master_key()
+            creds = _load_credentials(db, user.user_id, "cbs", master)
+            try:
+                data = import_from_cbs(str(raw_id), season, creds)
+            except CBSAuthError as exc:
+                raise HTTPException(
+                    status_code=401, detail="CBS session expired. Paste a fresh token."
+                ) from exc
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.exception("CBS refresh failed league_id=%s", league_id)
+                raise HTTPException(
+                    status_code=502,
+                    detail="CBS refresh failed. Paste a fresh token and try again.",
+                ) from exc
         else:
             raise HTTPException(
                 status_code=400, detail=f"Provider '{provider}' does not support refresh here"
@@ -729,10 +816,13 @@ def register_provider_routes(
 
 
 __all__ = [
+    "CbsCredentialBody",
+    "CbsImportBody",
     "EspnCredentialBody",
     "EspnImportBody",
     "ProviderImportRequest",
     "YahooImportBody",
+    "import_from_cbs",
     "import_from_espn",
     "import_from_yahoo",
     "provider_native_id",

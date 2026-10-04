@@ -1,0 +1,28 @@
+{
+  "statusCode": 200,
+  "statusMessage": "OK",
+  "body": {
+    "rules": {
+      "schedule": {"num_playoff_teams": {"value": "4"}},
+      "transactions": {"add_drop_faab_starting_budget": {"value": "100"}},
+      "roster": {
+        "statuses": [
+          {"description": "Reserve Players", "max": "8", "abbr": "RS"},
+          {"description": "Injured Players", "max": "2", "abbr": "I"},
+          {"description": "Taxi Squad", "max": "2", "abbr": "TX"}
+        ],
+        "positions": [
+          {"abbr": "QB", "max_active": "1"},
+          {"abbr": "RB", "max_active": "2"},
+          {"abbr": "WR", "max_active": "2"},
+          {"abbr": "TE", "max_active": "1"},
+          {"abbr": "RB-WR-TE", "max_active": "1"},
+          {"abbr": "FLEX", "max_active": "1"},
+          {"abbr": "DL", "max_active": "1"},
+          {"abbr": "LB", "max_active": "1"},
+          {"abbr": "DB", "max_active": "1"}
+        ]
+      }
+    }
+  }
+}
