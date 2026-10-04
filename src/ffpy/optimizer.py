@@ -338,6 +338,9 @@ class LineupOptimizer:
         Raises:
             ValueError: If no feasible solution exists
         """
+        from ffpy.pulp_solver import ensure_lineup_solver
+
+        ensure_lineup_solver()
         try:
             from pulp import (
                 PULP_CBC_CMD,
@@ -348,7 +351,7 @@ class LineupOptimizer:
                 lpSum,
             )
         except ImportError:
-            raise ImportError("PuLP is required for lineup optimization. Install with: uv add pulp")
+            raise ImportError("PuLP is required for lineup optimization. Install with: uv add 'pulp[highs]'")
 
         import time
 
