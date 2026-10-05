@@ -21,6 +21,7 @@ import argparse
 import logging
 import sys
 import time
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -257,6 +258,22 @@ def _load_games_frame(db, *, season: int, start_week: int, end_week: int) -> pd.
         return pd.DataFrame()
 
 
+@dataclass
+class CollectStatsResult:
+    """Outcome of one nflverse collect-stats process (one season download)."""
+
+    stored: int = 0
+    ok_weeks: list[int] = field(default_factory=list)
+    empty_weeks: list[int] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
+
+    def summary_line(self) -> str:
+        return (
+            f"collect-stats-summary ok={len(self.ok_weeks)} "
+            f"empty={len(self.empty_weeks)} failed={len(self.failed)}"
+        )
+
+
 def _collect_nflverse_actual_stats(
     *,
     season: int,
@@ -278,7 +295,7 @@ def _collect_nflverse_actual_stats(
         end_week=end_week,
     )
     db = FFPyDatabase(db_path=db_path)
-    total = 0
+    result = CollectStatsResult()
     try:
         games = _load_games_frame(db, season=season, start_week=start_week, end_week=end_week)
         dst_rows = build_dst_weekly_rows(
@@ -291,30 +308,46 @@ def _collect_nflverse_actual_stats(
         print(f"Collecting actual stats from nflverse for {season}, weeks {start_week}-{end_week}")
         for week in range(start_week, end_week + 1):
             print(f"[Week {week}/{end_week}] ", end="", flush=True)
-            if db.check_api_request("nflverse", season, week, "actuals"):
-                print("already collected, skipping")
-                continue
+            try:
+                if db.check_api_request("nflverse", season, week, "actuals"):
+                    print("already collected, skipping")
+                    result.ok_weeks.append(week)
+                    continue
 
-            week_df = stats[stats["week"] == week].copy()
-            week_dst = dst_rows[dst_rows["week"] == week].copy() if not dst_rows.empty else dst_rows
-            if week_df.empty and week_dst.empty:
-                print("no data")
-                db.log_api_request("nflverse", season, week, "actuals", False, "No data returned")
-                continue
+                week_df = stats[stats["week"] == week].copy()
+                week_dst = dst_rows[dst_rows["week"] == week].copy() if not dst_rows.empty else dst_rows
+                if week_df.empty and week_dst.empty:
+                    print("no data")
+                    db.log_api_request("nflverse", season, week, "actuals", False, "No data returned")
+                    result.empty_weeks.append(week)
+                    continue
 
-            stored = 0
-            if not week_df.empty:
-                db.store_actual_stats(week_df, season=season, week=week, source="nflverse")
-                stored += len(week_df)
-            if not week_dst.empty:
-                db.store_actual_stats(week_dst, season=season, week=week, source="nflverse")
-                stored += len(week_dst)
-            db.log_api_request("nflverse", season, week, "actuals", True)
-            total += stored
-            print(f"stored {stored} player-week records")
+                stored = 0
+                if not week_df.empty:
+                    db.store_actual_stats(week_df, season=season, week=week, source="nflverse")
+                    stored += len(week_df)
+                if not week_dst.empty:
+                    db.store_actual_stats(week_dst, season=season, week=week, source="nflverse")
+                    stored += len(week_dst)
+                db.log_api_request("nflverse", season, week, "actuals", True)
+                result.stored += stored
+                result.ok_weeks.append(week)
+                print(f"stored {stored} player-week records")
+            except Exception as exc:
+                detail = f"week {week}: {exc}"
+                result.failed.append(detail)
+                print(f"ERROR: {exc}")
+                try:
+                    db.log_api_request("nflverse", season, week, "actuals", False, str(exc))
+                except Exception:
+                    logger = logging.getLogger(__name__)
+                    logger.warning("could not log collect-stats failure for week %s", week)
 
-        print(f"\nDone. Stored {total} player-week records at {db.db_path}")
-        return total
+        print(f"\nDone. Stored {result.stored} player-week records at {db.db_path}")
+        print(result.summary_line())
+        for item in result.failed:
+            print(f"collect-stats-error {item}")
+        return result
     finally:
         db.close()
 
@@ -395,14 +428,15 @@ def _collect_actual_stats(
 
 
 def cmd_collect_stats(args: argparse.Namespace) -> int:
-    _collect_actual_stats(
+    result = _collect_actual_stats(
         source=args.source,
         season=args.season,
         start_week=args.start_week,
         end_week=args.end_week,
         db_path=args.db_path,
     )
-    return 0
+    failed = getattr(result, "failed", None)
+    return 1 if failed else 0
 
 
 def cmd_prepare(args: argparse.Namespace) -> int:

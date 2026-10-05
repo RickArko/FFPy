@@ -125,3 +125,52 @@ def test_normalise_nflverse_actual_stats_maps_required_columns():
     assert kicker["fg_made"] == 2
     assert kicker["fgm_40_49"] == 1
     assert kicker["xp_made"] == 2
+
+
+def test_collect_nflverse_downloads_once_and_continues_after_week_error(tmp_path: Path, monkeypatch, capsys):
+    """One process fetches the season once. A week that fails to store does not abort the rest."""
+    loads = {"n": 0}
+
+    def fake_load(season: int) -> pd.DataFrame:
+        loads["n"] += 1
+        return pd.DataFrame({"week": [1, 2], "player": ["A", "B"]})
+
+    def fake_norm(raw, *, season, start_week, end_week):
+        return raw
+
+    monkeypatch.setattr(cli, "_load_nflverse_raw_stats", fake_load)
+    monkeypatch.setattr(cli, "_normalise_nflverse_actual_stats", fake_norm)
+    monkeypatch.setattr(cli, "_load_games_frame", lambda *args, **kwargs: pd.DataFrame())
+
+    import ffpy.dst_stats as dst
+
+    monkeypatch.setattr(dst, "build_dst_weekly_rows", lambda *args, **kwargs: pd.DataFrame())
+
+    from ffpy.database import FFPyDatabase
+
+    def store(self, df, season, week, source="espn"):
+        if int(week) == 2:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(FFPyDatabase, "store_actual_stats", store)
+
+    code = cli.main(
+        [
+            "collect-stats",
+            "--season",
+            "2026",
+            "--start-week",
+            "1",
+            "--end-week",
+            "2",
+            "--source",
+            "nflverse",
+            "--db-path",
+            str(tmp_path / "stats.db"),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert loads["n"] == 1
+    assert code == 1
+    assert "collect-stats-summary ok=1 empty=0 failed=1" in captured.out
+    assert "collect-stats-error week 2: boom" in captured.out
